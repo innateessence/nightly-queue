@@ -1,0 +1,60 @@
+services:
+  nightly-queue:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nightly-queue-django
+    container_name: nightly-queue-django
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,nightly-queue"
+      CELERY_BROKER_URL: "redis://valkey:6379/0"
+      CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
+    depends_on:
+      - valkey
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: nightly-queue-valkey
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "PING"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nightly-queue-django
+    container_name: nightly-queue-celery
+    command: ["celery", "-A", "nightly_queue", "worker", "--loglevel=INFO", "-n", "worker@%h"]
+    environment:
+      DJANGO_SETTINGS_MODULE: "nightly_queue.settings"
+      CELERY_BROKER_URL: "redis://valkey:6379/0"
+      CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
+    depends_on:
+      valkey:
+        condition: service_healthy
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nightly-queue-django
+    container_name: nightly-queue-beat
+    command: ["celery", "-A", "nightly_queue", "beat", "--loglevel=INFO"]
+    environment:
+      DJANGO_SETTINGS_MODULE: "nightly_queue.settings"
+      CELERY_BROKER_URL: "redis://valkey:6379/0"
+      CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
+    depends_on:
+      valkey:
+        condition: service_healthy
+
+volumes:
+  valkey-data:
