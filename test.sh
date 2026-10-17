@@ -47,19 +47,19 @@ function test_command() {
     fail "$label"
 }
 
-function wait_for_worker() {
-  info "Waiting for celery worker to be ready..."
+function wait_for_django() {
+  info "Waiting for django to be ready..."
   for i in $(seq 1 60); do
-    if docker compose -f $COMPOSE_FILE exec -T "$WORKER_SERVICE" \
-       celery -A nightly_queue inspect ping --timeout=2 2>/dev/null | grep -q "pong"; then
-      pass "celery worker is responding to pings"
+    if docker compose -f $COMPOSE_FILE exec -T "$DJANGO_SERVICE" \
+       curl -s localhost:8000 | grep -q "Your queue"; then
+      pass "django is ready"
       return 0
     fi
     echo -n "."
     sleep 2
   done
   echo
-  warn "celery worker did not respond to ping within 120s; continuing anyway"
+  warn "django did not respond within 120s; continuing anyway"
   return 0
 }
 
@@ -101,7 +101,7 @@ function Main() {
     pass "All containers are up" ||
     fail "Could not start containers :("
 
-  wait_for_worker
+  wait_for_django
 
   if has_args "$@"; then
     info "Running unit tests only..." &&

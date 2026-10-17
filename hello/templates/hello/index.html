@@ -1,12 +1,128 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>nightly-queue</title>
+  <meta name="color-scheme" content="light">
+  <title>Your queue · Nightly</title>
+  <link rel="stylesheet" href="{% static 'hello/queue.css' %}">
 </head>
 <body>
-  <h1>{{ message }}</h1>
-  <p>Welcome to the nightly-queue boilerplate.</p>
+  <header class="site-header">
+    <a class="brand" href="{% url 'index' %}" aria-label="Nightly home">
+      <span class="brand-mark" aria-hidden="true">☾</span>
+      nightly<span class="brand-dot">.</span>
+    </a>
+    <span class="prototype-badge">Queue prototype</span>
+  </header>
+
+  <main>
+    <section class="page-heading" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">LESS BUSYWORK. MORE TOMORROW.</p>
+        <h1 id="page-title">Leave it for the night.</h1>
+        <p class="subtitle">Capture the work now. Make room for what’s next.</p>
+      </div>
+      <div class="queue-total"><span class="status-dot" aria-hidden="true"></span> {{ queue_count }} item{{ queue_count|pluralize }} queued</div>
+    </section>
+
+    {% for message in messages %}
+      <div class="notice" role="status">{{ message }}</div>
+    {% endfor %}
+
+    <div class="workspace">
+      <section class="panel composer" aria-labelledby="add-title">
+        <div class="section-heading">
+          <span class="section-icon" aria-hidden="true">＋</span>
+          <div><h2 id="add-title">Add a work item</h2><p>A little context goes a long way.</p></div>
+        </div>
+        <form method="post" action="{% url 'index' %}">
+          {% csrf_token %}
+          {% if form.errors %}
+            <div class="form-errors" role="alert">
+              <p>Please check your work item:</p>
+              {% for field in form %}
+                {% for error in field.errors %}<p>{{ field.label }}: {{ error }}</p>{% endfor %}
+              {% endfor %}
+              {{ form.non_field_errors }}
+            </div>
+          {% endif %}
+          <div class="field">
+            <label for="{{ form.title.id_for_label }}">What needs doing? <span class="required">*</span></label>
+            {{ form.title }}
+          </div>
+          <div class="field">
+            <label for="{{ form.instructions.id_for_label }}">Instructions <span class="optional">optional</span></label>
+            {{ form.instructions }}
+            <p class="field-hint">Give your future workflow enough detail to get started.</p>
+          </div>
+          <div class="field">
+            <label for="{{ form.priority.id_for_label }}">Priority</label>
+            {{ form.priority }}
+          </div>
+          <button class="button-primary" type="submit"><span aria-hidden="true">＋</span> Add to queue</button>
+          <p class="form-footnote">Saved here until an execution workflow is connected.</p>
+        </form>
+      </section>
+
+      <section class="queue-section" aria-labelledby="queue-title">
+        <div class="queue-heading">
+          <div><h2 id="queue-title">Your queue <span class="count-badge">{{ queue_count }}</span></h2><p>A clear head starts with a clear list.</p></div>
+          {% if items %}<span class="order-label">Oldest first</span>{% endif %}
+        </div>
+        <form method="get" class="queue-filters" role="search" aria-label="Search work items">
+          <label class="sr-only" for="queue-search">Search title and instructions</label>
+          <input type="search" id="queue-search" name="q" value="{{ query }}" placeholder="Search your queue…">
+          <label class="sr-only" for="priority-filter">Filter by priority</label>
+          <select id="priority-filter" name="priority">
+            <option value="">All priorities</option>
+            {% for value, label in priorities %}<option value="{{ value }}"{% if priority == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+          <button type="submit" class="button-filter">Filter</button>
+        </form>
+        {% if filtered %}<div class="filter-summary">{{ items|length }} item{{ items|length|pluralize }} found <a href="{% url 'index' %}">Clear filters</a></div>{% endif %}
+        <div class="queue-items">
+          {% for item in items %}
+            <article class="panel queue-item">
+              <div class="item-meta">
+                <span class="queued-label"><span class="status-dot" aria-hidden="true"></span> Queued</span>
+                <span class="priority priority-{{ item.priority }}">{{ item.get_priority_display }} priority</span>
+              </div>
+              <h3>{{ item.title }}</h3>
+              {% if item.instructions %}<p class="item-instructions">{{ item.instructions }}</p>{% endif %}
+              <div class="item-footer">
+                <span>Added <time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at|date:"M j, Y · H:i T" }}</time></span>
+                <form method="post" action="{% url 'remove_item' item.pk %}">
+                  {% csrf_token %}
+                  <button class="button-remove" type="submit" aria-label="Remove {{ item.title }} from queue">Remove</button>
+                </form>
+              </div>
+            </article>
+          {% empty %}
+            <div class="panel empty-state">
+              <div class="empty-illustration" aria-hidden="true"><span>☾</span><i>✦</i></div>
+              {% if filtered %}
+              <span class="eyebrow">A LITTLE ROOM TO SEARCH</span>
+              <h3>No matching work items.</h3>
+              <p>Try another search or priority. Your other items are still in the queue.</p>
+              <a href="{% url 'index' %}" class="empty-link">Clear filters <span aria-hidden="true">↗</span></a>
+              {% else %}
+              <span class="eyebrow">A LITTLE SPACE TO THINK</span>
+              <h3>Your evening starts with a clean slate.</h3>
+              <p>Got something on your mind? Add your first work item and give it a place to land.</p>
+              <a href="#{{ form.title.id_for_label }}" class="empty-link">Add your first item <span aria-hidden="true">↗</span></a>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+        <aside class="integration-note">
+          <span class="integration-icon" aria-hidden="true">↳</span>
+          <div><strong>Capture now. Connect later.</strong><p>This prototype saves your queue. n8n execution isn’t connected yet, so nothing runs automatically.</p></div>
+        </aside>
+      </section>
+    </div>
+    <footer class="site-footer"><span>Off your mind. In your queue.</span><span>Built for a better tomorrow <span aria-hidden="true">☾</span></span></footer>
+  </main>
 </body>
 </html>
