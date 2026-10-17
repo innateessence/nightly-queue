@@ -7,12 +7,15 @@ WORKDIR /app
 ARG PY_ENABLE_SHARED=1
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_SYSTEM_PYTHON=1
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 COPY requirements.txt .
-RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
-
+RUN uv pip install --no-cache-dir -r requirements.txt
 
 # ---- runtime stage ----
 FROM python:3.12-slim
@@ -21,10 +24,11 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/opt/venv/bin:$PATH" \
+    PATH="/usr/local/bin:$PATH" \
     HOME="/app"
 
-COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy the app code
 COPY manage.py .
