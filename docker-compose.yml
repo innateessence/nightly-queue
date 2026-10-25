@@ -14,6 +14,8 @@ services:
       CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
     depends_on:
       - valkey
+    volumes:
+      - ./:/app
 
   valkey:
     image: valkey/valkey:8-alpine
@@ -41,6 +43,8 @@ services:
     depends_on:
       valkey:
         condition: service_healthy
+    volumes:
+      - ./:/app
 
   celery-beat:
     build:
@@ -56,6 +60,8 @@ services:
     depends_on:
       valkey:
         condition: service_healthy
+    volumes:
+      - ./:/app
 
 volumes:
   valkey-data:

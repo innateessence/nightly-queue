@@ -4,9 +4,46 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <title>Your queue · Nightly</title>
   <link rel="stylesheet" href="{% static 'hello/queue.css' %}">
+  <script>
+    (function () {
+      var root = document.documentElement;
+      function pick() {
+        var params = new URLSearchParams(location.search);
+        var saved = null;
+        try { saved = localStorage.getItem("theme"); } catch (e) { e; }
+        var theme = params.get("theme") || saved;
+        if (theme !== "light" && theme !== "dark") {
+          theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        return theme;
+      }
+      function applyTheme(theme) {
+        root.dataset.theme = theme;
+        root.style.colorScheme = theme;
+        var toggle = document.querySelector(".theme-toggle");
+        if (toggle) {
+          var icon = toggle.querySelector("[aria-hidden]");
+          if (icon) { icon.textContent = theme === "dark" ? "🌙" : "🌞"; }
+          toggle.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
+          toggle.setAttribute("aria-label", theme === "dark" ? "Switch to light theme" : "Switch to dark theme");
+        }
+      }
+      applyTheme(pick());
+      window.addEventListener("DOMContentLoaded", function () {
+        var toggle = document.querySelector(".theme-toggle");
+        if (!toggle) { return; }
+        applyTheme(root.dataset.theme);
+        toggle.addEventListener("click", function () {
+          var next = root.dataset.theme === "dark" ? "light" : "dark";
+          applyTheme(next);
+          try { localStorage.setItem("theme", next); } catch (e) { e; }
+        });
+      });
+    })();
+  </script>
 </head>
 <body>
   <header class="site-header">
@@ -14,6 +51,7 @@
       <span class="brand-mark" aria-hidden="true">☾</span>
       nightly<span class="brand-dot">.</span>
     </a>
+    <button class="theme-toggle" type="button" aria-pressed="false" aria-label="Switch to dark theme"><span aria-hidden="true">🌞</span></button>
     <span class="prototype-badge">Queue prototype</span>
   </header>
 

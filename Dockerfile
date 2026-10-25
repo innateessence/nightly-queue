@@ -32,11 +32,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Copy the app code
-COPY manage.py .
-COPY mypy.ini pyproject.toml .
-COPY nightly_queue/ nightly_queue/
-COPY hello/ hello/
+# App source is bind-mounted at runtime (docker-compose.yml); not copied into the image.
 
 # Create a non-root user (sqlite db lives in /app, owned by appuser)
 RUN useradd -m -r appuser \

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Build and run the nightly-queue Django app via docker-compose.
+# Source code is bind-mounted into the container, so code changes do NOT
+# require an image rebuild - just re-run ./run.sh (or restart the services).
 # Usage:
-#   ./run.sh            # build (if needed) + start the container
-#   ./run.sh --build    # force rebuild the image first
+#   ./run.sh            # start the container (builds image only if missing)
+#   ./run.sh --build    # force rebuild the image (only needed when requirements.txt changes)
 #   ./run.sh --stop     # stop and remove the container
 #   PORT=8080 ./run.sh  # expose on a different host port (default 8000)
 set -euo pipefail
