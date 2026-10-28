@@ -9,7 +9,7 @@ repository and an optional base branch.
 - `projects/` owns project configuration, GitHub URL/branch validation, admin, and
   the project-list API.
 - `work_queue/` owns queue items, submission UI, queue services/API, execution
-  tracking, recovery, templates, static assets, and the backfill command. It depends
+  tracking, recovery, templates, and static assets. It depends
   on `projects`; `projects` does not depend on `work_queue`.
 - `nightly_queue/` contains Django/Celery configuration and shared HTTP API helpers.
 - `nq/` is the independent, standard-library CLI.
@@ -17,10 +17,8 @@ repository and an optional base branch.
 Tests live alongside their owning app in `test_*.py` (and `work_queue/tests.py`).
 Add new schema migrations to the app that owns the model.
 
-`hello/` is retained only to load historical migrations and their validator import.
-It has no runtime models, views, or tasks. The model moves reuse the existing
-`hello_project` and `hello_queueitem` tables and preserve content type IDs, permission
-assignments, and admin history. Keep this migration-only package installed.
+The apps use fresh initial migrations and the `projects_project` and
+`work_queue_queueitem` tables. Only fresh database builds are supported.
 
 ## Run locally
 
@@ -61,54 +59,6 @@ Compose also reads `NQ_API_TOKEN` from an untracked `.env` file. SQLite lives at
 when containers are recreated. Back up that file before schema changes. The app
 supports `NQ_DB_PATH` to select a different database file; its parent directory
 must already exist and be writable.
-
-## Upgrade an existing queue
-
-If the database already has projects and execution tracking (`hello.0004`), stop
-the app, Celery workers/beat, and n8n workflows, back up SQLite, then run
-`python manage.py migrate` and restart them. Public UI/API URLs and `nq` commands
-stay the same. Admin URLs move to `/admin/projects/project/` and
-`/admin/work_queue/queueitem/`. Permission names become `projects.*_project` and
-`work_queue.*_queueitem`; existing user/group assignments are migrated. The demo
-Celery task name becomes `work_queue.tasks.nightly_greeting`; discard any pending
-demo messages using the old task name before restarting workers.
-
-If existing items have no project, migration `0003` stops with instructions rather
-than guessing their repositories. Back up SQLite and stop submissions/workflows
-while performing the upgrade:
-
-```sh
-python manage.py migrate hello 0002
-python manage.py shell
-```
-
-In the Django shell, create the projects those items actually belong to:
-
-```python
-from projects.models import Project
-from work_queue.models import QueueItem
-
-project = Project.objects.create(
-    name="My project",
-    repository_url="https://github.com/owner/repo",
-    base_branch="",  # or an explicit branch such as "develop"
-)
-print(project.pk)
-print(list(QueueItem.objects.filter(project__isnull=True).values("id", "title")))
-```
-
-Exit the shell, then assign specific item IDs. Repeat for each project:
-
-```sh
-python manage.py backfill_projects --project 1 --items 3 4 8
-python manage.py migrate
-```
-
-Use `--all` instead of `--items ...` only when every remaining unassigned item
-belongs to that project. The command leaves already assigned items alone. Fresh
-databases and empty queues can run `python manage.py migrate` directly.
-For Docker, prefix these commands with `docker compose run --rm nightly-queue`
-while the app is stopped; the explicit command overrides its startup migration.
 
 ## Install and use nq
 
@@ -198,9 +148,9 @@ ruff check .
 mypy . --config-file mypy.ini
 ```
 
-Use `bash test.sh` for the Docker-based lint and test suite. Migration tests exercise
-existing-data backfill, required project relationships, and reversible app moves
-that preserve execution state, permissions, and admin history.
+Use `bash test.sh` for the Docker-based lint and test suite. Django creates a fresh
+test database from the initial migrations. Model tests cover required project
+relationships and deletion protection.
 API and service tests cover authentication, validation, competing claims, completion, and
 recovery; CLI tests cover requests, output, and failure exit codes.
 
