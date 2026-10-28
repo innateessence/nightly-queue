@@ -27,7 +27,10 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/usr/local/bin:$PATH" \
-    HOME="/app"
+    HOME="/app" \
+    XDG_CACHE_HOME="/tmp/cache" \
+    RUFF_CACHE_DIR="/tmp/cache/ruff" \
+    MYPY_CACHE_DIR="/tmp/cache/mypy"
 
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
