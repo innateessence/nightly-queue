@@ -6,6 +6,7 @@ __pycache__/
 .env.*
 db.sqlite3
 db.sqlite3-journal
+celerybeat-schedule*
 *.sqlite3
 .git/
 .gitignore

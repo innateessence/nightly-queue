@@ -54,6 +54,8 @@ Use `python -m nq` to run without installing. Submissions are never retried auto
 
 n8n owns scheduling, GitHub credentials, cloning, and agent execution. This repo
 does not install a workflow. The Celery greeting task is only a demo.
+Beat stores its schedule in `/tmp/celerybeat-schedule` inside its container;
+recreating the container resets this demo schedule.
 
 All API paths below start with `/api/v1/` and require the bearer token.
 POST bodies must be JSON with `Content-Type: application/json`.
