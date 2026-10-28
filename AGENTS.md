@@ -54,6 +54,8 @@ Use Django `TestCase` for database/API behavior, `TransactionTestCase` for migra
 
 ## Commit & Pull Request Guidelines
 
+Implement every new feature in its own branch.
+
 History uses short, free-form subjects such as `switch to uv` and `wip`; no enforced prefix convention is evident. Prefer descriptive, imperative subjects. PRs should explain behavior changes, list validation performed, link relevant issues, and document migration/configuration steps. Include screenshots for visible UI changes.
 
 ## Security & Configuration
