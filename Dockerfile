@@ -34,7 +34,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # App source is bind-mounted at runtime (docker-compose.yml); not copied into the image.
 
-# Create a non-root user (sqlite db lives in /app, owned by appuser)
+# Create a non-root user.
 RUN useradd -m -r appuser \
     && chown -R appuser:appuser /app
 USER appuser

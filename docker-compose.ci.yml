@@ -1,9 +1,0 @@
-services:
-  nightly-queue:
-    user: "${NQ_CI_UID:?Set NQ_CI_UID}:${NQ_CI_GID:?Set NQ_CI_GID}"
-
-  celery-worker:
-    user: "${NQ_CI_UID:?Set NQ_CI_UID}:${NQ_CI_GID:?Set NQ_CI_GID}"
-
-  celery-beat:
-    user: "${NQ_CI_UID:?Set NQ_CI_UID}:${NQ_CI_GID:?Set NQ_CI_GID}"
