@@ -15,14 +15,15 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
-1. Create a project in [Django admin](http://127.0.0.1:8000/admin/projects/project/)
+1. Create a project on the [Projects page](http://127.0.0.1:8000/projects/)
    with an HTTPS GitHub repository URL and optional base branch. Leave the branch
    blank to use the repository default.
 2. Open [the queue](http://127.0.0.1:8000/) and add work with a title, optional
    instructions, and priority.
 3. Use n8n to process items oldest first. Priority does not change their order.
 
-The queue page has no login requirement: keep it local/private. API access requires
+The queue and project pages have no login requirement: keep them local/private.
+API access requires
 `Authorization: Bearer <NQ_API_TOKEN>`; an unset token disables the API. Use HTTPS
 for API access over a network.
 
