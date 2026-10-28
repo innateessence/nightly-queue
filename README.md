@@ -5,20 +5,19 @@ an agent on a nightly schedule.
 
 ## Run locally
 
-Use Python 3.12:
+Copy `.env.example` to an untracked `.env` and set `NQ_API_TOKEN` for API access:
 
 ```sh
-python -m pip install -r requirements.txt
-export NQ_API_TOKEN='your-random-api-token'
-python manage.py migrate
-python manage.py createsuperuser
-python manage.py runserver
+cp .env.example .env
+# Edit .env, then start the containers:
+./run.sh --build
+docker compose exec nightly-queue python manage.py createsuperuser
 ```
 
-1. Create a project on the [Projects page](http://127.0.0.1:8000/projects/)
+1. Create a project on the [Projects page](http://127.0.0.1:7777/projects/)
    with an HTTPS GitHub repository URL and optional base branch. Leave the branch
    blank to use the repository default.
-2. Open [the queue](http://127.0.0.1:8000/) and add work with a title, optional
+2. Open [the queue](http://127.0.0.1:7777/) and add work with a title, optional
    instructions, and priority.
 3. Use n8n to process items oldest first. Priority does not change their order.
 
@@ -27,11 +26,34 @@ API access requires
 `Authorization: Bearer <NQ_API_TOKEN>`; an unset token disables the API. Use HTTPS
 for API access over a network.
 
-For Docker, set the token in your shell or an untracked `.env`, then run
-`./run.sh --build`. Docker serves http://127.0.0.1:7777/; use this URL for
-`NQ_URL` when using the CLI. SQLite persists at `db.sqlite3` in your checkout. Back it up
-before schema changes. Set `NQ_DB_PATH` to use another file in an existing,
-writable directory. Only fresh database builds are supported by the current migrations.
+PostgreSQL 17 stores data in the `postgres-data` Docker volume. Its port stays
+internal to Docker. `docker compose down` keeps the data; `down --volumes` deletes it.
+The database, user, and password default to `nightly_queue`. Override them with
+`POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` in `.env`.
+Database credentials initialize an empty volume; changing `.env` does not change an existing database password.
+
+Back up PostgreSQL with:
+
+```sh
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > backup.sql
+```
+
+## Move existing SQLite data
+
+Stop n8n executions and app writes first. Keep a backup of `db.sqlite3`.
+After setting up `.env`, export the current schema's data and import into an empty PostgreSQL database:
+
+```sh
+docker compose stop nightly-queue celery-worker celery-beat
+mkdir -p .cache
+docker compose run --rm --no-deps -T nightly-queue python manage.py dumpdata \
+  --settings nightly_queue.sqlite_settings --natural-foreign --natural-primary \
+  --exclude contenttypes --exclude auth.permission --exclude sessions > .cache/sqlite-export.json
+./run.sh --build
+docker compose exec nightly-queue python manage.py loaddata .cache/sqlite-export.json
+```
+
+The export opens SQLite read-only. Verify projects and queue items before resuming n8n.
 
 ## Use the CLI
 
@@ -39,7 +61,7 @@ The CLI needs Python 3.10+ and no Django installation:
 
 ```sh
 python -m pip install .
-export NQ_URL='http://127.0.0.1:8000'
+export NQ_URL='http://127.0.0.1:7777'
 export NQ_API_TOKEN='the-same-token-as-the-server'
 nq projects
 nq add --project 12 "Add CSV export" \
@@ -100,6 +122,11 @@ admin before retrying.
 
 Add migrations and tests to the app that owns the model. Implement each new
 feature in its own branch.
+
+The app uses Python 3.12. Run checks inside the app container with
+`docker compose exec nightly-queue <command>`. For a native Python setup, install
+`requirements.txt` and set `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`POSTGRES_HOST`, and `POSTGRES_PORT` for a reachable PostgreSQL server.
 
 ```sh
 python manage.py test

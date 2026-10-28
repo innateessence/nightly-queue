@@ -24,7 +24,7 @@ python manage.py test hello.test_api     # Run focused API tests
 bash test.sh                            # Docker lint, migration, and test checks
 ```
 
-For existing queue data, follow the README's project-backfill procedure before completing migrations.
+For existing SQLite data, follow the README's export/import procedure before switching databases.
 
 ## Coding Style & Naming Conventions
 
@@ -60,7 +60,7 @@ History uses short, free-form subjects such as `switch to uv` and `wip`; no enfo
 
 ## Security & Configuration
 
-Keep tokens and `.env` untracked. Configure `NQ_API_TOKEN` for API access, `NQ_URL` for the CLI, and optionally `NQ_DB_PATH` for SQLite. Keep GitHub credentials in n8n. n8n owns scheduling and execution; Celery's greeting task is only a demo.
+Keep tokens and `.env` untracked. Configure `NQ_API_TOKEN` for API access, `NQ_URL` for the CLI, and `POSTGRES_PASSWORD` for the database. PostgreSQL data lives in the `postgres-data` Docker volume. Keep GitHub credentials in n8n. n8n owns scheduling and execution; Celery's greeting task is only a demo.
 
 ## Rules
 

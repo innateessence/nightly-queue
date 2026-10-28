@@ -1,4 +1,5 @@
 Django==4.1.3
+psycopg2-binary==2.9.11
 celery[redis]
 black==25.1.0
 mypy==1.13.0

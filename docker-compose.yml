@@ -1,3 +1,10 @@
+x-database-environment: &database-environment
+  POSTGRES_DB: "${POSTGRES_DB:-nightly_queue}"
+  POSTGRES_USER: "${POSTGRES_USER:-nightly_queue}"
+  POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-nightly_queue}"
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+
 services:
 
   nightly-queue:
@@ -9,14 +16,33 @@ services:
     ports:
       - "${PORT:-7777}:8000"
     environment:
+      <<: *database-environment
       DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,nightly-queue"
       NQ_API_TOKEN: "${NQ_API_TOKEN:-}"
       CELERY_BROKER_URL: "redis://valkey:6379/0"
       CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
     depends_on:
-      - valkey
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
     volumes:
       - ./:/app
+
+  postgres:
+    image: postgres:17
+    container_name: nightly-queue-postgres
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-nightly_queue}"
+      POSTGRES_USER: "${POSTGRES_USER:-nightly_queue}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-nightly_queue}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   valkey:
     image: valkey/valkey:8-alpine
@@ -38,10 +64,13 @@ services:
     container_name: nightly-queue-celery
     command: ["celery", "-A", "nightly_queue", "worker", "--loglevel=INFO", "-n", "worker@%h"]
     environment:
+      <<: *database-environment
       DJANGO_SETTINGS_MODULE: "nightly_queue.settings"
       CELERY_BROKER_URL: "redis://valkey:6379/0"
       CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
     depends_on:
+      postgres:
+        condition: service_healthy
       valkey:
         condition: service_healthy
     volumes:
@@ -55,14 +84,18 @@ services:
     container_name: nightly-queue-beat
     command: ["celery", "-A", "nightly_queue", "beat", "--loglevel=INFO", "--schedule", "/tmp/celerybeat-schedule"]
     environment:
+      <<: *database-environment
       DJANGO_SETTINGS_MODULE: "nightly_queue.settings"
       CELERY_BROKER_URL: "redis://valkey:6379/0"
       CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
     depends_on:
+      postgres:
+        condition: service_healthy
       valkey:
         condition: service_healthy
     volumes:
       - ./:/app
 
 volumes:
+  postgres-data:
   valkey-data:

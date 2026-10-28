@@ -44,7 +44,6 @@ def claim_item(item, *, execution_ref=""):
     token = uuid.uuid4()
     queued = QueueItem.objects.filter(pk=item.pk, status=QueueItem.Status.QUEUED)
     queued = queued.filter(project_id=item.project_id)
-    # SQLite claims need a conditional update; row locks are unavailable.
     updated = queued.update(
         status=QueueItem.Status.RUNNING,
         claim_token=token,
