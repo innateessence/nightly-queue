@@ -49,7 +49,7 @@ function test_command() {
 
 function wait_for_django() {
   info "Waiting for django to be ready..."
-  for i in $(seq 1 60); do
+  for _ in $(seq 1 60); do
     if docker compose exec -T "$DJANGO_SERVICE" \
        curl -s localhost:8000 | grep -q "Your queue"; then
       pass "django is ready"
