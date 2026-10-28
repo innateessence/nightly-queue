@@ -7,9 +7,12 @@ from django.views.generic import ListView
 from .forms import QueueItemForm
 from .models import QueueItem
 
+
 class Index(ListView):
     def get(self, request, *args, **kwargs):
-        form = QueueItemForm(None)
+        return self.render_queue(request, QueueItemForm())
+
+    def render_queue(self, request, form):
         items = QueueItem.objects.all()
         queue_count = items.count()
         query = request.GET.get("q", "").strip()
@@ -17,31 +20,28 @@ class Index(ListView):
         if priority not in QueueItem.Priority.values:
             priority = ""
         if query:
-            items = items.filter(
-                Q(title__icontains=query) | Q(instructions__icontains=query)
-            )
+            matching_text = Q(title__icontains=query) | Q(instructions__icontains=query)
+            items = items.filter(matching_text)
         if priority:
             items = items.filter(priority=priority)
-        return render(
-            request,
-            "hello/index.html",
-            {
-                "form": form,
-                "items": items,
-                "queue_count": queue_count,
-                "query": query,
-                "priority": priority,
-                "priorities": QueueItem.Priority.choices,
-                "filtered": bool(query or priority),
-            },
-        )
+        context = {
+            "form": form,
+            "items": items,
+            "queue_count": queue_count,
+            "query": query,
+            "priority": priority,
+            "priorities": QueueItem.Priority.choices,
+            "filtered": bool(query or priority),
+        }
+        return render(request, "hello/index.html", context)
 
     def post(self, request, *args, **kwargs):
         form = QueueItemForm(request.POST)
-        if form.is_valid():
-            form.save()
-            messages.success(request, "Work item added to your queue.")
-            return redirect("index")
+        if not form.is_valid():
+            return self.render_queue(request, form)
+        form.save()
+        messages.success(request, "Work item added to your queue.")
+        return redirect("index")
 
 
 @require_POST

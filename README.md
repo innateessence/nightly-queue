@@ -52,7 +52,3 @@ export COMPOSE_FILE='docker-compose.yml:docker-compose.ci.yml'
 bash test.sh
 docker compose down --volumes --remove-orphans
 ```
-
-The workflow reports failures from the checked-out branch. Existing formatting,
-invalid-form, and escaping-test defects on `main` are addressed by the separate
-project/UI PR.
