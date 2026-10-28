@@ -53,7 +53,7 @@ services:
       dockerfile: Dockerfile
     image: nightly-queue-django
     container_name: nightly-queue-beat
-    command: ["celery", "-A", "nightly_queue", "beat", "--loglevel=INFO"]
+    command: ["celery", "-A", "nightly_queue", "beat", "--loglevel=INFO", "--schedule", "/tmp/celerybeat-schedule"]
     environment:
       DJANGO_SETTINGS_MODULE: "nightly_queue.settings"
       CELERY_BROKER_URL: "redis://valkey:6379/0"
