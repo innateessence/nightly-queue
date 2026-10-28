@@ -1,14 +1,17 @@
 import json
+import uuid
 from functools import wraps
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.http import JsonResponse
 from django.utils.crypto import constant_time_compare
 from django.views.decorators.csrf import csrf_exempt
 
 from .forms import QueueItemForm
 from .models import Project, QueueItem
+from .services import claim_next, finish_item
 
 
 def authentication_error(request):
@@ -93,15 +96,28 @@ def project_data(project):
     }
 
 
-def item_data(item):
-    return {
+def item_data(item, *, include_claim=False):
+    data = {
         "id": item.pk,
         "project": project_data(item.project),
         "title": item.title,
         "instructions": item.instructions,
         "priority": item.priority,
+        "status": item.status,
         "created_at": item.created_at.isoformat(),
+        "started_at": item.started_at.isoformat() if item.started_at else None,
+        "finished_at": item.finished_at.isoformat() if item.finished_at else None,
+        "branch_name": item.branch_name,
+        "execution_ref": item.execution_ref,
+        "result_url": item.result_url,
+        "error_summary": item.error_summary,
     }
+    if not include_claim:
+        return data
+    data["claim_token"] = str(item.claim_token)
+    data["repository_url"] = item.repository_url
+    data["base_branch"] = item.base_branch
+    return data
 
 
 @api_view("GET")
@@ -131,3 +147,38 @@ def enqueue(request):
     if "project" in errors:
         errors["project_id"] = errors.pop("project")
     return JsonResponse({"errors": errors}, status=400)
+
+
+@api_view("POST")
+def claim(request):
+    data = read_body(request, ["execution_ref"])
+    execution_ref = string_field(data, "execution_ref", max_length=200)
+    item = claim_next(execution_ref=execution_ref)
+    if item is None:
+        return JsonResponse({"item": None})
+    return JsonResponse({"item": item_data(item, include_claim=True)})
+
+
+@api_view("POST")
+def finish(request, pk):
+    data = read_body(request, ["claim_token", "status", "result_url", "error_summary"])
+    claim_token = string_field(data, "claim_token")
+    try:
+        token = uuid.UUID(claim_token)
+    except ValueError:
+        message = "Send the claim token returned when claiming work."
+        raise ValidationError({"claim_token": message})
+    if not QueueItem.objects.filter(pk=pk).exists():
+        return JsonResponse({"error": "Item not found."}, status=404)
+    result = {
+        "status": string_field(data, "status"),
+        "result_url": string_field(data, "result_url", max_length=500),
+        "error_summary": string_field(data, "error_summary"),
+    }
+    with transaction.atomic():
+        updated = finish_item(item_id=pk, claim_token=token, **result)
+        if not updated:
+            message = "Item is not running under this claim."
+            return JsonResponse({"error": message}, status=409)
+        item = QueueItem.objects.select_related("project").get(pk=pk)
+        return JsonResponse({"item": item_data(item)})

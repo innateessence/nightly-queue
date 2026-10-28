@@ -9,7 +9,7 @@ from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 
 from .models import Project, QueueItem
-from .services import enqueue_item
+from .services import claim_next, enqueue_item
 
 
 class ProjectTests(TestCase):
@@ -166,6 +166,25 @@ class ProjectViewTests(TestCase):
         response = self.client.get(reverse("index"))
         self.assertContains(response, "Create a project")
 
+    def test_running_item_cannot_be_removed(self):
+        item = enqueue_item(project=self.project, title="Work")
+        claim_next()
+        url = reverse("remove_item", args=[item.pk])
+        self.client.post(url)
+        self.assertTrue(QueueItem.objects.filter(pk=item.pk).exists())
+
+    def test_queue_count_excludes_running_items(self):
+        enqueue_item(project=self.project, title="Work")
+        claim_next()
+        response = self.client.get(reverse("index"))
+        self.assertEqual(response.context["queue_count"], 0)
+
+    def test_running_status_is_displayed(self):
+        enqueue_item(project=self.project, title="Work")
+        claim_next()
+        response = self.client.get(reverse("index"))
+        self.assertContains(response, "Running")
+
 
 class LegacyMigrationTests(TransactionTestCase):
     def migrate(self, name):
@@ -195,7 +214,7 @@ class LegacyMigrationTests(TransactionTestCase):
         project = project_model.objects.create(name="Restore", repository_url=url)
         unassigned = queue_item.objects.filter(project__isnull=True)
         unassigned.update(project=project)
-        self.migrate("0003_require_project")
+        self.migrate("0004_queue_execution")
         super().tearDown()
 
     def test_upgrade_requires_explicit_project_assignment(self):
@@ -229,12 +248,14 @@ class LegacyMigrationTests(TransactionTestCase):
         project_id = self.project.pk
         output = StringIO()
         call_command("backfill_projects", project=project_id, all=True, stdout=output)
-        self.migrate("0003_require_project")
-        item = self.queue_item.objects.get(pk=self.legacy_id)
+        apps = self.migrate("0004_queue_execution")
+        queue_item = apps.get_model("hello", "QueueItem")
+        item = queue_item.objects.get(pk=self.legacy_id)
         self.assertEqual(item.project_id, project_id)
         self.assertEqual(item.title, "Legacy work")
         self.assertEqual(item.instructions, "Preserve this")
         self.assertEqual(item.priority, "high")
+        self.assertEqual(item.status, "queued")
 
     def test_backfill_all_assigns_unassigned_items(self):
         project_id = self.project.pk
