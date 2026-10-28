@@ -18,7 +18,6 @@ jobs:
     timeout-minutes: 20
     env:
       COMPOSE_PROJECT_NAME: nightly-queue-ci
-      POSTGRES_PASSWORD: ci-postgres
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803

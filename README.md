@@ -5,7 +5,7 @@ an agent on a nightly schedule.
 
 ## Run locally
 
-Create an untracked `.env` with random values for `NQ_API_TOKEN` and `POSTGRES_PASSWORD`:
+Copy `.env.example` to an untracked `.env` and set `NQ_API_TOKEN` for API access:
 
 ```sh
 cp .env.example .env
@@ -28,7 +28,8 @@ for API access over a network.
 
 PostgreSQL 17 stores data in the `postgres-data` Docker volume. Its port stays
 internal to Docker. `docker compose down` keeps the data; `down --volumes` deletes it.
-Set `POSTGRES_DB` and `POSTGRES_USER` in `.env` to override `nightly_queue`.
+The database, user, and password default to `nightly_queue`. Override them with
+`POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` in `.env`.
 Database credentials initialize an empty volume; changing `.env` does not change an existing database password.
 
 Back up PostgreSQL with:
