@@ -93,7 +93,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-green-soft
 .queue-heading { display: flex; justify-content: space-between; align-items: center; margin: 4px 0 22px; gap: 12px; }
 .count-badge { margin-left: 5px; background: var(--color-badge-bg); font-size: 11px; padding: 3px 7px; border-radius: 5px; vertical-align: 2px; }
 .order-label { color: var(--color-order-label); font-size: 11px; }
-.queue-filters { display: flex; gap: 8px; margin: 0 0 16px; }
+.queue-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
 .queue-filters input { flex: 1; min-width: 0; background: var(--color-panel); }
 .queue-filters select { width: 130px; font-size: 12px; background: var(--color-panel); }
 .button-filter { border: 1px solid var(--color-input-border); border-radius: 7px; background: var(--color-highlight-bg); color: var(--color-green); font-size: 12px; padding: 10px 14px; cursor: pointer; }
@@ -124,6 +124,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-green-soft
 .priority-low { background: var(--color-priority-low-bg); color: var(--color-priority-low-text); }
 .queue-item h3 { margin: 16px 0 10px; font-size: 16px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
 .item-instructions { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; color: var(--color-muted); line-height: 1.8; margin: 0 0 18px; }
+.item-project { color: var(--color-muted); font-size: 12px; overflow-wrap: anywhere; margin: 0 0 14px; }
 .item-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--color-item-footer-border); padding-top: 13px; margin-top: 16px; color: var(--color-item-footer-text); font-size: 10px; }
 .button-remove { cursor: pointer; border: none; background: transparent; padding: 5px; color: var(--color-remove); font-size: 11px; }
 .button-remove:hover { color: var(--color-remove-hover); }

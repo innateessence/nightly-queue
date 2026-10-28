@@ -1,25 +1,78 @@
 # nightly-queue
 
-A small Django prototype for capturing work to be executed later by n8n.
+Capture project-linked work in Django for a future nightly n8n workflow.
 
 ## Run locally
+
+Use Python 3.12 for the Django application:
 
 ```sh
 python -m pip install -r requirements.txt
 python manage.py migrate
+python manage.py createsuperuser
 python manage.py runserver
 ```
 
-Open http://127.0.0.1:8000/ to add work items with a title, optional instructions,
-and priority. Items are saved in SQLite, displayed oldest first, and can be removed.
-Search by title or instructions, and filter by priority to find queued work.
-Priority is metadata only; it does not change the display order. The queue is shared
-and has no authentication yet, so use it locally with non-sensitive data.
+Create projects at http://127.0.0.1:8000/admin/hello/project/. Each project has:
 
-n8n is not connected yet: adding an item does not execute it or schedule a run.
+- A numeric ID, displayed in admin and used by `nq`.
+- A name and an HTTPS GitHub repository URL, normalized to
+  `https://github.com/owner/repo.git`. Credentials, query strings, and links to
+  repository subpages are rejected.
+- An optional base branch. A blank value tells n8n to use the repository's default
+  branch; it does not assume `main`.
 
-Alternatively, run `./run.sh --build` to use Docker. The current Docker setup keeps
-SQLite inside the app container; recreating that container loses its saved queue.
+Open http://127.0.0.1:8000/ to select a project and add a title, optional
+instructions, and priority. Search by title/instructions and filter by project or
+priority. Items remain oldest first regardless of priority. Projects referenced by any items cannot be deleted.
+
+The browser queue remains a shared, unauthenticated local interface with CSRF
+protection. Use it locally with non-sensitive data. n8n execution is not connected.
+
+Alternatively, run `./run.sh --build` to use Docker Compose.
+SQLite lives at
+`/app/db.sqlite3` in the source bind mount, so data persists in the host checkout
+when containers are recreated. Back up that file before schema changes. The app
+supports `NQ_DB_PATH` to select a different database file; its parent directory
+must already exist and be writable.
+
+## Upgrade an existing queue
+
+If existing items have no project, migration `0003` stops with instructions rather
+than guessing their repositories. Back up SQLite and stop submissions/workflows
+while performing the upgrade:
+
+```sh
+python manage.py migrate hello 0002
+python manage.py shell
+```
+
+In the Django shell, create the projects those items actually belong to:
+
+```python
+from hello.models import Project, QueueItem
+
+project = Project.objects.create(
+    name="My project",
+    repository_url="https://github.com/owner/repo",
+    base_branch="",  # or an explicit branch such as "develop"
+)
+print(project.pk)
+print(list(QueueItem.objects.filter(project__isnull=True).values("id", "title")))
+```
+
+Exit the shell, then assign specific item IDs. Repeat for each project:
+
+```sh
+python manage.py backfill_projects --project 1 --items 3 4 8
+python manage.py migrate
+```
+
+Use `--all` instead of `--items ...` only when every remaining unassigned item
+belongs to that project. The command leaves already assigned items alone. Fresh
+databases and empty queues can run `python manage.py migrate` directly.
+For Docker, prefix these commands with `docker compose run --rm nightly-queue`
+while the app is stopped; the explicit command overrides its startup migration.
 
 ## nq CLI
 
@@ -35,8 +88,8 @@ nq add --project 12 "Add CSV export" \
   --priority normal
 ```
 
-This branch adds the client only. The Django server does not expose its endpoints
-yet; the project model and submission API follow in separate branches.
+Projects can now be managed in Django admin. The CLI endpoints arrive in the
+submission API branch; this stage still submits work through the browser.
 
 `nq projects` calls `GET /api/v1/projects/` and lists existing project IDs.
 `nq add` calls `POST /api/v1/items/` with a required numeric `project_id`, title,
@@ -57,9 +110,15 @@ Run the client without installing it with `python -m nq`. Run its tests with
 
 ```sh
 python manage.py test
+python manage.py makemigrations --check --dry-run
+python manage.py check
+black --check .
+ruff check .
+mypy . --config-file mypy.ini
 ```
 
-Use `bash test.sh` for the Docker-based lint and test suite.
+Use `bash test.sh` for the Docker-based lint and test suite. Migration tests cover
+explicit backfill and the required project relationship.
 
 ## Continuous integration
 

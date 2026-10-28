@@ -5,7 +5,7 @@ from django.views.decorators.http import require_POST
 from django.views.generic import ListView
 
 from .forms import QueueItemForm
-from .models import QueueItem
+from .models import Project, QueueItem
 
 
 class Index(ListView):
@@ -13,10 +13,16 @@ class Index(ListView):
         return self.render_queue(request, QueueItemForm())
 
     def render_queue(self, request, form):
-        items = QueueItem.objects.all()
+        items = QueueItem.objects.select_related("project")
         queue_count = items.count()
         query = request.GET.get("q", "").strip()
         priority = request.GET.get("priority", "")
+        project = request.GET.get("project", "")
+        projects = Project.objects.all()
+        if not project.isascii() or not project.isdecimal() or len(project) > 18:
+            project = ""
+        if project and not projects.filter(pk=project).exists():
+            project = ""
         if priority not in QueueItem.Priority.values:
             priority = ""
         if query:
@@ -24,6 +30,8 @@ class Index(ListView):
             items = items.filter(matching_text)
         if priority:
             items = items.filter(priority=priority)
+        if project:
+            items = items.filter(project_id=project)
         context = {
             "form": form,
             "items": items,
@@ -31,7 +39,10 @@ class Index(ListView):
             "query": query,
             "priority": priority,
             "priorities": QueueItem.Priority.choices,
-            "filtered": bool(query or priority),
+            "project": project,
+            "projects": projects,
+            "has_projects": projects.exists(),
+            "filtered": bool(query or priority or project),
         }
         return render(request, "hello/index.html", context)
 
