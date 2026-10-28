@@ -4,7 +4,6 @@ from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 from django.utils import timezone
 
-from projects.models import Project
 from projects.validators import normalize_repository_url
 
 from .models import QueueItem
@@ -98,11 +97,3 @@ def requeue_items(items):
         result_url="",
         error_summary="",
     )
-
-
-def backfill_projects(*, project_id, item_ids=None):
-    project = Project.objects.get(pk=project_id)
-    items = QueueItem.objects.filter(project__isnull=True)
-    if item_ids is not None:
-        items = items.filter(pk__in=item_ids)
-    return items.update(project=project)

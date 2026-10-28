@@ -38,7 +38,6 @@ class QueueItem(models.Model):
 
     class Meta:
         ordering = ["created_at", "pk"]
-        db_table = "hello_queueitem"
         indexes = [
             models.Index(
                 fields=["status", "created_at", "id"], name="queue_claim_order"

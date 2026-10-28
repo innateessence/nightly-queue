@@ -15,7 +15,6 @@ class Project(models.Model):
 
     class Meta:
         ordering = ["name", "pk"]
-        db_table = "hello_project"
 
     def clean(self):
         super().clean()
