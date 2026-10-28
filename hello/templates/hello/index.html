@@ -87,6 +87,11 @@
             </div>
           {% endif %}
           <div class="field">
+            <label for="{{ form.project.id_for_label }}">Project <span class="required">*</span></label>
+            {{ form.project }}
+            {% if not has_projects %}<p class="field-hint">Create a project in <a href="{% url 'admin:hello_project_add' %}">Django admin</a> before adding work.</p>{% endif %}
+          </div>
+          <div class="field">
             <label for="{{ form.title.id_for_label }}">What needs doing? <span class="required">*</span></label>
             {{ form.title }}
           </div>
@@ -117,6 +122,11 @@
             <option value="">All priorities</option>
             {% for value, label in priorities %}<option value="{{ value }}"{% if priority == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
           </select>
+          <label class="sr-only" for="project-filter">Filter by project</label>
+          <select id="project-filter" name="project">
+            <option value="">All projects</option>
+            {% for option in projects %}<option value="{{ option.pk }}"{% if project == option.pk|stringformat:"s" %} selected{% endif %}>{{ option.name }}</option>{% endfor %}
+          </select>
           <button type="submit" class="button-filter">Filter</button>
         </form>
         {% if filtered %}<div class="filter-summary">{{ items|length }} item{{ items|length|pluralize }} found <a href="{% url 'index' %}">Clear filters</a></div>{% endif %}
@@ -128,6 +138,7 @@
                 <span class="priority priority-{{ item.priority }}">{{ item.get_priority_display }} priority</span>
               </div>
               <h3>{{ item.title }}</h3>
+              <p class="item-project"><a href="{{ item.project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ item.project.name }}</a> · #{{ item.project_id }}</p>
               {% if item.instructions %}<p class="item-instructions">{{ item.instructions }}</p>{% endif %}
               <div class="item-footer">
                 <span>Added <time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at|date:"M j, Y · H:i T" }}</time></span>
