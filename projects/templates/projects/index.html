@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Projects · Nightly{% endblock %}
+{% block projects_current %} aria-current="page"{% endblock %}
+
+{% block heading %}
+  <section class="page-heading" aria-labelledby="page-title">
+    <div>
+      <p class="eyebrow">YOUR GITHUB REPOSITORIES</p>
+      <h1 id="page-title">Projects</h1>
+      <p class="subtitle">Choose where your queued work belongs.</p>
+    </div>
+    <div class="queue-total">{{ projects|length }} project{{ projects|length|pluralize }}</div>
+  </section>
+{% endblock %}
+
+{% block content %}
+  <div class="workspace">
+    <section class="panel composer" aria-labelledby="add-title">
+      <div class="section-heading">
+        <span class="section-icon" aria-hidden="true">＋</span>
+        <div><h2 id="add-title">Add a project</h2><p>Start with a GitHub repository.</p></div>
+      </div>
+      <form method="post" action="{% url 'project_list' %}">
+        {% include "projects/_form.html" with submit_label="Create project" %}
+      </form>
+    </section>
+
+    <section aria-labelledby="projects-title">
+      <div class="queue-heading"><h2 id="projects-title">Your projects</h2></div>
+      <div class="queue-items">
+        {% for project in projects %}
+          <article class="panel queue-item">
+            <div class="item-meta">
+              <span class="order-label">Project #{{ project.pk }}</span>
+              <a class="empty-link" href="{% url 'edit_project' project.pk %}" aria-label="Edit {{ project.name }}">Edit</a>
+            </div>
+            <h3>{{ project.name }}</h3>
+            <p class="item-project"><a href="{{ project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ project.repository_url }}</a></p>
+            <p class="item-project">Base branch: {{ project.base_branch|default:"Repository default" }}</p>
+            <div class="item-footer"><a class="empty-link" href="{% url 'index' %}?project={{ project.pk }}">View queue <span aria-hidden="true">↗</span></a></div>
+          </article>
+        {% empty %}
+          <div class="panel empty-state">
+            <h3>No projects yet.</h3>
+            <p>Add your first GitHub repository to start queuing work.</p>
+            <a class="empty-link" href="#{{ form.name.id_for_label }}">Add your first project <span aria-hidden="true">↗</span></a>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+{% endblock %}

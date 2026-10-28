@@ -1,0 +1,72 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}Nightly{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'work_queue/queue.css' %}">
+  <script>
+    (function () {
+      var root = document.documentElement;
+      function pick() {
+        var params = new URLSearchParams(location.search);
+        var saved = null;
+        try { saved = localStorage.getItem("theme"); } catch (e) { e; }
+        var theme = params.get("theme") || saved;
+        if (theme !== "light" && theme !== "dark") {
+          theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        return theme;
+      }
+      function applyTheme(theme) {
+        root.dataset.theme = theme;
+        root.style.colorScheme = theme;
+        var toggle = document.querySelector(".theme-toggle");
+        if (toggle) {
+          var icon = toggle.querySelector("[aria-hidden]");
+          if (icon) { icon.textContent = theme === "dark" ? "🌙" : "🌞"; }
+          toggle.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
+          toggle.setAttribute("aria-label", theme === "dark" ? "Switch to light theme" : "Switch to dark theme");
+        }
+      }
+      applyTheme(pick());
+      window.addEventListener("DOMContentLoaded", function () {
+        var toggle = document.querySelector(".theme-toggle");
+        if (!toggle) { return; }
+        applyTheme(root.dataset.theme);
+        toggle.addEventListener("click", function () {
+          var next = root.dataset.theme === "dark" ? "light" : "dark";
+          applyTheme(next);
+          try { localStorage.setItem("theme", next); } catch (e) { e; }
+        });
+      });
+    })();
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="{% url 'index' %}" aria-label="Nightly home">
+      <span class="brand-mark" aria-hidden="true">☾</span>
+      nightly<span class="brand-dot">.</span>
+    </a>
+    <nav class="site-nav" aria-label="Main navigation">
+      <a href="{% url 'index' %}"{% block queue_current %}{% endblock %}>Queue</a>
+      <a href="{% url 'project_list' %}"{% block projects_current %}{% endblock %}>Projects</a>
+    </nav>
+    <button class="theme-toggle" type="button" aria-pressed="false" aria-label="Switch to dark theme"><span aria-hidden="true">🌞</span></button>
+  </header>
+
+  <main>
+    {% block heading %}{% endblock %}
+
+    {% for message in messages %}
+      <div class="notice" role="status">{{ message }}</div>
+    {% endfor %}
+
+    {% block content %}{% endblock %}
+    <footer class="site-footer"><span>Off your mind. In your queue.</span><span>Built for a better tomorrow <span aria-hidden="true">☾</span></span></footer>
+  </main>
+</body>
+</html>
