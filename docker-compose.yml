@@ -7,7 +7,7 @@ services:
     image: nightly-queue-django
     container_name: nightly-queue-django
     ports:
-      - "${PORT:-8000}:8000"
+      - "${PORT:-7777}:8000"
     environment:
       DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,nightly-queue"
       NQ_API_TOKEN: "${NQ_API_TOKEN:-}"
