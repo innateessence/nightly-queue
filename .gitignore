@@ -4,3 +4,7 @@ db.sqlite3
 .env
 staticfiles/
 .cache/
+.venv/
+*.egg-info/
+build/
+dist/
