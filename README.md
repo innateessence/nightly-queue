@@ -8,6 +8,7 @@ Use Python 3.12 for the Django application:
 
 ```sh
 python -m pip install -r requirements.txt
+export NQ_API_TOKEN='your-random-api-token'
 python manage.py migrate
 python manage.py createsuperuser
 python manage.py runserver
@@ -88,9 +89,6 @@ nq add --project 12 "Add CSV export" \
   --priority normal
 ```
 
-Projects can now be managed in Django admin. The CLI endpoints arrive in the
-submission API branch; this stage still submits work through the browser.
-
 `nq projects` calls `GET /api/v1/projects/` and lists existing project IDs.
 `nq add` calls `POST /api/v1/items/` with a required numeric `project_id`, title,
 optional instructions, and priority (`low`, `normal`, or `high`). It prints the
@@ -105,6 +103,25 @@ The CLI needs neither Django nor direct database access.
 
 Run the client without installing it with `python -m nq`. Run its tests with
 `python -m unittest hello.test_cli`.
+
+## Submission API
+
+Configure `NQ_API_TOKEN` on the server and use the same token in `nq`. Docker
+Compose reads it from the shell or an untracked `.env` file. An unset token
+disables the API with HTTP 503. Browser sessions do not grant API access.
+
+All endpoints require `Authorization: Bearer <NQ_API_TOKEN>` and return JSON.
+POST requests require `Content-Type: application/json`.
+
+| Method and path | Request | Result |
+| --- | --- | --- |
+| `GET /api/v1/projects/` | — | `{"projects": [...]}` with ID, name, repository URL, and base branch |
+| `POST /api/v1/items/` | `{"project_id": 12, "title": "Add export", "instructions": "CSV", "priority": "normal"}` | HTTP 201 with `{"item": {...}}`; instructions and priority are optional |
+
+Invalid values and unknown fields return 400 with an `errors` object. Missing or
+wrong tokens return 401; incorrect HTTP methods return 405. Keep the shared web
+interface local/private and use HTTPS for remote API access. Claiming work,
+execution status, and result callbacks arrive in the n8n execution branch.
 
 ## Tests
 
