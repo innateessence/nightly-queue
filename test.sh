@@ -8,7 +8,7 @@
 # shellcheck disable=SC2086
 # shellcheck disable=SC2048
 
-COMPOSE_FILE="docker-compose.yml"
+export COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 # These are the compose SERVICE names (not container names) so that
 # `docker compose exec <service>` works.
 DJANGO_SERVICE="nightly-queue"
@@ -28,7 +28,7 @@ function docker_exec() {
   local service_name
   service_name=$1
   shift
-  docker compose -f $COMPOSE_FILE exec -T "$service_name" $*
+  docker compose exec -T "$service_name" $*
 }
 
 function test_command() {
@@ -50,7 +50,7 @@ function test_command() {
 function wait_for_django() {
   info "Waiting for django to be ready..."
   for i in $(seq 1 60); do
-    if docker compose -f $COMPOSE_FILE exec -T "$DJANGO_SERVICE" \
+    if docker compose exec -T "$DJANGO_SERVICE" \
        curl -s localhost:8000 | grep -q "Your queue"; then
       pass "django is ready"
       return 0
@@ -59,8 +59,7 @@ function wait_for_django() {
     sleep 2
   done
   echo
-  warn "django did not respond within 120s; continuing anyway"
-  return 0
+  error "Django did not respond within 120s"
 }
 
 function has_args() {
@@ -96,8 +95,8 @@ function Main() {
   cd "$(dirname "$0")" || error "Failed to change directory to $(dirname "$0")"
 
   info "Bringing up container..." &&
-    docker compose -f $COMPOSE_FILE build &&
-    docker compose -f $COMPOSE_FILE up -d --wait &&
+    docker compose build &&
+    docker compose up -d --wait &&
     pass "All containers are up" ||
     fail "Could not start containers :("
 

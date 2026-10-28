@@ -8,6 +8,19 @@ from hello.tasks import add, nightly_greeting
 
 
 class HelloAppTests(TestCase):
+    def assert_invalid_item(self, field, value):
+        data = {
+            "title": "Task",
+            "instructions": "Keep this context",
+            "priority": "normal",
+        }
+        data[field] = value
+        response = self.client.post(reverse("index"), data)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(field, response.context["form"].errors)
+        self.assertContains(response, "Keep this context")
+        self.assertFalse(QueueItem.objects.exists())
+
     def test_index_renders(self):
         response = self.client.get(reverse("index"))
         self.assertEqual(response.status_code, 200)
@@ -48,26 +61,14 @@ class HelloAppTests(TestCase):
         self.assertRedirects(response, reverse("index"))
         self.assertEqual(QueueItem.objects.get().instructions, "")
 
-    def test_invalid_item_is_not_saved_and_preserves_input(self):
-        for title, priority, field in [
-            ("   ", "normal", "title"),
-            ("x" * 201, "normal", "title"),
-            ("Task", "urgent", "priority"),
-        ]:
-            with self.subTest(field=field, title=title):
-                response = self.client.post(
-                    reverse("index"),
-                    {
-                        "title": title,
-                        "instructions": "Keep this context",
-                        "priority": priority,
-                    },
-                )
+    def test_blank_title_is_rejected(self):
+        self.assert_invalid_item("title", "   ")
 
-                self.assertEqual(response.status_code, 200)
-                self.assertIn(field, response.context["form"].errors)
-                self.assertContains(response, "Keep this context")
-                self.assertFalse(QueueItem.objects.exists())
+    def test_long_title_is_rejected(self):
+        self.assert_invalid_item("title", "x" * 201)
+
+    def test_unknown_priority_is_rejected(self):
+        self.assert_invalid_item("priority", "urgent")
 
     def test_empty_post_shows_validation_errors(self):
         response = self.client.post(reverse("index"), {})
@@ -89,17 +90,17 @@ class HelloAppTests(TestCase):
         self.assertEqual(response.context["queue_count"], 2)
         self.assertNotContains(response, "Add your first item")
 
-    def test_work_item_content_is_escaped(self):
-        QueueItem.objects.create(
-            title="<script>alert('title')</script>",
-            instructions="<img src=x onerror=alert(1)>",
-        )
-
+    def test_work_item_title_is_escaped(self):
+        QueueItem.objects.create(title="<script>alert('title')</script>")
         response = self.client.get(reverse("index"))
-
         self.assertContains(response, "&lt;script&gt;")
+        self.assertNotContains(response, "<script>alert('title')</script>")
+
+    def test_work_item_instructions_are_escaped(self):
+        instructions = "<img src=x onerror=alert(1)>"
+        QueueItem.objects.create(title="Work", instructions=instructions)
+        response = self.client.get(reverse("index"))
         self.assertContains(response, "&lt;img")
-        self.assertNotContains(response, "<script>")
         self.assertNotContains(response, "<img")
 
     def test_search_matches_title_and_instructions_and_preserves_total(self):
