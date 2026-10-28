@@ -5,8 +5,9 @@ services:
       context: .
       dockerfile: Dockerfile
     image: nightly-queue-django
+    container_name: nightly-queue-django
     ports:
-      - "${PORT:-0}:8000"
+      - "${PORT:-7777}:8000"
     environment:
       DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,nightly-queue"
       NQ_API_TOKEN: "${NQ_API_TOKEN:-}"
@@ -19,6 +20,7 @@ services:
 
   valkey:
     image: valkey/valkey:8-alpine
+    container_name: nightly-queue-valkey
     command: ["valkey-server", "--appendonly", "yes"]
     volumes:
       - valkey-data:/data
@@ -33,6 +35,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: nightly-queue-django
+    container_name: nightly-queue-celery
     command: ["celery", "-A", "nightly_queue", "worker", "--loglevel=INFO", "-n", "worker@%h"]
     environment:
       DJANGO_SETTINGS_MODULE: "nightly_queue.settings"
@@ -49,6 +52,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: nightly-queue-django
+    container_name: nightly-queue-beat
     command: ["celery", "-A", "nightly_queue", "beat", "--loglevel=INFO"]
     environment:
       DJANGO_SETTINGS_MODULE: "nightly_queue.settings"

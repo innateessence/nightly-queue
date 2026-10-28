@@ -6,7 +6,7 @@
 #   ./run.sh            # start the container (builds image only if missing)
 #   ./run.sh --build    # force rebuild the image (only needed when requirements.txt changes)
 #   ./run.sh --stop     # stop and remove the container
-#   PORT=8080 ./run.sh  # use a fixed host port (default: automatically assigned)
+#   PORT=7778 ./run.sh  # expose on a different host port (default 7777)
 set -euo pipefail
 
 # shellcheck disable=SC2086
@@ -53,14 +53,9 @@ fi
 
 info "Starting container..."
 docker compose -f "$COMPOSE_FILE" up -d --wait
-NQ_BINDING=$(docker compose -f "$COMPOSE_FILE" port nightly-queue 8000)
-NQ_BINDING="${NQ_BINDING%%$'\n'*}"
-NQ_HOST_PORT="${NQ_BINDING##*:}"
-[[ -n "$NQ_HOST_PORT" ]] || error "Could not determine the app's host port"
 echo
-echo "    app:      http://127.0.0.1:${NQ_HOST_PORT}/"
-echo "    admin:    http://127.0.0.1:${NQ_HOST_PORT}/admin/"
-echo "    CLI:      export NQ_URL='http://127.0.0.1:${NQ_HOST_PORT}'"
+echo "    app:      http://127.0.0.1:${PORT:-7777}/"
+echo "    admin:    http://127.0.0.1:${PORT:-7777}/admin/"
 echo
 echo "    logs:     docker compose -f ${COMPOSE_FILE} logs -f"
 echo "    shell:    docker compose -f ${COMPOSE_FILE} exec nightly-queue sh"

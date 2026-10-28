@@ -28,11 +28,8 @@ API access requires
 for API access over a network.
 
 For Docker, set the token in your shell or an untracked `.env`, then run
-`./run.sh --build`. Docker chooses an available port; the script prints the URL
-and `NQ_URL` setting for the CLI. Use `PORT=8080 ./run.sh` for a fixed port.
-For another checkout, set a distinct `COMPOSE_PROJECT_NAME` to keep its containers separate.
-
-SQLite persists at `db.sqlite3` in your checkout. Back it up
+`./run.sh --build`. Docker serves http://127.0.0.1:7777/; use this URL for
+`NQ_URL` when using the CLI. SQLite persists at `db.sqlite3` in your checkout. Back it up
 before schema changes. Set `NQ_DB_PATH` to use another file in an existing,
 writable directory. Only fresh database builds are supported by the current migrations.
 
