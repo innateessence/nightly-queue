@@ -3,7 +3,7 @@ from django.contrib.auth.models import Permission
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Project
+from projects.models import Project
 from .services import claim_next, enqueue_item
 
 
@@ -15,11 +15,11 @@ class RequeueActionTests(TestCase):
         self.item = claim_next()
         users = get_user_model().objects
         self.user = users.create_user(username="viewer", is_staff=True)
-        permissions = Permission.objects.filter(content_type__app_label="hello")
+        permissions = Permission.objects.filter(content_type__app_label="work_queue")
         permission = permissions.get(codename="view_queueitem")
         self.user.user_permissions.add(permission)
         self.client.force_login(self.user)
-        self.url = reverse("admin:hello_queueitem_changelist")
+        self.url = reverse("admin:work_queue_queueitem_changelist")
 
     def post_requeue(self):
         data = {
@@ -42,7 +42,7 @@ class RequeueActionTests(TestCase):
         self.assertEqual(self.item.claim_token, token)
 
     def test_staff_with_change_permission_can_requeue(self):
-        permissions = Permission.objects.filter(content_type__app_label="hello")
+        permissions = Permission.objects.filter(content_type__app_label="work_queue")
         permission = permissions.get(codename="change_queueitem")
         self.user.user_permissions.add(permission)
         response = self.post_requeue()

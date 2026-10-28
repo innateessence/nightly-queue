@@ -4,8 +4,10 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from django.views.generic import ListView
 
+from projects.models import Project
+
 from .forms import QueueItemForm
-from .models import Project, QueueItem
+from .models import QueueItem
 
 
 class Index(ListView):
@@ -44,7 +46,7 @@ class Index(ListView):
             "has_projects": projects.exists(),
             "filtered": bool(query or priority or project),
         }
-        return render(request, "hello/index.html", context)
+        return render(request, "work_queue/index.html", context)
 
     def post(self, request, *args, **kwargs):
         form = QueueItemForm(request.POST)

@@ -2,7 +2,7 @@
 
 # This script is intended to serve as the standard for how we test things before merging any branches for `nightly-queue`
 # Typical usage is simply `bash test.sh`
-# If you supply any args, they are passed directly to `manage.py test` to run specific tests, e.g. `bash test.sh hello.tests`
+# If you supply any args, they are passed directly to `manage.py test` to run specific tests, e.g. `bash test.sh work_queue.tests`
 
 # The following lines disable some shellcheck rules that are not applicable to this specific script.
 # shellcheck disable=SC2086

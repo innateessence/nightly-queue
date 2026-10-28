@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Your queue · Nightly</title>
-  <link rel="stylesheet" href="{% static 'hello/queue.css' %}">
+  <link rel="stylesheet" href="{% static 'work_queue/queue.css' %}">
   <script>
     (function () {
       var root = document.documentElement;
@@ -89,7 +89,7 @@
           <div class="field">
             <label for="{{ form.project.id_for_label }}">Project <span class="required">*</span></label>
             {{ form.project }}
-            {% if not has_projects %}<p class="field-hint">Create a project in <a href="{% url 'admin:hello_project_add' %}">Django admin</a> before adding work.</p>{% endif %}
+            {% if not has_projects %}<p class="field-hint">Create a project in <a href="{% url 'admin:projects_project_add' %}">Django admin</a> before adding work.</p>{% endif %}
           </div>
           <div class="field">
             <label for="{{ form.title.id_for_label }}">What needs doing? <span class="required">*</span></label>

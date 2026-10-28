@@ -4,8 +4,10 @@ from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 from django.utils import timezone
 
-from .models import Project, QueueItem
-from .validators import normalize_repository_url
+from projects.models import Project
+from projects.validators import normalize_repository_url
+
+from .models import QueueItem
 
 
 def enqueue_item(

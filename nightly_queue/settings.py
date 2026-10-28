@@ -44,7 +44,9 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "hello",
+    "hello",  # Migration history only.
+    "projects",
+    "work_queue",
 ]
 
 MIDDLEWARE = [
@@ -145,7 +147,7 @@ CELERY_TIMEZONE = TIME_ZONE
 
 CELERY_BEAT_SCHEDULE = {
     "nightly-greeting": {
-        "task": "hello.tasks.nightly_greeting",
+        "task": "work_queue.tasks.nightly_greeting",
         "schedule": 5.0,
     }
 }

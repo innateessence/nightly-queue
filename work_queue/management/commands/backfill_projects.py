@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand, CommandError
 
-from hello.models import Project
-from hello.services import backfill_projects
+from projects.models import Project
+from work_queue.services import backfill_projects
 
 
 class Command(BaseCommand):
