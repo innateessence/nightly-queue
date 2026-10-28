@@ -2,21 +2,19 @@ name: Tests
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+    types: [opened, ready_for_review]
 
 permissions:
   contents: read
 
 concurrency:
-  group: tests-${{ github.event.pull_request.number || github.ref }}
+  group: tests-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   test:
     name: Run test.sh
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:

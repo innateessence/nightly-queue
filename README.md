@@ -31,16 +31,19 @@ Use `bash test.sh` for the Docker-based lint and test suite.
 
 ## Continuous integration
 
-The `Tests` GitHub Actions workflow runs `bash test.sh` on pull requests and pushes
-to `main`. It also supports manual runs. The job builds the
-Compose services, checks Django readiness, then runs formatting, lint, type,
-migration, and application checks through the same script used locally.
+The `Tests` GitHub Actions workflow runs `bash test.sh` when a pull request is
+opened as ready for review or changed from draft to ready. Drafts are skipped.
+Commits pushed afterward do not trigger another run. To request another run after
+further changes, mark the PR as draft and then ready again.
+
+The job builds the Compose services, checks Django readiness, then runs formatting,
+lint, type, migration, and application checks through the same script used locally.
 
 CI combines `docker-compose.yml` with `docker-compose.ci.yml`. Application
 containers use the runner's UID/GID so SQLite and Celery can write to the checkout.
 Service logs appear in the workflow output on failure; containers and volumes are
 removed afterward. Runs time out after 20 minutes, and newer runs cancel older runs
-for the same pull request or branch.
+for the same pull request.
 
 To reproduce the CI configuration on Linux:
 
