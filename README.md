@@ -64,9 +64,8 @@ Use `bash test.sh` for the Docker-based lint and test suite.
 ## Continuous integration
 
 The `Tests` GitHub Actions workflow runs `bash test.sh` when a pull request is
-opened as ready for review or changed from draft to ready. Drafts are skipped.
-Commits pushed afterward do not trigger another run. To request another run after
-further changes, mark the PR as draft and then ready again.
+opened as ready for review, changed from draft to ready, or updated with new
+commits while non-draft. Drafts are skipped, including commits pushed to them.
 
 The job builds the Compose services, checks Django readiness, then runs formatting,
 lint, type, migration, and application checks through the same script used locally.
