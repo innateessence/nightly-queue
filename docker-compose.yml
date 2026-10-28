@@ -17,7 +17,7 @@ services:
       - "${PORT:-7777}:8000"
     environment:
       <<: *database-environment
-      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,nightly-queue"
+      DJANGO_ALLOWED_HOSTS: "*"
       NQ_API_TOKEN: "${NQ_API_TOKEN:-}"
       CELERY_BROKER_URL: "redis://valkey:6379/0"
       CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
