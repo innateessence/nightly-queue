@@ -14,7 +14,7 @@ class Index(ListView):
 
     def render_queue(self, request, form):
         items = QueueItem.objects.select_related("project")
-        queue_count = items.count()
+        queue_count = items.filter(status=QueueItem.Status.QUEUED).count()
         query = request.GET.get("q", "").strip()
         priority = request.GET.get("priority", "")
         project = request.GET.get("project", "")
@@ -57,7 +57,11 @@ class Index(ListView):
 
 @require_POST
 def remove_item(request, pk):
-    item = get_object_or_404(QueueItem, pk=pk)
-    item.delete()
+    get_object_or_404(QueueItem, pk=pk)
+    removable = QueueItem.objects.filter(pk=pk).exclude(status=QueueItem.Status.RUNNING)
+    removed, _ = removable.delete()
+    if not removed:
+        messages.error(request, "Stop and requeue running work before removing it.")
+        return redirect("index")
     messages.success(request, "Work item removed from your queue.")
     return redirect("index")

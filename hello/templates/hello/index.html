@@ -105,7 +105,7 @@
             {{ form.priority }}
           </div>
           <button class="button-primary" type="submit"><span aria-hidden="true">＋</span> Add to queue</button>
-          <p class="form-footnote">Saved here until an execution workflow is connected.</p>
+          <p class="form-footnote">Saved for your nightly n8n workflow.</p>
         </form>
       </section>
 
@@ -134,18 +134,20 @@
           {% for item in items %}
             <article class="panel queue-item">
               <div class="item-meta">
-                <span class="queued-label"><span class="status-dot" aria-hidden="true"></span> Queued</span>
+                <span class="queued-label"><span class="status-dot" aria-hidden="true"></span> {{ item.get_status_display }}</span>
                 <span class="priority priority-{{ item.priority }}">{{ item.get_priority_display }} priority</span>
               </div>
               <h3>{{ item.title }}</h3>
-              <p class="item-project"><a href="{{ item.project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ item.project.name }}</a> · #{{ item.project_id }}</p>
+              <p class="item-project"><a href="{{ item.project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ item.project.name }}</a> · #{{ item.project_id }}{% if item.branch_name %} · {{ item.branch_name }}{% endif %}</p>
               {% if item.instructions %}<p class="item-instructions">{{ item.instructions }}</p>{% endif %}
+              {% if item.result_url %}<p class="item-project"><a href="{{ item.result_url }}" target="_blank" rel="noopener noreferrer">View result</a></p>{% endif %}
+              {% if item.error_summary %}<p class="item-instructions">{{ item.error_summary }}</p>{% endif %}
               <div class="item-footer">
                 <span>Added <time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at|date:"M j, Y · H:i T" }}</time></span>
-                <form method="post" action="{% url 'remove_item' item.pk %}">
+                {% if item.status != 'running' %}<form method="post" action="{% url 'remove_item' item.pk %}">
                   {% csrf_token %}
                   <button class="button-remove" type="submit" aria-label="Remove {{ item.title }} from queue">Remove</button>
-                </form>
+                </form>{% endif %}
               </div>
             </article>
           {% empty %}
@@ -167,7 +169,7 @@
         </div>
         <aside class="integration-note">
           <span class="integration-icon" aria-hidden="true">↳</span>
-          <div><strong>Capture now. Connect later.</strong><p>This prototype saves your queue. n8n execution isn’t connected yet, so nothing runs automatically.</p></div>
+          <div><strong>Ready for your nightly workflow.</strong><p>n8n can claim queued work through the API. Configure its schedule, GitHub credentials, and agent separately; adding work does not start a run.</p></div>
         </aside>
       </section>
     </div>

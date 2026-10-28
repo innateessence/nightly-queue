@@ -1,6 +1,8 @@
 # nightly-queue
 
-Capture project-linked work in Django for a future nightly n8n workflow.
+Capture project-linked work in Django, then let n8n claim and execute it at night.
+Each queue item references an existing `Project`, which identifies a GitHub
+repository and an optional base branch.
 
 ## Run locally
 
@@ -25,13 +27,18 @@ Create projects at http://127.0.0.1:8000/admin/hello/project/. Each project has:
 
 Open http://127.0.0.1:8000/ to select a project and add a title, optional
 instructions, and priority. Search by title/instructions and filter by project or
-priority. Items remain oldest first regardless of priority. Projects referenced by any items cannot be deleted.
+priority. Items remain oldest first regardless of priority. The page shows execution
+status and results; its queue count includes only queued items. Projects referenced
+by any items cannot be deleted, and running items cannot be removed from the queue.
 
 The browser queue remains a shared, unauthenticated local interface with CSRF
-protection. Use it locally with non-sensitive data. n8n execution is not connected.
+protection. The machine API requires `Authorization: Bearer <NQ_API_TOKEN>`;
+browser sessions do not grant API access. An unset token disables the API with
+HTTP 503. Keep this prototype local/private, and use HTTPS when accessing the API
+over a network.
 
-Alternatively, run `./run.sh --build` to use Docker Compose.
-SQLite lives at
+Alternatively, export the token and run `./run.sh --build` to use Docker Compose.
+Compose also reads `NQ_API_TOKEN` from an untracked `.env` file. SQLite lives at
 `/app/db.sqlite3` in the source bind mount, so data persists in the host checkout
 when containers are recreated. Back up that file before schema changes. The app
 supports `NQ_DB_PATH` to select a different database file; its parent directory
@@ -75,9 +82,10 @@ databases and empty queues can run `python manage.py migrate` directly.
 For Docker, prefix these commands with `docker compose run --rm nightly-queue`
 while the app is stopped; the explicit command overrides its startup migration.
 
-## nq CLI
+## Install and use nq
 
-Install the standalone HTTP client with Python 3.10+:
+The CLI uses the Python standard library and needs no Django installation or direct
+database access. Install it from this checkout (Python 3.10+):
 
 ```sh
 python -m pip install .
@@ -89,39 +97,65 @@ nq add --project 12 "Add CSV export" \
   --priority normal
 ```
 
-`nq projects` calls `GET /api/v1/projects/` and lists existing project IDs.
-`nq add` calls `POST /api/v1/items/` with a required numeric `project_id`, title,
-optional instructions, and priority (`low`, `normal`, or `high`). It prints the
-created item ID. The expected responses are `{"projects": [...]}` and
-`{"item": {"id": 42, "project": {"id": 12}, "title": "Add CSV export"}}`.
+`NQ_URL` defaults to `http://127.0.0.1:8000`. `nq projects` lists existing IDs;
+`nq add` requires one and never creates a project implicitly. Successful submissions
+print the new item ID. Validation, authentication, and connection failures exit
+nonzero. The client uses a 30-second timeout and does not follow redirects or
+automatically retry submissions, which could otherwise add duplicate work. During
+development, `python -m nq` runs the same CLI without installation.
 
-`NQ_URL` defaults to `http://127.0.0.1:8000`. The client sends a bearer token from
-`NQ_API_TOKEN`, uses a 30-second timeout, and exits nonzero on validation,
-authentication, or connection failures. It does not follow redirects or retry
-submissions automatically. Keep credentials out of URLs and use HTTPS remotely.
-The CLI needs neither Django nor direct database access.
+## n8n API contract
 
-Run the client without installing it with `python -m nq`. Run its tests with
-`python -m unittest hello.test_cli`.
-
-## Submission API
-
-Configure `NQ_API_TOKEN` on the server and use the same token in `nq`. Docker
-Compose reads it from the shell or an untracked `.env` file. An unset token
-disables the API with HTTP 503. Browser sessions do not grant API access.
-
-All endpoints require `Authorization: Bearer <NQ_API_TOKEN>` and return JSON.
-POST requests require `Content-Type: application/json`.
+All endpoints live under `/api/v1/`, require the bearer token, and return JSON.
+POST requests require `Content-Type: application/json`. Unknown fields and invalid
+values return HTTP 400 with an `errors` object. Wrong tokens return 401, and wrong
+HTTP methods return 405.
 
 | Method and path | Request | Result |
 | --- | --- | --- |
-| `GET /api/v1/projects/` | — | `{"projects": [...]}` with ID, name, repository URL, and base branch |
-| `POST /api/v1/items/` | `{"project_id": 12, "title": "Add export", "instructions": "CSV", "priority": "normal"}` | HTTP 201 with `{"item": {...}}`; instructions and priority are optional |
+| `GET /projects/` | — | `{"projects": [...]}` with ID, name, repository URL, and base branch |
+| `POST /items/` | `{"project_id": 12, "title": "Add export", "instructions": "CSV", "priority": "normal"}` | HTTP 201 with `{"item": {...}}`; instructions and priority are optional |
+| `POST /items/claim/` | `{"execution_ref": "n8n-execution-id"}` or `{}` | HTTP 200 with one reserved item, or `{"item": null}` when nothing is queued |
+| `POST /items/123/finish/` | `{"claim_token": "<returned UUID>", "status": "succeeded", "result_url": "https://github.com/owner/repo/pull/1"}` | HTTP 200 with the updated item |
 
-Invalid values and unknown fields return 400 with an `errors` object. Missing or
-wrong tokens return 401; incorrect HTTP methods return 405. Keep the shared web
-interface local/private and use HTTPS for remote API access. Claiming work,
-execution status, and result callbacks arrive in the n8n execution branch.
+The claim response includes the item ID, nested project, title, instructions,
+priority, status, timestamps, `claim_token`, `execution_ref`, `branch_name`, and
+top-level `repository_url` and `base_branch`. Use the **top-level checkout fields**:
+these are captured at the first claim and preserved on retries even if the project
+is edited later. The nested project contains current project settings. A blank
+captured base branch still means the repository's default branch at checkout time.
+The stable feature branch is `nq/<item-id>` and is also reused on retries.
+
+Configure an n8n workflow to:
+
+1. Trigger on your chosen nightly schedule and timezone.
+2. Claim an item, passing the n8n execution ID for traceability. Stop on `item: null`.
+3. Clone the returned repository using credentials stored in n8n, check out the
+   base branch (or discover the remote default), and create the returned feature
+   branch. On retries, inspect/reuse any existing feature branch instead of blindly
+   creating another. Pass repository URLs, branch names, and instructions as data
+   to the execution tool rather than interpolating them into shell commands.
+4. Run the agent with the title and instructions in that checkout.
+5. Report `succeeded` with an optional HTTP(S) result URL, or `failed` with an
+   optional `error_summary`, using the claim token returned in step 2.
+6. Claim the next item while the nightly execution window remains open.
+
+Claims atomically change `queued` to `running`; overlapping callers cannot claim
+the same queued item. Completion requires both `running` status and the current
+claim token. A stale token or a repeated completion returns 409; a missing item
+returns 404. Neither operation retries or schedules agent work itself.
+
+Interrupted work stays `running` until an operator recovers it. First stop the old
+n8n execution and agent, then select the item in Django admin and choose
+**Requeue failed/interrupted work**. This invalidates its old token and clears
+attempt timestamps/results while preserving the checkout settings and branch.
+The next claim receives a new token. There is no automatic lease expiry or separate
+attempt history yet. If a claim or finish request times out after reaching Django,
+inspect its status/execution reference in admin before retrying the operation.
+
+n8n owns the nightly schedule, GitHub credentials, cloning, and agent execution.
+No n8n workflow is installed by this repository. The existing Celery greeting is
+only a demo and does not consume queue items.
 
 ## Tests
 
@@ -134,8 +168,10 @@ ruff check .
 mypy . --config-file mypy.ini
 ```
 
-Use `bash test.sh` for the Docker-based lint and test suite. Migration tests cover
-explicit backfill and the required project relationship.
+Use `bash test.sh` for the Docker-based lint and test suite. Migration tests exercise
+both existing-data backfill and enforcement of the required project relationship.
+API and service tests cover authentication, validation, competing claims, completion, and
+recovery; CLI tests cover requests, output, and failure exit codes.
 
 ## Continuous integration
 
