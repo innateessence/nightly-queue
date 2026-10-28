@@ -1,51 +1,51 @@
 :root {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
-  --color-text: #24332f;
-  --color-bg: #f7f8f5;
+  --color-text: #202633;
+  --color-bg: #f6f7fb;
   --color-panel: #fff;
-  --color-muted: #6f7b74;
-  --color-accent: #275b46;
-  --color-accent-hover: #1c4836;
-  --color-focus: #81ad85;
-  --color-border: #e2e7de;
-  --color-input-bg: #fdfefb;
-  --color-input-border: #dce2d7;
-  --color-placeholder: #91998e;
-  --color-eyebrow: #71816b;
-  --color-brand-dot: #81a46c;
-  --color-highlight-bg: #edf2e8;
-  --color-highlight-border: #dfe7d7;
-  --color-status-dot: #789b60;
-  --color-icon-bg: #f1f4eb;
-  --color-required: #7b8f6f;
-  --color-optional: #879086;
-  --color-hint: #818b7b;
-  --color-badge-bg: #e8ede3;
-  --color-order-label: #85907e;
-  --color-illustration-bg: #edf2e3;
-  --color-illustration-border: #dce5ce;
-  --color-illustration-text: #6b8659;
-  --color-item-footer-border: #f0f2ec;
-  --color-item-footer-text: #87907f;
-  --color-remove: #7d8576;
-  --color-remove-hover: #a04636;
-  --color-notice-bg: #edf4e8;
-  --color-notice-border: #d5e3cb;
-  --color-error-bg: #fff4ef;
-  --color-error-border: #edcebf;
-  --color-error-text: #9c4933;
-  --color-footer: #88927f;
-  --color-integration-icon: #7e8e74;
-  --color-priority-bg: #f2f3ef;
-  --color-priority-text: #737b6e;
-  --color-priority-high-bg: #fbefdf;
-  --color-priority-high-text: #96652a;
-  --color-priority-low-bg: #edf2f7;
-  --color-priority-low-text: #5c7692;
-  --color-queued-label: #6c7f60;
-  --color-brand-mark-text: #f1f6d5;
-  --color-on-accent: #f1f6d5;
+  --color-muted: #5e687d;
+  --color-accent: #365bb0;
+  --color-accent-hover: #294890;
+  --color-focus: #486cbd;
+  --color-border: #dfe3ed;
+  --color-input-bg: #fcfcff;
+  --color-input-border: #7c8496;
+  --color-placeholder: #68748a;
+  --color-eyebrow: #596b92;
+  --color-brand-dot: #365bb0;
+  --color-highlight-bg: #edf1fc;
+  --color-highlight-border: #ccd6f1;
+  --color-status-dot: #365bb0;
+  --color-icon-bg: #eef2fc;
+  --color-required: #365bb0;
+  --color-optional: #657085;
+  --color-hint: #657085;
+  --color-badge-bg: #e9edf6;
+  --color-order-label: #657085;
+  --color-illustration-bg: #edf1fc;
+  --color-illustration-border: #d1daf0;
+  --color-illustration-text: #526ba4;
+  --color-item-footer-border: #e9ecf3;
+  --color-item-footer-text: #657085;
+  --color-remove: #657085;
+  --color-remove-hover: #a62c46;
+  --color-notice-bg: #edf2ff;
+  --color-notice-border: #c4d2f1;
+  --color-error-bg: #fff1f4;
+  --color-error-border: #ebbdc8;
+  --color-error-text: #a32b46;
+  --color-footer: #657085;
+  --color-integration-icon: #657085;
+  --color-priority-bg: #eef0f5;
+  --color-priority-text: #596275;
+  --color-priority-high-bg: #fff1dd;
+  --color-priority-high-text: #875516;
+  --color-priority-low-bg: #edf0fc;
+  --color-priority-low-text: #4d5f9b;
+  --color-queued-label: #4c6193;
+  --color-brand-mark-text: #fff;
+  --color-on-accent: #fff;
   color: var(--color-text);
   background: var(--color-bg);
 }
@@ -77,7 +77,7 @@ h1 { margin: 0; font-size: clamp(30px, 3.5vw, 43px); line-height: 1.2; font-weig
 .queue-total { display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 12px; font-weight: 600; background: var(--color-highlight-bg); border: 1px solid var(--color-highlight-border); border-radius: 24px; padding: 10px 15px; }
 .status-dot { display: inline-block; width: 6px; height: 6px; background: var(--color-status-dot); border-radius: 50%; }
 .workspace { display: grid; grid-template-columns: 420px minmax(0, 1fr); gap: 36px; align-items: start; }
-.panel { background: var(--color-panel); border: 1px solid var(--color-border); border-radius: 12px; box-shadow: 0 3px 8px rgba(39, 57, 40, 0.0118); }
+.panel { background: var(--color-panel); border: 1px solid var(--color-border); border-radius: 12px; box-shadow: 0 3px 8px rgba(20, 30, 55, 0.04); }
 .composer { padding: 27px; }
 .section-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 30px; }
 .section-icon { display: grid; place-items: center; background: var(--color-icon-bg); width: 38px; height: 38px; border-radius: 10px; font-size: 24px; color: var(--color-accent); }
