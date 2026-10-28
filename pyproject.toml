@@ -17,7 +17,3 @@ include = ["nq*"]
 
 [tool.ruff]
 line-length = 120
-
-[tool.ruff.lint.per-file-ignores]
-"hello/models.py" = ["F401"]
-"hello/admin.py" = ["F401"]

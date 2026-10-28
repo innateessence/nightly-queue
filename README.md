@@ -4,6 +4,24 @@ Capture project-linked work in Django, then let n8n claim and execute it at nigh
 Each queue item references an existing `Project`, which identifies a GitHub
 repository and an optional base branch.
 
+## Application structure
+
+- `projects/` owns project configuration, GitHub URL/branch validation, admin, and
+  the project-list API.
+- `work_queue/` owns queue items, submission UI, queue services/API, execution
+  tracking, recovery, templates, static assets, and the backfill command. It depends
+  on `projects`; `projects` does not depend on `work_queue`.
+- `nightly_queue/` contains Django/Celery configuration and shared HTTP API helpers.
+- `nq/` is the independent, standard-library CLI.
+
+Tests live alongside their owning app in `test_*.py` (and `work_queue/tests.py`).
+Add new schema migrations to the app that owns the model.
+
+`hello/` is retained only to load historical migrations and their validator import.
+It has no runtime models, views, or tasks. The model moves reuse the existing
+`hello_project` and `hello_queueitem` tables and preserve content type IDs, permission
+assignments, and admin history. Keep this migration-only package installed.
+
 ## Run locally
 
 Use Python 3.12 for the Django application:
@@ -16,7 +34,7 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
-Create projects at http://127.0.0.1:8000/admin/hello/project/. Each project has:
+Create projects at http://127.0.0.1:8000/admin/projects/project/. Each project has:
 
 - A numeric ID, displayed in admin and used by `nq`.
 - A name and an HTTPS GitHub repository URL, normalized to
@@ -46,6 +64,15 @@ must already exist and be writable.
 
 ## Upgrade an existing queue
 
+If the database already has projects and execution tracking (`hello.0004`), stop
+the app, Celery workers/beat, and n8n workflows, back up SQLite, then run
+`python manage.py migrate` and restart them. Public UI/API URLs and `nq` commands
+stay the same. Admin URLs move to `/admin/projects/project/` and
+`/admin/work_queue/queueitem/`. Permission names become `projects.*_project` and
+`work_queue.*_queueitem`; existing user/group assignments are migrated. The demo
+Celery task name becomes `work_queue.tasks.nightly_greeting`; discard any pending
+demo messages using the old task name before restarting workers.
+
 If existing items have no project, migration `0003` stops with instructions rather
 than guessing their repositories. Back up SQLite and stop submissions/workflows
 while performing the upgrade:
@@ -58,7 +85,8 @@ python manage.py shell
 In the Django shell, create the projects those items actually belong to:
 
 ```python
-from hello.models import Project, QueueItem
+from projects.models import Project
+from work_queue.models import QueueItem
 
 project = Project.objects.create(
     name="My project",
@@ -161,6 +189,8 @@ only a demo and does not consume queue items.
 
 ```sh
 python manage.py test
+python manage.py test projects work_queue  # Focus on Django apps
+python -m unittest nq.test_cli            # Run CLI tests without Django
 python manage.py makemigrations --check --dry-run
 python manage.py check
 black --check .
@@ -169,7 +199,8 @@ mypy . --config-file mypy.ini
 ```
 
 Use `bash test.sh` for the Docker-based lint and test suite. Migration tests exercise
-both existing-data backfill and enforcement of the required project relationship.
+existing-data backfill, required project relationships, and reversible app moves
+that preserve execution state, permissions, and admin history.
 API and service tests cover authentication, validation, competing claims, completion, and
 recovery; CLI tests cover requests, output, and failure exit codes.
 

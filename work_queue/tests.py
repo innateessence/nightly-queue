@@ -2,11 +2,13 @@ from django.conf import settings
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from hello.models import Project, QueueItem
-from hello.tasks import add, nightly_greeting
+from projects.models import Project
+
+from .models import QueueItem
+from .tasks import add, nightly_greeting
 
 
-class HelloAppTests(TestCase):
+class QueueViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.project = Project.objects.create(
@@ -204,4 +206,4 @@ class CeleryTaskTests(TestCase):
     def test_beat_schedule_contains_nightly_greeting(self):
         self.assertIn("nightly-greeting", settings.CELERY_BEAT_SCHEDULE)
         greeting = settings.CELERY_BEAT_SCHEDULE["nightly-greeting"]
-        self.assertEqual(greeting["task"], "hello.tasks.nightly_greeting")
+        self.assertEqual(greeting["task"], "work_queue.tasks.nightly_greeting")

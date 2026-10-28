@@ -1,6 +1,8 @@
 from django.test import TestCase
 
-from .models import Project, QueueItem
+from projects.models import Project
+
+from .models import QueueItem
 from .services import claim_item, claim_next, enqueue_item, finish_item, requeue_items
 
 
