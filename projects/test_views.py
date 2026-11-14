@@ -1,6 +1,8 @@
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
+from credentials.models import Credential
+from credentials.test_models import TEST_KEY
 from work_queue.services import claim_next, enqueue_item
 
 from .models import Project
@@ -17,6 +19,13 @@ class ProjectViewTests(TestCase):
 
     def create_project(self):
         return Project.objects.create(**self.data)
+
+    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    def create_credential(self, name="GitHub work account"):
+        credential = Credential(name=name, kind=Credential.Kind.TOKEN)
+        credential.set_secret("private-token")
+        credential.save()
+        return credential
 
     def assert_invalid_field(self, field, value):
         self.data[field] = value
@@ -59,6 +68,77 @@ class ProjectViewTests(TestCase):
         del self.data["base_branch"]
         self.client.post(self.url, self.data)
         self.assertEqual(Project.objects.get().base_branch, "")
+
+    def test_create_form_lists_credential_names_without_secrets(self):
+        credential = self.create_credential()
+        response = self.client.get(self.url)
+        self.assertContains(response, 'name="credential"')
+        option = f'<option value="{credential.pk}">{credential.name}</option>'
+        self.assertContains(response, option, html=True)
+        self.assertNotContains(response, "private-token")
+        self.assertNotContains(response, credential.encrypted_payload)
+
+    def test_create_assigns_selected_credential(self):
+        credential = self.create_credential()
+        self.data["credential"] = credential.pk
+        response = self.client.post(self.url, self.data)
+        self.assertRedirects(response, self.url)
+        self.assertEqual(Project.objects.get().credential, credential)
+
+    def test_create_without_credential_is_allowed(self):
+        self.create_credential()
+        self.client.post(self.url, self.data)
+        self.assertIsNone(Project.objects.get().credential)
+
+    def test_create_with_blank_credential_is_allowed(self):
+        self.data["credential"] = ""
+        self.client.post(self.url, self.data)
+        self.assertIsNone(Project.objects.get().credential)
+
+    def test_unknown_credential_is_rejected(self):
+        self.assert_invalid_field("credential", 999)
+
+    def test_invalid_form_preserves_selected_credential(self):
+        credential = self.create_credential()
+        self.data.update(credential=credential.pk, name="")
+        response = self.client.post(self.url, self.data)
+        option = f'<option value="{credential.pk}" selected>{credential.name}</option>'
+        self.assertContains(response, option, html=True)
+        self.assertFalse(Project.objects.exists())
+
+    def test_edit_form_selects_saved_credential(self):
+        project = self.create_project()
+        project.credential = self.create_credential()
+        project.save()
+        response = self.client.get(reverse("edit_project", args=[project.pk]))
+        self.assertEqual(
+            response.context["form"]["credential"].value(), project.credential_id
+        )
+
+    def test_edit_changes_credential(self):
+        project = self.create_project()
+        project.credential = self.create_credential()
+        project.save()
+        credential = self.create_credential("Other account")
+        self.data["credential"] = credential.pk
+        response = self.client.post(
+            reverse("edit_project", args=[project.pk]), self.data
+        )
+        self.assertRedirects(response, self.url)
+        project.refresh_from_db()
+        self.assertEqual(project.credential, credential)
+
+    def test_edit_clears_credential(self):
+        project = self.create_project()
+        project.credential = self.create_credential()
+        project.save()
+        self.data["credential"] = ""
+        response = self.client.post(
+            reverse("edit_project", args=[project.pk]), self.data
+        )
+        self.assertRedirects(response, self.url)
+        project.refresh_from_db()
+        self.assertIsNone(project.credential)
 
     def test_creation_toggle_defaults_to_off(self):
         response = self.client.get(self.url)

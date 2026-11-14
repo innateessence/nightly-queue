@@ -6,11 +6,12 @@ from .models import Project
 class ProjectForm(forms.ModelForm):
     class Meta:
         model = Project
-        fields = ["name", "repository_url", "base_branch", "autonomous"]
+        fields = ["name", "repository_url", "base_branch", "credential", "autonomous"]
         labels = {"repository_url": "GitHub repository URL"}
         help_texts = {
             "repository_url": "Use an HTTPS URL, such as https://github.com/owner/repo.",
             "base_branch": "Leave blank to use the repository's default branch.",
+            "credential": "Choose a saved credential. Manage credentials on the Credentials page.",
             "autonomous": "Find open issues and create a pull request for each.",
         }
         widgets = {
