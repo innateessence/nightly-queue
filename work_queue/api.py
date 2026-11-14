@@ -1,6 +1,7 @@
 import uuid
 
 from django.core.exceptions import ValidationError
+from django.conf import settings
 from django.db import transaction
 from django.http import JsonResponse
 
@@ -9,7 +10,7 @@ from projects.api import project_data
 
 from .forms import QueueItemForm
 from .models import QueueItem
-from .services import claim_next, finish_item
+from .services import append_runner_log, claim_next, finish_item
 
 
 def item_data(item, *, include_claim=False):
@@ -71,6 +72,51 @@ def claim(request):
     if item is None:
         return JsonResponse({"item": None})
     return JsonResponse({"item": item_data(item, include_claim=True)})
+
+
+@api_view("GET")
+def runner_run(request, run_id):
+    items = QueueItem.objects.select_related("project")
+    items = list(items.filter(execution_ref=f"runner:{run_id}")[:2])
+    if len(items) > 1:
+        return JsonResponse({"error": "Execution reference is not unique."}, status=409)
+    if not items:
+        return JsonResponse({"item": None})
+    item = items[0]
+    data = item_data(item, include_claim=item.status == QueueItem.Status.RUNNING)
+    return JsonResponse({"item": data})
+
+
+@api_view("POST")
+def runner_logs(request, pk):
+    data = read_body(request, ["run_id", "claim_token", "sequence", "text"])
+    try:
+        run_id = uuid.UUID(string_field(data, "run_id"))
+        claim_token = uuid.UUID(string_field(data, "claim_token"))
+    except ValueError:
+        raise ValidationError({"run_id": "Send valid run and claim UUIDs."}) from None
+    sequence = data.get("sequence")
+    if type(sequence) is not int or not 1 <= sequence <= 256:
+        raise ValidationError({"sequence": "Send a sequence number from 1 to 256."})
+    text = string_field(data, "text", max_length=4096)
+    if not text:
+        raise ValidationError({"text": "Send log text."})
+    status = append_runner_log(
+        item_id=pk,
+        run_id=run_id,
+        claim_token=claim_token,
+        sequence=sequence,
+        text=text,
+        api_token=settings.NQ_API_TOKEN,
+    )
+    if status == 404:
+        return JsonResponse({"error": "Item not found."}, status=404)
+    if status == 409:
+        return JsonResponse(
+            {"error": "Stale claim, wrong run, or conflicting log sequence."},
+            status=409,
+        )
+    return JsonResponse({"accepted": True})
 
 
 @api_view("POST")

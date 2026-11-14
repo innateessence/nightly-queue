@@ -1,8 +1,9 @@
 # nightly-queue
 
 Queue work for your GitHub projects. Django stores tasks and imports issues.
-A dedicated `coding-runner` Docker Compose service is planned to execute queued
-work with Codex, Claude Code, or OpenCode and deliver pull requests.
+A dedicated, opt-in `coding-runner` Docker Compose service can execute queued
+work with Codex and deliver pull requests. Claude Code and OpenCode are planned.
+See [Codex runner setup and recovery](docs/codex-runner.md) before enabling it.
 See the [coding runner architecture and implementation plan](docs/coding-runner.md).
 
 ## Run locally
@@ -22,8 +23,8 @@ docker compose exec nightly-queue python manage.py createsuperuser
 2. Open [the queue](http://127.0.0.1:7777/) and add work with a title, optional
    instructions, and priority.
 3. Items are ready for a runner to claim through the API, oldest first. Priority
-   does not change their order. Built-in task execution is planned; the current
-   stack stores work and imports issues but does not execute coding tasks.
+   does not change their order. To execute coding tasks, configure and explicitly
+   enable the [Codex runner](docs/codex-runner.md); it is excluded from default startup.
 
 The **Autonomous** toggle on project creation and editing records whether a
 project should automatically find open issues and create a pull request for each.
@@ -68,7 +69,7 @@ are logged by project ID and retried on the next scheduled run; other projects
 continue importing. Clearing the GitHub selection pauses imports. The GitLab API
 credential selector accepts existing GitLab tokens for future integrations;
 repository URLs and issue imports currently support GitHub only. Creating pull
-requests is part of the planned `coding-runner` service.
+requests requires the optional `coding-runner` service.
 
 The queue, project, credential, and settings pages have no login requirement.
 This is a single-user app for a private LAN.
@@ -178,21 +179,31 @@ Use `python -m nq` to run without installing. Submissions are never retried auto
 
 ## Coding runner architecture
 
-The planned `coding-runner` service will own execution schedules, queue claims,
+The optional `coding-runner` service owns execution windows, queue claims,
 isolated repository workspaces, coding agents, validation, commits, pushes, pull
 requests, and completion reporting. Django owns queue state and settings; Celery
 Beat and its worker continue to own scheduled issue discovery. Issue sync and
 coding execution have separate schedules. The Celery greeting task remains a demo.
 
-The runner will use the existing HTTP API at `http://nightly-queue:8000` on the
+The runner uses the HTTP API at `http://nightly-queue:8000` on the
 Compose network, with its own workspace and secret configuration. It will not
 connect directly to PostgreSQL or mount the live application's source directory.
-GitHub push/PR credentials and coding backend credentials will be configured for
+GitHub push/PR credentials and Codex API credentials are configured for
 the runner separately from the issue-import token selected in Settings. The
 existing API does not expose stored project credentials.
 
-The service, execution settings, and recovery behavior are not implemented yet.
-See [the implementation plan](docs/coding-runner.md) for scope and acceptance criteria.
+The first implementation supports Codex, repository policies, execution windows,
+private logs, and conservative interruption recovery. Configuration currently
+lives in environment variables and a repository policy file. Django execution
+settings, run visibility, task budgets, and additional backends remain planned.
+See [setup instructions](docs/codex-runner.md) and [the implementation plan](docs/coding-runner.md).
+
+Each queue item has a **Runner logs** link. Its page shows execution stages and
+command output, refreshes every three seconds while that execution is running,
+and keeps previous attempts available in the execution selector. The runner
+uploads redacted output through an authenticated API; the web app does not mount
+the runner's data volume. Web logs share the queue's private-LAN access model.
+Apply migrations and rebuild the runner to enable uploads for new executions.
 
 ## Issue discovery operations
 
@@ -224,6 +235,8 @@ POST bodies must be JSON with `Content-Type: application/json`.
 | `POST /items/` | `{"project_id": 12, "title": "Add export", "instructions": "CSV", "priority": "normal"}` | HTTP 201, `{"item": {...}}`; instructions and priority are optional |
 | `POST /items/claim/` | `{"execution_ref": "runner:<run-id>"}` or `{}` | `{"item": {...}}` or `{"item": null}` |
 | `POST /items/123/finish/` | `{"claim_token": "<UUID from claim>", "status": "succeeded", "result_url": "https://github.com/owner/repo/pull/1"}` | Updated item |
+| `GET /runner/runs/<run-uuid>/` | — | `{"item": {...}}` or `{"item": null}`; running items include their claim token and checkout settings |
+| `POST /items/123/logs/` | `{"run_id": "<run-uuid>", "claim_token": "<claim-uuid>", "sequence": 1, "text": "output"}` | `{"accepted": true}`; requires the current running claim |
 
 Claims select the oldest eligible item across manual work and imported issues.
 No queue selection is needed. Item responses include `source` (`manual` or
@@ -234,7 +247,7 @@ remain visible but cannot be claimed. Existing `/auto/` bookmarks redirect to th
 main queue. The merge migration preserves item IDs, issue metadata, and execution
 history.
 
-The planned runner will:
+The runner will:
 
 1. Run continuously or during a configured execution window.
 2. Claim an item with a unique runner execution ID. Stop claiming when `item` is `null`.
@@ -247,7 +260,7 @@ The planned runner will:
 5. Validate the changes, commit, push the task branch, and create or reuse a pull request.
 6. Finish with the returned `claim_token` and status `succeeded` plus the actual PR
    URL in `result_url`, or `failed` with an `error_summary`.
-7. Repeat while the execution window and configured task limit allow it.
+7. Repeat while the execution window allows it, or stop after one task with `--once`.
 
 Claims are atomic. Only the current token can finish a running item. Invalid
 input returns 400, wrong tokens 401, missing items 404, wrong methods 405, and
@@ -256,8 +269,9 @@ stale claims or repeated completion 409.
 Interrupted items currently stay running. Stop the old runner execution and agent, then select
 **Requeue failed/interrupted work** in admin. This clears the old token and
 attempt results while preserving checkout settings and the branch. There is no
-automatic recovery. If a claim or finish request times out, inspect the item in
-admin before retrying.
+automatic requeueing. If a claim or finish request times out, inspect the item in
+admin before retrying. The Codex runner can reconcile a pending completion report
+using its persisted run ID; other ambiguous or interrupted executions stop for review.
 
 ## Development
 
@@ -266,6 +280,7 @@ admin before retrying.
 - `work_queue/`: queue models, services, UI, API, and recovery.
 - `nightly_queue/`: Django/Celery configuration and shared API helpers.
 - `nq/`: standalone standard-library CLI.
+- `coding_runner/`: standalone Codex runner, Docker image, and standard-library tests.
 
 Add migrations and tests to the app that owns the model. Implement each new
 feature in its own branch.
@@ -274,6 +289,8 @@ UI previews with sample data: [Queue](docs/screenshots/queue-desktop.png),
 [Settings](docs/screenshots/settings-desktop.png),
 [mobile queue](docs/screenshots/queue-mobile.png), and
 [mobile Settings](docs/screenshots/settings-mobile.png).
+Runner log previews: [desktop](docs/screenshots/runner-logs-desktop.png) and
+[mobile](docs/screenshots/runner-logs-mobile.png).
 
 The app uses Python 3.12. Run checks inside the app container with
 `docker compose exec nightly-queue <command>`. For a native Python setup, install

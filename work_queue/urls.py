@@ -11,8 +11,12 @@ urlpatterns = [
         name="auto_queue",
     ),
     path("items/<int:pk>/remove/", views.remove_item, name="remove_item"),
+    path("items/<int:pk>/logs/", views.item_logs, name="item_logs"),
+    path("items/<int:pk>/logs/data/", views.item_log_data, name="item_log_data"),
     path("issues/sync/", views.sync_issues, name="sync_issues"),
     path("api/v1/items/", api.enqueue, name="api_enqueue"),
     path("api/v1/items/claim/", api.claim, name="api_claim"),
+    path("api/v1/runner/runs/<uuid:run_id>/", api.runner_run, name="api_runner_run"),
     path("api/v1/items/<int:pk>/finish/", api.finish, name="api_finish"),
+    path("api/v1/items/<int:pk>/logs/", api.runner_logs, name="api_runner_logs"),
 ]

@@ -51,6 +51,14 @@
 }
 
 * { box-sizing: border-box; }
+.runner-logs { padding: 28px; min-width: 0; }
+.log-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.log-toolbar h2 { margin: 0; font-size: 19px; }
+.log-toolbar p, .log-toolbar a { color: var(--color-muted); font-size: 13px; }
+.log-run-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 24px 0; }
+.log-run-picker label { font-size: 13px; font-weight: 600; }
+.log-run-picker select { flex: 1; min-width: 0; max-width: 100%; }
+.log-output { margin: 20px 0 0; padding: 20px; min-height: 240px; max-height: 65vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--color-input-bg); color: var(--color-text); border: 1px solid var(--color-border); border-radius: 12px; font: 12px/1.75 ui-monospace, SFMono-Regular, Consolas, monospace; }
 body { margin: 0; }
 a { color: inherit; }
 button, input, textarea, select { font: inherit; }

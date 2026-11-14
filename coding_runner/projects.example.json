@@ -1,0 +1,6 @@
+{
+  "example/repository": {
+    "setup": [],
+    "validation": [["python", "-m", "unittest", "discover"]]
+  }
+}

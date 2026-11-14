@@ -1,8 +1,10 @@
 import uuid
+import re
 from datetime import timedelta
 
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -10,7 +12,7 @@ from credentials.models import APISettings
 from projects.models import Project
 from projects.validators import normalize_repository_url
 
-from .models import QueueItem
+from .models import QueueItem, RunnerLog
 
 
 def claim_auto_sync(saved):
@@ -144,3 +146,30 @@ def requeue_items(items):
         result_url="",
         error_summary="",
     )
+
+
+@transaction.atomic
+def append_runner_log(*, item_id, run_id, claim_token, sequence, text, api_token=""):
+    item = QueueItem.objects.select_for_update().filter(pk=item_id).first()
+    if item is None:
+        return 404
+    same_run = item.execution_ref == f"runner:{run_id}"
+    if (
+        item.status != QueueItem.Status.RUNNING
+        or item.claim_token != claim_token
+        or not same_run
+    ):
+        return 409
+    for secret in (api_token, str(claim_token)):
+        if secret:
+            text = text.replace(secret, "[REDACTED]")
+    text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    text = text[:4096]
+    entry, created = RunnerLog.objects.get_or_create(
+        item=item,
+        run_id=run_id,
+        sequence=sequence,
+        defaults={"text": text},
+    )
+    return 200 if created or entry.text == text else 409

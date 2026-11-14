@@ -7,6 +7,42 @@ x-database-environment: &database-environment
 
 services:
 
+  coding-runner:
+    profiles: ["runner"]
+    build:
+      context: .
+      dockerfile: coding_runner/Dockerfile
+    image: nightly-queue-coding-runner
+    init: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+      # Codex's bubblewrap sandbox requires unprivileged user namespaces.
+      - seccomp:unconfined
+    stop_grace_period: 15s
+    environment:
+      NQ_URL: http://nightly-queue:8000
+      NQ_API_TOKEN: "${NQ_API_TOKEN:-}"
+      GH_TOKEN: "${NQ_RUNNER_GITHUB_TOKEN:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      NQ_RUNNER_PROJECTS: /etc/coding-runner/projects.json
+      NQ_RUNNER_MODEL: "${NQ_RUNNER_MODEL:-}"
+      NQ_RUNNER_TIMEOUT_SECONDS: "${NQ_RUNNER_TIMEOUT_SECONDS:-3600}"
+      NQ_RUNNER_POLL_SECONDS: "${NQ_RUNNER_POLL_SECONDS:-60}"
+      NQ_RUNNER_TIMEZONE: "${NQ_RUNNER_TIMEZONE:-UTC}"
+      NQ_RUNNER_WINDOW_START: "${NQ_RUNNER_WINDOW_START:-}"
+      NQ_RUNNER_WINDOW_END: "${NQ_RUNNER_WINDOW_END:-}"
+    depends_on:
+      - nightly-queue
+    volumes:
+      - runner-data:/data
+      - type: bind
+        source: ${NQ_RUNNER_PROJECTS_FILE:-./.cache/runner-projects.json}
+        target: /etc/coding-runner/projects.json
+        read_only: true
+        bind:
+          create_host_path: false
+
   nightly-queue:
     build:
       context: .
@@ -100,5 +136,6 @@ services:
       - ./:/app
 
 volumes:
+  runner-data:
   postgres-data:
   valkey-data:

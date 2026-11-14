@@ -91,6 +91,18 @@ function run_tests() {
     fail "One or more tests failed. :("
 }
 
+function run_runner_tests() {
+  testing "coding runner image and unit tests" &&
+    docker compose build coding-runner &&
+    docker run --rm --network none --entrypoint python nightly-queue-coding-runner \
+      -m unittest discover -s coding_runner -t . &&
+    docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges:true \
+      --security-opt seccomp=unconfined --workdir /data --entrypoint codex \
+      nightly-queue-coding-runner sandbox -c 'sandbox_mode="workspace-write"' -- python -c 'pass' &&
+    pass "coding runner image and unit tests" ||
+    fail "Coding runner checks failed"
+}
+
 function Main() {
   cd "$(dirname "$0")" || error "Failed to change directory to $(dirname "$0")"
 
@@ -111,6 +123,7 @@ function Main() {
     run_lints
     echo
     run_tests
+    run_runner_tests
   fi
 
 }

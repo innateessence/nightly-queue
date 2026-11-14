@@ -98,6 +98,7 @@
               {% if item.error_summary %}<p class="item-instructions">{{ item.error_summary }}</p>{% endif %}
               <div class="item-footer">
                 <span>Added <time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at|date:"M j, Y · H:i T" }}</time></span>
+                <a href="{% url 'item_logs' item.pk %}">Runner logs</a>
                 {% if item.source == 'manual' and item.status != 'running' %}<form method="post" action="{% url 'remove_item' item.pk %}">
                   {% csrf_token %}
                   <button class="button-remove" type="submit" aria-label="Remove {{ item.title }} from queue">Remove</button>
@@ -123,7 +124,7 @@
         </div>
         <aside class="integration-note">
           <span class="integration-icon" aria-hidden="true">↳</span>
-          <div><strong>Ready for a coding runner.</strong><p>Manual work and open GitHub issues are processed oldest first. Built-in task execution is planned.</p></div>
+          <div><strong>Ready for the coding runner.</strong><p>Manual work and open GitHub issues are processed oldest first. Start a configured coding runner to execute queued tasks.</p></div>
         </aside>
       </section>
     </div>

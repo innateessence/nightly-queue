@@ -68,3 +68,21 @@ class QueueItem(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class RunnerLog(models.Model):
+    item = models.ForeignKey(
+        QueueItem, on_delete=models.CASCADE, related_name="runner_logs"
+    )
+    run_id = models.UUIDField()
+    sequence = models.PositiveSmallIntegerField()
+    text = models.TextField(max_length=4096)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["sequence"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item", "run_id", "sequence"], name="unique_runner_log_sequence"
+            ),
+        ]

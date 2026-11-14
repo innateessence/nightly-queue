@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Runner logs · Nightly{% endblock %}
+{% block queue_current %} aria-current="page"{% endblock %}
+
+{% block heading %}
+  <section class="page-heading" aria-labelledby="page-title">
+    <div>
+      <p class="eyebrow">RUNNER LOGS · ITEM #{{ item.pk }}</p>
+      <h1 id="page-title">{{ item.title }}</h1>
+      <p class="subtitle">{{ item.project.name }} · Item status: <span id="log-item-status">{{ item.get_status_display }}</span></p>
+    </div>
+    <a class="empty-link" href="{% url 'index' %}">Back to queue</a>
+  </section>
+{% endblock %}
+
+{% block content %}
+  <section class="panel runner-logs" aria-labelledby="log-title"
+           data-feed="{% url 'item_log_data' item.pk %}" data-run="{{ run_id|default:'' }}"
+           data-cursor="{{ cursor }}" data-running="{{ running|yesno:'true,false' }}">
+    <div class="log-toolbar">
+      <div><h2 id="log-title">Execution output</h2><p id="log-refresh-status" role="status">{% if running %}Live updates every 3 seconds.{% else %}Saved runner output.{% endif %}</p></div>
+      <a href="{% url 'item_logs' item.pk %}">Latest run</a>
+    </div>
+    {% if runs %}
+      <form method="get" class="log-run-picker">
+        <label for="log-run">Execution</label>
+        <select id="log-run" name="run">
+          {% if unlisted_run %}<option value="{{ run_id }}" selected>Current execution · {{ run_id }}</option>{% endif %}
+          {% for run in runs %}<option value="{{ run.run_id }}"{% if run.run_id == run_id %} selected{% endif %}>{{ run.started_at|date:"M j, Y · H:i:s T" }} · {{ run.run_id }}</option>{% endfor %}
+        </select>
+        <button class="button-filter" type="submit">View run</button>
+      </form>
+    {% endif %}
+    <p class="field-hint">Logs can contain task details and source code. Each run keeps up to 256 log chunks; full command logs remain with the runner.</p>
+    <p id="log-empty" class="field-hint"{% if entries %} hidden{% endif %}>{% if running %}Waiting for runner output…{% else %}No logs have been received for this execution.{% endif %}</p>
+    <pre id="runner-log-output" class="log-output" aria-label="Runner output" tabindex="0">{% for entry in entries %}{{ entry.text }}{% endfor %}</pre>
+  </section>
+  <script src="{% static 'work_queue/logs.js' %}" defer></script>
+{% endblock %}

@@ -2,10 +2,12 @@
 
 ## Status
 
-The next execution component is a dedicated `coding-runner` Docker Compose service
-in this repository. This document defines the planned implementation. The current
-stack stores tasks, imports GitHub issues, and exposes claim/finish APIs; it does
-not execute coding tasks or create pull requests.
+The initial Codex implementation is available as an optional `coding-runner`
+Docker Compose service. It supports repository policies, execution windows,
+isolated workspaces, validation, branch delivery, PR creation, and persistent
+interruption journals. See [setup and recovery](codex-runner.md). Claude Code and
+OpenCode adapters remain planned. A real Codex-to-GitHub acceptance run is still
+required before enabling unattended production execution.
 
 ## Responsibilities
 
@@ -95,8 +97,12 @@ do not silently bypass required approvals to keep an unattended run moving.
 
 ## Interruption and recovery
 
-The current API has no heartbeat, expiring lease, item-detail endpoint, or requeue
-endpoint. Interrupted items stay running until an operator stops the original
+The API now provides `GET /api/v1/runner/runs/<run-uuid>/` to reconcile a run by
+its exact `runner:<run-uuid>` execution reference. It returns the current claim
+token only while the item is running. An unknown or requeued execution returns
+`item: null`; duplicate references return HTTP 409. The API has no heartbeat,
+expiring lease, general item-detail endpoint, or requeue endpoint.
+Interrupted items stay running until an operator stops the original
 runner and agent, then uses **Requeue failed/interrupted work** in admin. Requeueing
 invalidates the old claim token and preserves branch and checkout settings.
 
@@ -107,8 +113,10 @@ because completion reporting failed.
 
 Do not blindly repeat claims or finish calls after ambiguous network timeouts.
 The request may already have succeeded; repeated completion returns HTTP 409.
-Before unattended use, implement an authenticated reconciliation API for a runner
-to recover its own claims and confirm item status. Define and test restart and
+The initial runner uses the reconciliation API to confirm completion or retry
+reporting a persisted outcome for the same live claim. It stops for operator
+review after ambiguous claims, interrupted agent runs, or ambiguous PR creation.
+It never automatically repeats the agent. Extend and test restart and
 cancellation behavior before adding automatic requeueing or lease expiry; prevent
 two surviving agents from operating on the same task.
 
@@ -132,6 +140,12 @@ two surviving agents from operating on the same task.
    with a real branch and PR. Verify a failing task reports failed with useful
    diagnostics. Verify restarts do not duplicate agent runs or PRs.
 
-Built-in execution is ready only after the service and these behaviors are
-implemented and verified. The existing queue API and issue importer remain the
-foundation throughout this work.
+The initial service covers the lifecycle and Codex adapter with environment and
+file configuration. Django execution settings, project overrides in the UI,
+execution settings UI, per-window task budgets, other backends, and broader automatic
+recovery remain follow-up work. The existing queue API and issue importer remain
+the foundation throughout this work.
+
+Per-item web logs now provide execution history and live command output through
+bounded, authenticated uploads. Web settings and a global runner dashboard remain
+follow-up work.

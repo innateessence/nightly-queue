@@ -60,7 +60,7 @@ History uses short, free-form subjects such as `switch to uv` and `wip`; no enfo
 
 ## Security & Configuration
 
-Keep tokens and `.env` untracked. Configure `NQ_API_TOKEN` for API access, `NQ_URL` for the CLI, and `POSTGRES_PASSWORD` for the database. PostgreSQL data lives in the `postgres-data` Docker volume. The planned `coding-runner` Compose service owns task execution schedules, coding agents, Git operations, and PR delivery through the queue API. Configure its GitHub and coding backend credentials separately from issue-import credentials. Celery Beat and its worker own scheduled issue imports; Celery's greeting task is only a demo. Follow `docs/coding-runner.md` for the architecture and implementation plan; the runner is not implemented yet.
+Keep tokens and `.env` untracked. Configure `NQ_API_TOKEN` for API access, `NQ_URL` for the CLI, and `POSTGRES_PASSWORD` for the database. PostgreSQL data lives in the `postgres-data` Docker volume. The optional `coding-runner` Compose service owns execution windows, Codex, Git operations, and PR delivery through the queue API. Keep it independent of Django and `nq`. Configure its GitHub and Codex credentials separately from issue-import credentials. Celery Beat and its worker own scheduled issue imports; Celery's greeting task is only a demo. Follow `docs/codex-runner.md` for setup and recovery and `docs/coding-runner.md` for the architecture. Test the runner with `python -m unittest discover -s coding_runner -t .`; Git integration tests also run in its own image through `test.sh`. Do not start the runner against production work while developing or testing it.
 
 ## Rules
 
