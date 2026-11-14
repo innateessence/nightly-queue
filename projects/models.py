@@ -11,6 +11,9 @@ class Project(models.Model):
         max_length=200, blank=True, validators=[validate_branch]
     )
     autonomous = models.BooleanField(default=False)
+    credential = models.ForeignKey(
+        "credentials.Credential", on_delete=models.PROTECT, null=True, blank=True
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
