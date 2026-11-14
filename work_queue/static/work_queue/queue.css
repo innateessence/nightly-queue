@@ -177,7 +177,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-focus); }
   input, textarea, select, .queue-filters select { font-size: 16px; }
 }
 
-@media (max-width: 420px) {
+@media (max-width: 600px) {
   .site-header { height: auto; min-height: 72px; flex-wrap: wrap; row-gap: 16px; padding-top: 20px; padding-bottom: 16px; }
   .site-nav { order: 3; flex-basis: 100%; margin: 0; justify-content: center; }
   .theme-toggle { margin-left: auto; }

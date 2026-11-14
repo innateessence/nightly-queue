@@ -2,8 +2,10 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
+from django.db.models import Q
 from django.utils import timezone
 
+from projects.models import Project
 from projects.validators import normalize_repository_url
 
 from .models import QueueItem
@@ -22,9 +24,43 @@ def enqueue_item(
     return item
 
 
+def import_issue(*, project, number, title, body, state):
+    repository = normalize_repository_url(project.repository_url)
+    item, created = QueueItem.objects.get_or_create(
+        project=project,
+        issue_repository=repository,
+        issue_number=number,
+        defaults={
+            "source": QueueItem.Source.GITHUB,
+            "title": title[:200],
+            "instructions": body,
+            "issue_state": state,
+        },
+    )
+    if created:
+        return True
+    matching = QueueItem.objects.filter(pk=item.pk)
+    matching.update(issue_state=state)
+    matching.filter(status=QueueItem.Status.QUEUED).update(
+        title=title[:200], instructions=body
+    )
+    return False
+
+
+def claimable_items():
+    manual = Q(source=QueueItem.Source.MANUAL)
+    # Avoid a joined UPDATE so competing claims recheck the item's status.
+    autonomous = Project.objects.filter(autonomous=True).values("pk")
+    imported = Q(
+        source=QueueItem.Source.GITHUB,
+        issue_state=QueueItem.IssueState.OPEN,
+        project_id__in=autonomous,
+    )
+    return QueueItem.objects.filter(manual | imported, status=QueueItem.Status.QUEUED)
+
+
 def claim_next(*, execution_ref=""):
-    queued = QueueItem.objects.filter(status=QueueItem.Status.QUEUED)
-    queued = queued.select_related("project")
+    queued = claimable_items().select_related("project")
     while True:
         item = queued.first()
         if item is None:
@@ -42,8 +78,10 @@ def claim_item(item, *, execution_ref=""):
         base_branch = item.project.base_branch
 
     token = uuid.uuid4()
-    queued = QueueItem.objects.filter(pk=item.pk, status=QueueItem.Status.QUEUED)
+    queued = claimable_items().filter(pk=item.pk)
     queued = queued.filter(project_id=item.project_id)
+    if item.source == QueueItem.Source.GITHUB:
+        repository_url = item.repository_url or item.issue_repository
     updated = queued.update(
         status=QueueItem.Status.RUNNING,
         claim_token=token,

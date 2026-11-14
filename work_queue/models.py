@@ -4,6 +4,14 @@ from projects.models import Project
 
 
 class QueueItem(models.Model):
+    class Source(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        GITHUB = "github", "GitHub issue"
+
+    class IssueState(models.TextChoices):
+        OPEN = "open", "Open"
+        CLOSED = "closed", "Closed"
+
     class Priority(models.TextChoices):
         LOW = "low", "Low"
         NORMAL = "normal", "Normal"
@@ -16,6 +24,14 @@ class QueueItem(models.Model):
         FAILED = "failed", "Failed"
 
     project = models.ForeignKey(Project, on_delete=models.PROTECT, related_name="items")
+    source = models.CharField(
+        max_length=6, choices=Source.choices, default=Source.MANUAL
+    )
+    issue_number = models.PositiveBigIntegerField(null=True, blank=True, editable=False)
+    issue_repository = models.URLField(max_length=500, blank=True, editable=False)
+    issue_state = models.CharField(
+        max_length=6, choices=IssueState.choices, blank=True, editable=False
+    )
     title = models.CharField(max_length=200)
     instructions = models.TextField(blank=True)
     priority = models.CharField(
@@ -38,6 +54,12 @@ class QueueItem(models.Model):
 
     class Meta:
         ordering = ["created_at", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "issue_repository", "issue_number"],
+                name="unique_project_issue",
+            ),
+        ]
         indexes = [
             models.Index(
                 fields=["status", "created_at", "id"], name="queue_claim_order"

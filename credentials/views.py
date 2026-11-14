@@ -4,8 +4,21 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_http_methods
 
-from .forms import CredentialForm
-from .models import Credential
+from .forms import APISettingsForm, CredentialForm
+from .models import APISettings, Credential
+
+
+@never_cache
+@require_http_methods(["GET", "POST"])
+def api_settings(request):
+    saved = APISettings.objects.filter(pk=1).first() or APISettings()
+    data = request.POST if request.method == "POST" else None
+    form = APISettingsForm(data, instance=saved)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Settings saved.")
+        return redirect("api_settings")
+    return render(request, "credentials/settings.html", {"form": form})
 
 
 @never_cache

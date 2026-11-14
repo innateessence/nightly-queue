@@ -6,11 +6,23 @@ from .services import requeue_items
 
 @admin.register(QueueItem)
 class QueueItemAdmin(admin.ModelAdmin):
-    list_display = ("id", "title", "project", "status", "priority", "created_at")
-    list_filter = ("project", "status", "priority")
+    list_display = (
+        "id",
+        "title",
+        "project",
+        "source",
+        "status",
+        "priority",
+        "created_at",
+    )
+    list_filter = ("source", "project", "status", "priority")
     search_fields = ("title", "instructions", "project__name")
     list_select_related = ("project",)
     readonly_fields = (
+        "source",
+        "issue_number",
+        "issue_repository",
+        "issue_state",
         "created_at",
         "status",
         "claim_token",

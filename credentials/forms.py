@@ -2,7 +2,21 @@ from django import forms
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.views.decorators.debug import sensitive_variables
 
-from .models import Credential
+from .models import APISettings, Credential
+
+
+class APISettingsForm(forms.ModelForm):
+    class Meta:
+        model = APISettings
+        fields = ["github_credential", "gitlab_credential"]
+        labels = {
+            "github_credential": "GitHub API credential",
+            "gitlab_credential": "GitLab API credential",
+        }
+        help_texts = {
+            "github_credential": "Used for hourly issue imports from autonomous GitHub projects.",
+            "gitlab_credential": "Saved for GitLab API access. GitLab issue imports are not available yet.",
+        }
 
 
 class SecretTextarea(forms.Textarea):

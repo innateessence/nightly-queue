@@ -27,12 +27,39 @@ It defaults to off, including for existing projects. The project list shows the
 selected mode, and the API exposes it as the boolean `autonomous` on each project,
 including projects nested in queue item responses.
 
-Issue discovery and PR automation are not implemented yet; enabling the toggle
-only saves the preference. That workflow will be built separately, and its runner
-has not been chosen yet.
+Celery Beat imports GitHub issues for every autonomous project once an hour.
+Choose an existing **GitHub Token** on the [Settings page](http://127.0.0.1:7777/settings/)
+to enable imports. The token needs Issues read access to each repository.
+Click **Sync issues now** on the queue page to import issues from every autonomous
+project immediately. This uses the same task as the hourly import, so repeated
+clicks do not duplicate existing items or requeue completed work. In development,
+the sync runs immediately and reports how many items were added. With asynchronous
+workers enabled, it starts the sync in the background; refresh the queue shortly
+afterward to see the imported items.
+All issues, including closed issues, appear alongside manual work in
+[the queue](http://127.0.0.1:7777/); pull requests are excluded.
+Imports fetch every page and refresh titles, bodies, and issue state without
+creating duplicates. Titles longer than 200 characters are shortened for display.
+Manual work and imported issues share one oldest-first queue. Each item shows
+its origin as Manual or GitHub issue.
 
-The queue, project, and credential pages have no login requirement. This is a
-single-user app for a private LAN.
+Only open issues on projects that still have Autonomous enabled can be claimed
+from the queue. Closed issues remain visible, and previously completed work
+is not automatically requeued if an issue reopens. Imports preserve running and
+completed items' instructions and execution history. Issue identity includes the
+project, repository, and issue number, so changing a project's repository does
+not overwrite another repository's issues. Imported issues are managed on GitHub;
+imported items cannot be removed from the queue page.
+
+Missing credentials or an unavailable encryption key skip imports. API failures
+are logged by project ID and retried on the next hourly run; other projects
+continue importing. Clearing the GitHub selection pauses imports. The GitLab API
+credential selector accepts existing GitLab tokens for future integrations;
+repository URLs and issue imports currently support GitHub only. Creating pull
+requests still requires a separately configured runner.
+
+The queue, project, credential, and settings pages have no login requirement.
+This is a single-user app for a private LAN.
 API access requires
 `Authorization: Bearer <NQ_API_TOKEN>`; an unset token disables the API. Use HTTPS
 for API access over a network.
@@ -60,8 +87,8 @@ docker compose run --rm --no-deps nightly-queue python -c 'from cryptography.fer
 ```
 
 Set `NQ_CREDENTIAL_KEY` to that value in your untracked `.env`, then recreate the
-app container with `./run.sh --build`. For a native setup, export the variable
-and run `python manage.py migrate`. There is no default encryption key; credential
+app and Celery worker containers with `./run.sh --build`. For a native setup,
+export the variable and run `python manage.py migrate`. There is no default encryption key; credential
 creation and decryption fail if it is missing or invalid. Existing projects keep
 working without one until you add credentials.
 
@@ -76,7 +103,7 @@ associate it with a repository, select it in the optional **Credential** field
 when creating or editing a project on the Projects page. You can also assign it
 in admin.
 Multiple projects can share a credential. A credential cannot be deleted while
-projects reference it.
+projects or API settings reference it.
 
 Saved secrets are never filled back into forms. Use admin to edit credentials;
 leave the secret blank to keep it or paste a new value to replace it. Replacing an SSH key also
@@ -90,9 +117,10 @@ contain ciphertext, but names, providers, and credential types remain readable. 
 SSH passphrases use [Fernet authenticated encryption](https://cryptography.io/en/stable/fernet/).
 Use HTTPS when submitting credentials over a network.
 
-This adds storage and project associations. Runners do not retrieve or use these
-credentials yet; there is no credential-decryption HTTP endpoint. Trusted server
-code can explicitly call `project.credential.get_secret()` to obtain a dictionary
+The hourly issue importer uses the GitHub token selected in Settings. The project
+credential remains a separate repository association. Runners do not retrieve
+these credentials through the API; there is no credential-decryption HTTP endpoint.
+Trusted server code can explicitly call `project.credential.get_secret()` to obtain a dictionary
 with `secret` and `passphrase`. Do not log or serialize that result into queue
 responses.
 
@@ -138,11 +166,22 @@ Use `python -m nq` to run without installing. Submissions are never retried auto
 
 ## Connect n8n
 
-n8n owns scheduling, cloning, and agent execution. Until a runner integration is
-added, configure its GitHub authentication separately. This repo
-does not install a workflow. The Celery greeting task is only a demo.
+Celery Beat owns hourly issue discovery. n8n owns work execution schedules,
+cloning, and agent execution. Configure its GitHub authentication separately;
+this repo does not install a workflow. The Celery greeting task remains a demo.
 Beat stores its schedule in `/tmp/celerybeat-schedule` inside its container;
-recreating the container resets this demo schedule.
+recreating the container resets the schedule, including the hourly import timer.
+Run one Beat instance. After updating an existing installation, apply migrations
+and restart the worker and Beat so they load the new task and schedule:
+
+```sh
+docker compose exec nightly-queue python manage.py migrate
+docker compose up -d --force-recreate celery-worker celery-beat
+```
+
+The worker receives `NQ_CREDENTIAL_KEY` through Compose and must use the same key
+as the web app. No API token is passed as a Celery task argument or returned in
+its result.
 
 All API paths below start with `/api/v1/` and require the bearer token.
 POST bodies must be JSON with `Content-Type: application/json`.
@@ -153,6 +192,15 @@ POST bodies must be JSON with `Content-Type: application/json`.
 | `POST /items/` | `{"project_id": 12, "title": "Add export", "instructions": "CSV", "priority": "normal"}` | HTTP 201, `{"item": {...}}`; instructions and priority are optional |
 | `POST /items/claim/` | `{"execution_ref": "n8n-execution-id"}` or `{}` | `{"item": {...}}` or `{"item": null}` |
 | `POST /items/123/finish/` | `{"claim_token": "<UUID from claim>", "status": "succeeded", "result_url": "https://github.com/owner/repo/pull/1"}` | Updated item |
+
+Claims select the oldest eligible item across manual work and imported issues.
+No queue selection is needed. Item responses include `source` (`manual` or
+`github`), `issue_number`, `issue_repository`, and `issue_state` (empty/null for
+manual work). Both sources use the same claim tokens, finish endpoint, and
+recovery rules. Closed issues and imports from projects with Autonomous disabled
+remain visible but cannot be claimed. Existing `/auto/` bookmarks redirect to the
+main queue. The merge migration preserves item IDs, issue metadata, and execution
+history.
 
 Build a workflow that:
 
@@ -188,6 +236,11 @@ admin before retrying.
 
 Add migrations and tests to the app that owns the model. Implement each new
 feature in its own branch.
+
+UI previews with sample data: [Queue](docs/screenshots/queue-desktop.png),
+[Settings](docs/screenshots/settings-desktop.png),
+[mobile queue](docs/screenshots/queue-mobile.png), and
+[mobile Settings](docs/screenshots/settings-mobile.png).
 
 The app uses Python 3.12. Run checks inside the app container with
 `docker compose exec nightly-queue <command>`. For a native Python setup, install
