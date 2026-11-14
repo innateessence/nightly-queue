@@ -4,10 +4,17 @@ from threading import Barrier
 from django.db import connection, connections
 from django.test import TransactionTestCase
 
+from credentials.models import APISettings
 from projects.models import Project
 
 from .models import QueueItem
-from .services import claim_item, claim_next, enqueue_item, import_issue
+from .services import (
+    claim_auto_sync,
+    claim_item,
+    claim_next,
+    enqueue_item,
+    import_issue,
+)
 
 
 class ClaimConcurrencyTests(TransactionTestCase):
@@ -60,6 +67,24 @@ class ClaimConcurrencyTests(TransactionTestCase):
 
 
 class ImportConcurrencyTests(TransactionTestCase):
+    def claim_sync(self, barrier):
+        try:
+            saved = APISettings.objects.get()
+            with connection.cursor() as cursor:
+                cursor.execute("SET statement_timeout = '5s'")
+            barrier.wait(timeout=5)
+            return claim_auto_sync(saved)
+        finally:
+            connections.close_all()
+
+    def test_only_one_worker_starts_a_due_scheduled_sync(self):
+        APISettings.objects.create()
+        barrier = Barrier(2)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(self.claim_sync, barrier) for _ in range(2)]
+            claimed = [future.result(timeout=10) for future in futures]
+        self.assertCountEqual(claimed, [True, False])
+
     def import_candidate(self, project_id, barrier):
         try:
             project = Project.objects.get(pk=project_id)

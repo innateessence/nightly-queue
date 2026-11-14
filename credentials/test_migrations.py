@@ -7,7 +7,7 @@ from django.test import TransactionTestCase, override_settings
 
 from projects.models import Project
 
-from .models import Credential
+from .models import APISettings, Credential
 from .test_models import TEST_KEY
 
 
@@ -78,3 +78,30 @@ class CredentialMigrationTests(TransactionTestCase):
         token = old_credential.objects.get(pk=self.token.pk)
         self.assertEqual(token.kind, "github_token")
         self.assertEqual(token.encrypted_payload, self.ciphertext)
+
+
+class SyncIntervalMigrationTests(TransactionTestCase):
+    def restore_schema(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_existing_settings_keep_credential_and_default_to_hourly(self):
+        self.addCleanup(self.restore_schema)
+        target = [("credentials", "0003_apisettings")]
+        executor = MigrationExecutor(connection)
+        executor.migrate(target)
+        apps = executor.loader.project_state(target).apps
+        credential = apps.get_model("credentials", "Credential").objects.create(
+            name="Existing token",
+            provider="github",
+            kind="token",
+            encrypted_payload="unchanged",
+        )
+        apps.get_model("credentials", "APISettings").objects.create(
+            github_credential=credential
+        )
+        self.restore_schema()
+        saved = APISettings.objects.get()
+        self.assertEqual(saved.github_credential_id, credential.pk)
+        self.assertEqual(saved.auto_sync_interval_hours, 1)
+        self.assertIsNone(saved.last_auto_sync_at)

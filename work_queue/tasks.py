@@ -8,14 +8,14 @@ from credentials.models import APISettings, Credential
 from projects.models import Project
 
 from .github import GitHubAPIError, repository_issues
-from .services import import_issue
+from .services import claim_auto_sync, import_issue
 
 logger = logging.getLogger(__name__)
 
 
 @shared_task
 @sensitive_variables()
-def import_auto_issues():
+def import_auto_issues(scheduled=False):
     saved = APISettings.objects.select_related("github_credential").filter(pk=1).first()
     credential = saved.github_credential if saved else None
     if credential is None:
@@ -38,6 +38,8 @@ def import_auto_issues():
             "Auto issue import skipped: unable to decrypt the selected credential."
         )
         return {"projects": 0, "created": 0, "failed": 0, "skipped": True}
+    if scheduled and not claim_auto_sync(saved):
+        return {"projects": 0, "created": 0, "failed": 0, "skipped": True}
     result = {"projects": 0, "created": 0, "failed": 0, "skipped": False}
     for project in Project.objects.filter(autonomous=True).iterator():
         try:
@@ -45,7 +47,7 @@ def import_auto_issues():
                 result["created"] += int(import_issue(project=project, **issue))
         except (GitHubAPIError, ValidationError):
             logger.warning(
-                "Auto issue import failed for project %s; check API access and retry next hour.",
+                "Auto issue import failed for project %s; check API access and retry next scheduled sync.",
                 project.pk,
             )
             result["failed"] += 1

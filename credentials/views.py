@@ -15,7 +15,9 @@ def api_settings(request):
     data = request.POST if request.method == "POST" else None
     form = APISettingsForm(data, instance=saved)
     if request.method == "POST" and form.is_valid():
-        form.save()
+        saved = form.save(commit=False)
+        fields = list(form.fields) if not saved._state.adding else None
+        saved.save(update_fields=fields)
         messages.success(request, "Settings saved.")
         return redirect("api_settings")
     return render(request, "credentials/settings.html", {"form": form})

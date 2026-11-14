@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from io import BytesIO
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
@@ -6,6 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
 from credentials.models import APISettings, Credential
 from credentials.test_models import TEST_KEY
@@ -91,10 +93,11 @@ class GitHubClientTests(SimpleTestCase):
             )
         )
 
-    def test_real_celery_configuration_schedules_import_hourly(self):
-        schedule = app.conf.beat_schedule["hourly-auto-issues"]
+    def test_real_celery_configuration_checks_scheduled_import_every_minute(self):
+        schedule = app.conf.beat_schedule["scheduled-auto-issues"]
         self.assertEqual(schedule["task"], import_auto_issues.name)
-        self.assertEqual(schedule["schedule"], 3600.0)
+        self.assertEqual(schedule["schedule"], 60.0)
+        self.assertEqual(schedule["kwargs"], {"scheduled": True})
         self.assertEqual(app.conf.broker_url, settings.CELERY_BROKER_URL)
 
 
@@ -113,6 +116,85 @@ class AutoImportTests(TestCase):
         credential.set_secret("selected-private-token")
         credential.save()
         APISettings.objects.create(github_credential=credential)
+
+    @patch("work_queue.tasks.repository_issues", return_value=[])
+    def test_first_scheduled_sync_runs_immediately(self, fetch):
+        result = import_auto_issues(scheduled=True)
+        self.assertEqual(result["projects"], 1)
+        self.assertIsNotNone(APISettings.objects.get().last_auto_sync_at)
+        fetch.assert_called_once()
+
+    @patch("work_queue.tasks.repository_issues", return_value=[])
+    def test_scheduled_sync_waits_for_each_supported_interval(self, fetch):
+        now = timezone.now()
+        for hours in [1, 4, 8, 12, 24]:
+            with self.subTest(hours=hours):
+                last_sync = now - timedelta(hours=hours) + timedelta(seconds=1)
+                APISettings.objects.update(
+                    auto_sync_interval_hours=hours, last_auto_sync_at=last_sync
+                )
+                with patch("work_queue.services.timezone.now", return_value=now):
+                    self.assertTrue(import_auto_issues(scheduled=True)["skipped"])
+                fetch.assert_not_called()
+
+    @patch("work_queue.tasks.repository_issues", return_value=[])
+    def test_scheduled_sync_runs_at_each_supported_interval(self, fetch):
+        now = timezone.now()
+        for hours in [1, 4, 8, 12, 24]:
+            with self.subTest(hours=hours):
+                last_sync = now - timedelta(hours=hours)
+                APISettings.objects.update(
+                    auto_sync_interval_hours=hours, last_auto_sync_at=last_sync
+                )
+                with patch("work_queue.services.timezone.now", return_value=now):
+                    self.assertEqual(import_auto_issues(scheduled=True)["projects"], 1)
+                self.assertEqual(APISettings.objects.get().last_auto_sync_at, now)
+                fetch.assert_called_once()
+                fetch.reset_mock()
+
+    @patch("work_queue.tasks.repository_issues", return_value=[])
+    def test_duplicate_scheduled_sync_is_skipped(self, fetch):
+        import_auto_issues(scheduled=True)
+        self.assertTrue(import_auto_issues(scheduled=True)["skipped"])
+        fetch.assert_called_once()
+
+    @patch("work_queue.tasks.repository_issues", return_value=[])
+    def test_shortening_interval_applies_to_next_check(self, fetch):
+        last_sync = timezone.now() - timedelta(hours=5)
+        APISettings.objects.update(
+            auto_sync_interval_hours=24, last_auto_sync_at=last_sync
+        )
+        self.assertTrue(import_auto_issues(scheduled=True)["skipped"])
+        APISettings.objects.update(auto_sync_interval_hours=4)
+        self.assertEqual(import_auto_issues(scheduled=True)["projects"], 1)
+        fetch.assert_called_once()
+
+    @patch("work_queue.tasks.repository_issues", return_value=[])
+    def test_manual_sync_bypasses_interval_without_postponing_scheduled_sync(
+        self, fetch
+    ):
+        last_sync = timezone.now()
+        APISettings.objects.update(
+            auto_sync_interval_hours=24, last_auto_sync_at=last_sync
+        )
+        self.assertEqual(import_auto_issues()["projects"], 1)
+        self.assertEqual(APISettings.objects.get().last_auto_sync_at, last_sync)
+        fetch.assert_called_once()
+
+    @override_settings(NQ_CREDENTIAL_KEY="")
+    @patch("work_queue.tasks.repository_issues")
+    def test_skipped_scheduled_sync_does_not_advance_timer(self, fetch):
+        with self.assertLogs("work_queue.tasks", level="ERROR"):
+            self.assertTrue(import_auto_issues(scheduled=True)["skipped"])
+        self.assertIsNone(APISettings.objects.get().last_auto_sync_at)
+        fetch.assert_not_called()
+
+    @patch("work_queue.tasks.repository_issues", side_effect=GitHubAPIError("failed"))
+    def test_failed_import_waits_until_next_scheduled_sync(self, fetch):
+        with self.assertLogs("work_queue.tasks", level="WARNING"):
+            self.assertEqual(import_auto_issues(scheduled=True)["failed"], 1)
+        self.assertTrue(import_auto_issues(scheduled=True)["skipped"])
+        fetch.assert_called_once()
 
     @patch("work_queue.tasks.repository_issues")
     def test_import_uses_selected_token_and_only_autonomous_projects(self, fetch):

@@ -3,6 +3,7 @@ from unittest.mock import call, patch
 from celery.result import EagerResult
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from kombu.exceptions import OperationalError
 
 from credentials.models import APISettings, Credential
@@ -71,6 +72,15 @@ class ManualSyncTests(TestCase):
         response = self.client.post(self.url, follow=True)
         self.assertEqual(QueueItem.objects.count(), 1)
         self.assertContains(response, "New items: 0.")
+
+    def test_button_syncs_immediately_during_scheduled_interval(self):
+        last_sync = timezone.now()
+        APISettings.objects.update(
+            auto_sync_interval_hours=24, last_auto_sync_at=last_sync
+        )
+        response = self.client.post(self.url, follow=True)
+        self.assertContains(response, "Projects synced: 1. New items: 1.")
+        self.assertEqual(APISettings.objects.get().last_auto_sync_at, last_sync)
 
     def test_missing_selection_explains_how_to_enable_sync(self):
         APISettings.objects.all().delete()

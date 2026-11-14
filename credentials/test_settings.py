@@ -1,6 +1,11 @@
+from unittest.mock import patch
+
+from django.core.exceptions import ValidationError
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
+from .forms import APISettingsForm
 from .models import APISettings, Credential
 from .test_models import TEST_KEY
 
@@ -32,16 +37,71 @@ class APISettingsTests(TestCase):
         data = {
             "github_credential": self.github.pk,
             "gitlab_credential": self.gitlab.pk,
+            "auto_sync_interval_hours": 4,
         }
         response = self.client.post(self.url, data)
         self.assertRedirects(response, self.url)
         saved = APISettings.objects.get(pk=1)
         self.assertEqual(saved.github_credential, self.github)
         self.assertEqual(saved.gitlab_credential, self.gitlab)
+        self.assertEqual(saved.auto_sync_interval_hours, 4)
         response = self.client.get(self.url)
         self.assertEqual(
             response.context["form"]["github_credential"].value(), self.github.pk
         )
+        self.assertEqual(
+            response.context["form"]["auto_sync_interval_hours"].value(), 4
+        )
+
+    def test_sync_interval_choices_and_default(self):
+        response = self.client.get(self.url)
+        field = response.context["form"]["auto_sync_interval_hours"]
+        self.assertEqual(field.value(), 1)
+        self.assertEqual(
+            list(field.field.choices),
+            [(1, "1h"), (4, "4h"), (8, "8h"), (12, "12h"), (24, "24h")],
+        )
+
+    def test_supported_sync_intervals_can_be_saved(self):
+        for hours in [1, 4, 8, 12, 24]:
+            with self.subTest(hours=hours):
+                response = self.client.post(
+                    self.url, {"auto_sync_interval_hours": hours}
+                )
+                self.assertRedirects(response, self.url)
+                self.assertEqual(
+                    APISettings.objects.get().auto_sync_interval_hours, hours
+                )
+
+    def test_invalid_sync_interval_does_not_change_saved_settings(self):
+        APISettings.objects.create(
+            github_credential=self.github, auto_sync_interval_hours=8
+        )
+        response = self.client.post(self.url, {"auto_sync_interval_hours": 2})
+        self.assertIn("auto_sync_interval_hours", response.context["form"].errors)
+        saved = APISettings.objects.get()
+        self.assertEqual(saved.auto_sync_interval_hours, 8)
+        self.assertEqual(saved.github_credential, self.github)
+
+    def test_sync_interval_is_required(self):
+        response = self.client.post(self.url, {})
+        self.assertIn("auto_sync_interval_hours", response.context["form"].errors)
+        self.assertFalse(APISettings.objects.exists())
+
+    def test_model_rejects_unsupported_sync_interval(self):
+        with self.assertRaises(ValidationError):
+            APISettings.objects.create(auto_sync_interval_hours=2)
+
+    def test_saving_settings_preserves_a_concurrent_sync_timestamp(self):
+        saved = APISettings.objects.create()
+        data = {"auto_sync_interval_hours": 4}
+        form = APISettingsForm(data, instance=saved)
+        last_sync = timezone.now()
+        APISettings.objects.update(last_auto_sync_at=last_sync)
+        with patch("credentials.views.APISettingsForm", return_value=form):
+            response = self.client.post(self.url, data)
+        self.assertRedirects(response, self.url)
+        self.assertEqual(APISettings.objects.get().last_auto_sync_at, last_sync)
 
     def test_wrong_provider_is_rejected(self):
         response = self.client.post(self.url, {"github_credential": self.gitlab.pk})
@@ -60,7 +120,7 @@ class APISettingsTests(TestCase):
 
     def test_blank_selection_clears_saved_credential(self):
         APISettings.objects.create(github_credential=self.github)
-        self.client.post(self.url, {})
+        self.client.post(self.url, {"auto_sync_interval_hours": 1})
         self.assertIsNone(APISettings.objects.get().github_credential)
 
     def test_post_requires_csrf(self):
