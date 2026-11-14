@@ -1,14 +1,24 @@
 import uuid
+from datetime import timedelta
 
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 from django.db.models import Q
 from django.utils import timezone
 
+from credentials.models import APISettings
 from projects.models import Project
 from projects.validators import normalize_repository_url
 
 from .models import QueueItem
+
+
+def claim_auto_sync(saved):
+    now = timezone.now()
+    cutoff = now - timedelta(hours=saved.auto_sync_interval_hours)
+    due = Q(last_auto_sync_at__isnull=True) | Q(last_auto_sync_at__lte=cutoff)
+    matching = APISettings.objects.filter(pk=saved.pk).filter(due)
+    return matching.update(last_auto_sync_at=now) == 1
 
 
 def enqueue_item(

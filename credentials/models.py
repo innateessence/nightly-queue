@@ -104,7 +104,18 @@ class Credential(models.Model):
 
 
 class APISettings(models.Model):
+    class SyncInterval(models.IntegerChoices):
+        HOURLY = 1, "1h"
+        FOUR_HOURS = 4, "4h"
+        EIGHT_HOURS = 8, "8h"
+        TWELVE_HOURS = 12, "12h"
+        DAILY = 24, "24h"
+
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    auto_sync_interval_hours = models.PositiveSmallIntegerField(
+        choices=SyncInterval.choices, default=SyncInterval.HOURLY
+    )
+    last_auto_sync_at = models.DateTimeField(null=True, blank=True, editable=False)
     github_credential = models.ForeignKey(
         Credential,
         on_delete=models.PROTECT,

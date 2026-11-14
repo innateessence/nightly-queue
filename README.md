@@ -27,12 +27,20 @@ It defaults to off, including for existing projects. The project list shows the
 selected mode, and the API exposes it as the boolean `autonomous` on each project,
 including projects nested in queue item responses.
 
-Celery Beat imports GitHub issues for every autonomous project once an hour.
+Celery Beat imports GitHub issues for every autonomous project at the interval
+selected in Settings: **1h**, **4h**, **8h**, **12h**, or **24h**. The default is **1h**,
+including for existing installations. The interval applies to all autonomous projects.
 Choose an existing **GitHub Token** on the [Settings page](http://127.0.0.1:7777/settings/)
 to enable imports. The token needs Issues read access to each repository.
+The scheduler checks once a minute. The first sync runs on the next check; later
+syncs are measured from the start of the last scheduled attempt. Interval changes
+apply on the next check without restarting workers or Beat. Shortening the interval
+can make a sync due immediately; lengthening it postpones the next sync. The last
+scheduled attempt is stored in the database so restarts preserve the interval.
 Click **Sync issues now** on the queue page to import issues from every autonomous
-project immediately. This uses the same task as the hourly import, so repeated
-clicks do not duplicate existing items or requeue completed work. In development,
+project immediately, without changing the scheduled timer. This uses the same task
+as scheduled imports, so repeated clicks do not duplicate existing items or requeue
+completed work. In development,
 the sync runs immediately and reports how many items were added. With asynchronous
 workers enabled, it starts the sync in the background; refresh the queue shortly
 afterward to see the imported items.
@@ -52,7 +60,7 @@ not overwrite another repository's issues. Imported issues are managed on GitHub
 imported items cannot be removed from the queue page.
 
 Missing credentials or an unavailable encryption key skip imports. API failures
-are logged by project ID and retried on the next hourly run; other projects
+are logged by project ID and retried on the next scheduled run; other projects
 continue importing. Clearing the GitHub selection pauses imports. The GitLab API
 credential selector accepts existing GitLab tokens for future integrations;
 repository URLs and issue imports currently support GitHub only. Creating pull
@@ -117,7 +125,7 @@ contain ciphertext, but names, providers, and credential types remain readable. 
 SSH passphrases use [Fernet authenticated encryption](https://cryptography.io/en/stable/fernet/).
 Use HTTPS when submitting credentials over a network.
 
-The hourly issue importer uses the GitHub token selected in Settings. The project
+The scheduled issue importer uses the GitHub token selected in Settings. The project
 credential remains a separate repository association. Runners do not retrieve
 these credentials through the API; there is no credential-decryption HTTP endpoint.
 Trusted server code can explicitly call `project.credential.get_secret()` to obtain a dictionary
@@ -166,11 +174,12 @@ Use `python -m nq` to run without installing. Submissions are never retried auto
 
 ## Connect n8n
 
-Celery Beat owns hourly issue discovery. n8n owns work execution schedules,
+Celery Beat owns scheduled issue discovery. n8n owns work execution schedules,
 cloning, and agent execution. Configure its GitHub authentication separately;
 this repo does not install a workflow. The Celery greeting task remains a demo.
 Beat stores its schedule in `/tmp/celerybeat-schedule` inside its container;
-recreating the container resets the schedule, including the hourly import timer.
+recreating the container resets Beat's minute check timer. The import interval and
+last scheduled attempt remain in the database.
 Run one Beat instance. After updating an existing installation, apply migrations
 and restart the worker and Beat so they load the new task and schedule:
 
@@ -180,7 +189,9 @@ docker compose up -d --force-recreate celery-worker celery-beat
 ```
 
 The worker receives `NQ_CREDENTIAL_KEY` through Compose and must use the same key
-as the web app. No API token is passed as a Celery task argument or returned in
+as the web app. Beat runs with `DJANGO_DEBUG=False` so it sends tasks to the worker
+instead of executing them eagerly without the credential key.
+No API token is passed as a Celery task argument or returned in
 its result.
 
 All API paths below start with `/api/v1/` and require the bearer token.

@@ -151,9 +151,10 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TIMEZONE = TIME_ZONE
 
 CELERY_BEAT_SCHEDULE = {
-    "hourly-auto-issues": {
+    "scheduled-auto-issues": {
         "task": "work_queue.tasks.import_auto_issues",
-        "schedule": 3600.0,
+        "schedule": 60.0,
+        "kwargs": {"scheduled": True},
     },
     "nightly-greeting": {
         "task": "work_queue.tasks.nightly_greeting",

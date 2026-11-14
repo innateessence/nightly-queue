@@ -8,14 +8,16 @@ from .models import APISettings, Credential
 class APISettingsForm(forms.ModelForm):
     class Meta:
         model = APISettings
-        fields = ["github_credential", "gitlab_credential"]
+        fields = ["github_credential", "gitlab_credential", "auto_sync_interval_hours"]
         labels = {
             "github_credential": "GitHub API credential",
             "gitlab_credential": "GitLab API credential",
+            "auto_sync_interval_hours": "Auto sync interval",
         }
         help_texts = {
-            "github_credential": "Used for hourly issue imports from autonomous GitHub projects.",
+            "github_credential": "Used for scheduled issue imports from autonomous GitHub projects.",
             "gitlab_credential": "Saved for GitLab API access. GitLab issue imports are not available yet.",
+            "auto_sync_interval_hours": "How often to sync issues for all autonomous projects. Sync issues now runs immediately.",
         }
 
 
