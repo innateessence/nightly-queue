@@ -27,6 +27,15 @@ class ProjectTests(TestCase):
         expected = "https://github.com/example/repo.git"
         self.assertEqual(self.project.repository_url, expected)
 
+    def test_autonomous_defaults_to_false(self):
+        self.assertIs(self.project.autonomous, False)
+
+    def test_autonomous_can_be_enabled(self):
+        self.project.autonomous = True
+        self.project.save()
+        self.project.refresh_from_db()
+        self.assertIs(self.project.autonomous, True)
+
     def test_repository_rejects_non_github_host(self):
         self.assert_invalid_repository("https://gitlab.com/example/repo")
 

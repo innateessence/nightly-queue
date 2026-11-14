@@ -64,9 +64,16 @@ class ProjectAPITests(TestCase):
             "name": "Example",
             "repository_url": "https://github.com/example/repo.git",
             "base_branch": "develop",
+            "autonomous": False,
         }
         response = self.client.get(reverse("api_projects"))
         self.assertEqual(response.json()["projects"], [expected])
+
+    def test_project_listing_includes_enabled_autonomous_mode(self):
+        self.project.autonomous = True
+        self.project.save()
+        response = self.client.get(reverse("api_projects"))
+        self.assertIs(response.json()["projects"][0]["autonomous"], True)
 
     def test_project_listing_requires_get(self):
         response = self.post("api_projects", {})

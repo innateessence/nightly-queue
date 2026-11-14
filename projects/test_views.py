@@ -60,6 +60,63 @@ class ProjectViewTests(TestCase):
         self.client.post(self.url, self.data)
         self.assertEqual(Project.objects.get().base_branch, "")
 
+    def test_creation_toggle_defaults_to_off(self):
+        response = self.client.get(self.url)
+        field = response.context["form"]["autonomous"]
+        self.assertFalse(field.value())
+        self.assertContains(response, 'role="switch"')
+        self.assertContains(response, "Requires an automation workflow.")
+
+    def test_create_without_toggle_saves_manual_project(self):
+        self.client.post(self.url, self.data)
+        self.assertIs(Project.objects.get().autonomous, False)
+
+    def test_create_with_toggle_saves_autonomous_project(self):
+        self.data["autonomous"] = "on"
+        response = self.client.post(self.url, self.data)
+        self.assertRedirects(response, self.url)
+        self.assertIs(Project.objects.get().autonomous, True)
+
+    def test_invalid_form_preserves_autonomous_toggle(self):
+        self.data.update(autonomous="on", name="")
+        response = self.client.post(self.url, self.data)
+        self.assertTrue(response.context["form"]["autonomous"].value())
+        self.assertFalse(Project.objects.exists())
+
+    def test_list_shows_autonomous_mode(self):
+        project = self.create_project()
+        project.autonomous = True
+        project.save()
+        response = self.client.get(self.url)
+        self.assertContains(response, "Mode: Autonomous")
+
+    def test_list_shows_manual_mode(self):
+        self.create_project()
+        response = self.client.get(self.url)
+        self.assertContains(response, "Mode: Manual")
+
+    def test_edit_form_contains_saved_autonomous_toggle(self):
+        project = self.create_project()
+        project.autonomous = True
+        project.save()
+        response = self.client.get(reverse("edit_project", args=[project.pk]))
+        self.assertTrue(response.context["form"]["autonomous"].value())
+
+    def test_edit_enables_autonomous_mode(self):
+        project = self.create_project()
+        self.data["autonomous"] = "on"
+        self.client.post(reverse("edit_project", args=[project.pk]), self.data)
+        project.refresh_from_db()
+        self.assertIs(project.autonomous, True)
+
+    def test_edit_disables_autonomous_mode(self):
+        project = self.create_project()
+        project.autonomous = True
+        project.save()
+        self.client.post(reverse("edit_project", args=[project.pk]), self.data)
+        project.refresh_from_db()
+        self.assertIs(project.autonomous, False)
+
     def test_blank_name_is_rejected(self):
         self.assert_invalid_field("name", "   ")
 
