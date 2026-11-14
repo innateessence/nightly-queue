@@ -27,9 +27,13 @@ def private_key(passphrase=""):
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
 class CredentialTests(TestCase):
     def make_credential(
-        self, kind=Credential.Kind.GITHUB_TOKEN, secret="test-token", passphrase=""
+        self,
+        kind=Credential.Kind.TOKEN,
+        secret="test-token",
+        passphrase="",
+        provider=Credential.Provider.GITHUB,
     ):
-        credential = Credential(name="Repository access", kind=kind)
+        credential = Credential(name="Repository access", provider=provider, kind=kind)
         credential.set_secret(secret, passphrase)
         credential.save()
         return credential
@@ -40,6 +44,35 @@ class CredentialTests(TestCase):
         self.assertEqual(
             credential.get_secret(), {"secret": "test-token", "passphrase": ""}
         )
+
+    def test_gitlab_token_round_trip(self):
+        credential = self.make_credential(provider=Credential.Provider.GITLAB)
+        credential.refresh_from_db()
+        self.assertEqual(credential.provider, "gitlab")
+        self.assertEqual(credential.get_secret()["secret"], "test-token")
+
+    def test_gitlab_ssh_key_round_trip(self):
+        key = private_key()
+        credential = self.make_credential(
+            Credential.Kind.SSH, key, provider=Credential.Provider.GITLAB
+        )
+        credential.refresh_from_db()
+        self.assertEqual(credential.get_secret()["secret"], key)
+
+    def test_other_secret_preserves_whitespace(self):
+        value = "  arbitrary secret\nwith multiple lines  "
+        credential = self.make_credential(Credential.Kind.SECRET, value)
+        credential.refresh_from_db()
+        self.assertEqual(credential.get_secret()["secret"], value)
+        self.assertNotIn(value, credential.encrypted_payload)
+
+    def test_other_secret_rejects_passphrase(self):
+        with self.assertRaises(ValidationError):
+            self.make_credential(Credential.Kind.SECRET, "value", "passphrase")
+
+    def test_unknown_provider_is_rejected(self):
+        with self.assertRaises(ValidationError):
+            self.make_credential(provider="unsupported")
 
     def test_database_stores_ciphertext(self):
         credential = self.make_credential()
@@ -57,7 +90,7 @@ class CredentialTests(TestCase):
 
     def test_ssh_key_round_trip(self):
         key = private_key()
-        credential = self.make_credential(Credential.Kind.SSH_KEY, key)
+        credential = self.make_credential(Credential.Kind.SSH, key)
         credential.refresh_from_db()
         self.assertEqual(credential.get_secret()["secret"], key)
         self.assertNotIn(key, credential.encrypted_payload)
@@ -69,13 +102,13 @@ class CredentialTests(TestCase):
             serialization.PrivateFormat.PKCS8,
             serialization.NoEncryption(),
         ).decode("ascii")
-        credential = self.make_credential(Credential.Kind.SSH_KEY, pem)
+        credential = self.make_credential(Credential.Kind.SSH, pem)
         self.assertEqual(credential.get_secret()["secret"], pem)
 
     def test_ssh_passphrase_is_encrypted(self):
         passphrase = " key password "
         key = private_key(passphrase)
-        credential = self.make_credential(Credential.Kind.SSH_KEY, key, passphrase)
+        credential = self.make_credential(Credential.Kind.SSH, key, passphrase)
         credential.refresh_from_db()
         self.assertEqual(credential.get_secret()["passphrase"], passphrase)
         self.assertNotIn(passphrase, credential.encrypted_payload)
@@ -83,7 +116,7 @@ class CredentialTests(TestCase):
     def test_ssh_key_rejects_wrong_passphrase(self):
         key = private_key("password")
         with self.assertRaises(ValidationError):
-            self.make_credential(Credential.Kind.SSH_KEY, key, "incorrect")
+            self.make_credential(Credential.Kind.SSH, key, "incorrect")
 
     def test_ssh_key_rejects_public_key(self):
         key = ed25519.Ed25519PrivateKey.generate().public_key()
@@ -91,11 +124,11 @@ class CredentialTests(TestCase):
             serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH
         )
         with self.assertRaises(ValidationError):
-            self.make_credential(Credential.Kind.SSH_KEY, public.decode("ascii"))
+            self.make_credential(Credential.Kind.SSH, public.decode("ascii"))
 
     def test_ssh_key_rejects_arbitrary_text(self):
         with self.assertRaises(ValidationError):
-            self.make_credential(Credential.Kind.SSH_KEY, "not a private key")
+            self.make_credential(Credential.Kind.SSH, "not a private key")
 
     def test_empty_secret_is_rejected(self):
         with self.assertRaises(ValidationError):
@@ -110,7 +143,7 @@ class CredentialTests(TestCase):
             self.make_credential(passphrase="password")
 
     def test_missing_secret_cannot_be_saved(self):
-        credential = Credential(name="Empty", kind=Credential.Kind.GITHUB_TOKEN)
+        credential = Credential(name="Empty", kind=Credential.Kind.TOKEN)
         with self.assertRaises(ValidationError):
             credential.save()
 
@@ -137,7 +170,7 @@ class CredentialTests(TestCase):
 
     def test_type_cannot_change(self):
         credential = self.make_credential()
-        credential.kind = Credential.Kind.SSH_KEY
+        credential.kind = Credential.Kind.SSH
         with self.assertRaises(ValidationError):
             credential.save()
 

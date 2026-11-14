@@ -20,7 +20,8 @@ class CredentialAdminTests(TestCase):
         self.url = reverse("admin:credentials_credential_add")
         self.data = {
             "name": "GitHub access",
-            "kind": "github_token",
+            "provider": Credential.Provider.GITHUB,
+            "kind": "token",
             "secret": "private-token",
             "passphrase": "",
         }
@@ -55,12 +56,12 @@ class CredentialAdminTests(TestCase):
     def test_creation_requires_secret(self):
         self.data["secret"] = ""
         response = self.client.post(self.url, self.data)
-        self.assertContains(response, "Enter a token or private key.")
+        self.assertContains(response, "Enter a secret value.")
         self.assertFalse(Credential.objects.exists())
 
     def test_admin_can_create_encrypted_ssh_key(self):
         key = private_key("key-password")
-        self.data.update(kind="ssh_key", secret=key, passphrase="key-password")
+        self.data.update(kind="ssh", secret=key, passphrase="key-password")
         response = self.client.post(self.url, self.data)
         self.assertEqual(response.status_code, 302)
         self.assertEqual(
@@ -112,10 +113,10 @@ class CredentialAdminTests(TestCase):
 
     def test_edit_cannot_change_type(self):
         credential = self.make_credential()
-        self.data.update(kind="ssh_key", secret="")
+        self.data.update(kind="ssh", secret="")
         self.client.post(self.change_url(credential), self.data)
         credential.refresh_from_db()
-        self.assertEqual(credential.kind, "github_token")
+        self.assertEqual(credential.kind, "token")
 
     def test_passphrase_change_requires_private_key(self):
         credential = self.make_credential()

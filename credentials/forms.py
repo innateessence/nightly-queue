@@ -17,7 +17,7 @@ class CredentialForm(forms.ModelForm):
         widget=SecretTextarea(
             attrs={"autocomplete": "off", "spellcheck": "false", "rows": 5}
         ),
-        help_text="Paste a token or complete private key. Leave blank when editing to keep the saved secret.",
+        help_text="Paste the secret value. Leave blank when editing to keep the saved secret.",
     )
     passphrase = forms.CharField(
         required=False,
@@ -28,7 +28,30 @@ class CredentialForm(forms.ModelForm):
 
     class Meta:
         model = Credential
-        fields = ["name", "kind", "secret", "passphrase"]
+        fields = ["name", "provider", "kind", "secret", "passphrase"]
+        labels = {"kind": "Type"}
+        widgets = {
+            "name": forms.TextInput(
+                attrs={"placeholder": "e.g. Work repository access"}
+            )
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, field in self.fields.items():
+            field.widget.attrs["aria-describedby"] = (
+                f"id_{name}_helptext" if field.help_text else ""
+            )
+        if self.instance.pk:
+            return
+        self.fields["kind"].initial = Credential.Kind.TOKEN
+        secret = self.fields["secret"]
+        secret.required = True
+        secret.error_messages["required"] = "Enter a secret value."
+        secret.help_text = "Paste a token, a complete SSH private key (OpenSSH or PEM), or another secret."
+        self.fields["passphrase"].help_text = (
+            "Only needed for a passphrase-protected SSH key."
+        )
 
     @sensitive_variables()
     def clean(self):
@@ -37,7 +60,7 @@ class CredentialForm(forms.ModelForm):
         passphrase = data.get("passphrase", "")
         if not secret:
             if not self.instance.pk:
-                self.add_error("secret", "Enter a token or private key.")
+                self.add_error("secret", "Enter a secret value.")
             elif passphrase:
                 self.add_error(
                     "passphrase",

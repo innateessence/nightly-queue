@@ -9,11 +9,20 @@ from .models import Credential
 @admin.register(Credential)
 class CredentialAdmin(admin.ModelAdmin):
     form = CredentialForm
-    list_display = ("id", "name", "kind", "updated_at")
-    list_filter = ("kind",)
+    list_display = ("id", "name", "provider", "kind", "updated_at")
+    list_filter = ("provider", "kind")
     search_fields = ("name",)
     readonly_fields = ("id", "created_at", "updated_at")
-    fields = ("name", "kind", "secret", "passphrase", "id", "created_at", "updated_at")
+    fields = (
+        "name",
+        "provider",
+        "kind",
+        "secret",
+        "passphrase",
+        "id",
+        "created_at",
+        "updated_at",
+    )
 
     def get_readonly_fields(self, request, obj=None):
         if obj:

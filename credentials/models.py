@@ -14,11 +14,19 @@ from .encryption import credential_cipher
 
 
 class Credential(models.Model):
+    class Provider(models.TextChoices):
+        GITHUB = "github", "GitHub"
+        GITLAB = "gitlab", "GitLab"
+
     class Kind(models.TextChoices):
-        GITHUB_TOKEN = "github_token", "GitHub token"
-        SSH_KEY = "ssh_key", "SSH private key"
+        TOKEN = "token", "Token"
+        SSH = "ssh", "SSH"
+        SECRET = "secret", "Secret (other)"
 
     name = models.CharField(max_length=200, unique=True)
+    provider = models.CharField(
+        max_length=20, choices=Provider.choices, default=Provider.GITHUB
+    )
     kind = models.CharField(max_length=20, choices=Kind.choices)
     encrypted_payload = models.TextField(editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -46,17 +54,17 @@ class Credential(models.Model):
     @sensitive_variables()
     def set_secret(self, secret, passphrase=""):
         if not isinstance(secret, str) or not secret.strip():
-            raise ValidationError({"secret": "Enter a token or private key."})
+            raise ValidationError({"secret": "Enter a secret value."})
         if not isinstance(passphrase, str):
             raise ValidationError({"passphrase": "Enter a text passphrase."})
-        if self.kind == self.Kind.GITHUB_TOKEN:
+        if self.kind != self.Kind.SSH and passphrase:
+            raise ValidationError({"passphrase": "Only SSH keys use a passphrase."})
+        if self.kind == self.Kind.TOKEN:
             if any(character.isspace() for character in secret):
                 raise ValidationError({"secret": "Tokens cannot contain whitespace."})
-            if passphrase:
-                raise ValidationError({"passphrase": "Only SSH keys use a passphrase."})
-        elif self.kind == self.Kind.SSH_KEY:
+        elif self.kind == self.Kind.SSH:
             self.validate_private_key(secret, passphrase)
-        else:
+        elif self.kind != self.Kind.SECRET:
             raise ValidationError({"kind": "Select a supported credential type."})
         payload = json.dumps({"secret": secret, "passphrase": passphrase})
         self.encrypted_payload = (

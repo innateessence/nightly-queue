@@ -57,6 +57,7 @@
     <nav class="site-nav" aria-label="Main navigation">
       <a href="{% url 'index' %}"{% block queue_current %}{% endblock %}>Queue</a>
       <a href="{% url 'project_list' %}"{% block projects_current %}{% endblock %}>Projects</a>
+      <a href="{% url 'credential_list' %}"{% block credentials_current %}{% endblock %}>Credentials</a>
     </nav>
     <button class="theme-toggle" type="button" aria-pressed="false" aria-label="Switch to dark theme"><span aria-hidden="true">🌞</span></button>
   </header>

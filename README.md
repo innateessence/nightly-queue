@@ -31,7 +31,8 @@ Issue discovery and PR automation are not implemented yet; enabling the toggle
 only saves the preference. That workflow will be built separately, and its runner
 has not been chosen yet.
 
-The queue and project pages have no login requirement: keep them local/private.
+The queue, project, and credential pages have no login requirement. This is a
+single-user app for a private LAN.
 API access requires
 `Authorization: Bearer <NQ_API_TOKEN>`; an unset token disables the API. Use HTTPS
 for API access over a network.
@@ -50,7 +51,8 @@ docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES
 
 ## Repository credentials
 
-GitHub tokens and SSH private keys are stored encrypted in PostgreSQL. Generate
+GitHub and GitLab tokens, SSH private keys, and other secrets are stored encrypted
+in PostgreSQL. Generate
 an encryption key once after building the app image:
 
 ```sh
@@ -63,22 +65,26 @@ and run `python manage.py migrate`. There is no default encryption key; credenti
 creation and decryption fail if it is missing or invalid. Existing projects keep
 working without one until you add credentials.
 
-Sign in to [Django admin](http://127.0.0.1:7777/admin/) and add a **Credential**.
-Choose **GitHub token** or **SSH private key** and paste the secret. SSH keys can
+Open the [Credentials page](http://127.0.0.1:7777/credentials/) from the main
+navigation to add credentials and see saved names and types. No account or login
+is required. You can also manage credentials in
+[Django admin](http://127.0.0.1:7777/admin/).
+Enter a **Name**, select a **Provider** (**GitHub** or **GitLab**), then choose a
+**Type** (**Token**, **SSH**, or **Secret (other)**) and paste the secret. SSH keys can
 use OpenSSH or PEM format; supply the passphrase if the key is encrypted. To
 associate it with a repository, edit the project's **Credential** field in admin.
 Multiple projects can share a credential. A credential cannot be deleted while
 projects reference it.
 
-Saved secrets are never filled back into forms. Leave the secret blank when
-editing to keep it; paste a new value to replace it. Replacing an SSH key also
+Saved secrets are never filled back into forms. Use admin to edit credentials;
+leave the secret blank to keep it or paste a new value to replace it. Replacing an SSH key also
 requires its passphrase again, if encrypted. The credential type cannot be changed
-after creation. Credential management requires admin permissions. The public
-project forms cannot assign credentials, and existing APIs do not expose them.
+after creation. Project forms cannot assign credentials, and existing APIs do not
+expose them.
 
 Back up the encryption key separately from PostgreSQL and keep it out of Git.
 Losing or replacing it makes saved credentials unreadable. Database exports
-contain ciphertext, but names and credential types remain readable. Secrets and
+contain ciphertext, but names, providers, and credential types remain readable. Secrets and
 SSH passphrases use [Fernet authenticated encryption](https://cryptography.io/en/stable/fernet/).
 Use HTTPS when submitting credentials over a network.
 
@@ -87,6 +93,12 @@ credentials yet; there is no credential-decryption HTTP endpoint. Trusted server
 code can explicitly call `project.credential.get_secret()` to obtain a dictionary
 with `secret` and `passphrase`. Do not log or serialize that result into queue
 responses.
+
+Existing credentials are migrated to the GitHub provider: GitHub tokens become
+Token credentials and SSH private keys become SSH credentials. The migration
+preserves encrypted values and project associations without needing the
+encryption key. GitLab is available for credential storage; project repository
+URLs still support GitHub only.
 
 ## Move existing SQLite data
 
