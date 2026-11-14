@@ -72,15 +72,17 @@ is required. You can also manage credentials in
 Enter a **Name**, select a **Provider** (**GitHub** or **GitLab**), then choose a
 **Type** (**Token**, **SSH**, or **Secret (other)**) and paste the secret. SSH keys can
 use OpenSSH or PEM format; supply the passphrase if the key is encrypted. To
-associate it with a repository, edit the project's **Credential** field in admin.
+associate it with a repository, select it in the optional **Credential** field
+when creating or editing a project on the Projects page. You can also assign it
+in admin.
 Multiple projects can share a credential. A credential cannot be deleted while
 projects reference it.
 
 Saved secrets are never filled back into forms. Use admin to edit credentials;
 leave the secret blank to keep it or paste a new value to replace it. Replacing an SSH key also
 requires its passphrase again, if encrypted. The credential type cannot be changed
-after creation. Project forms cannot assign credentials, and existing APIs do not
-expose them.
+after creation. Project forms show saved credential names only, and existing APIs
+do not expose credentials.
 
 Back up the encryption key separately from PostgreSQL and keep it out of Git.
 Losing or replacing it makes saved credentials unreadable. Database exports

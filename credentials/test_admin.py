@@ -158,7 +158,7 @@ class CredentialAdminTests(TestCase):
         self.assertNotContains(response, credential.encrypted_payload)
         self.assertNotIn("credential", response.json()["projects"][0])
 
-    def test_public_project_form_cannot_assign_credential(self):
+    def test_public_project_form_can_assign_admin_credential(self):
         credential = self.make_credential()
         data = {
             "name": "Example",
@@ -167,9 +167,9 @@ class CredentialAdminTests(TestCase):
         }
         response = Client().post(reverse("project_list"), data)
         self.assertEqual(response.status_code, 302)
-        self.assertIsNone(Project.objects.get().credential_id)
+        self.assertEqual(Project.objects.get().credential_id, credential.pk)
 
-    def test_public_project_edit_preserves_admin_credential(self):
+    def test_public_project_edit_can_clear_admin_credential(self):
         credential = self.make_credential()
         project = Project.objects.create(
             name="Example",
@@ -183,4 +183,4 @@ class CredentialAdminTests(TestCase):
         }
         Client().post(reverse("edit_project", args=[project.pk]), data)
         project.refresh_from_db()
-        self.assertEqual(project.credential_id, credential.pk)
+        self.assertIsNone(project.credential_id)
