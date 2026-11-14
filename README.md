@@ -3,6 +3,9 @@
 Queue work for your GitHub projects. Django stores tasks and imports issues.
 A dedicated `coding-runner` Docker Compose service is planned to execute queued
 work with Codex, Claude Code, or OpenCode and deliver pull requests.
+It will read the full GitHub issue discussion, research a solution, and save an
+implementation plan before handing the task to the code runner. Runner behavior
+and credential selections will be configured in the web UI.
 See the [coding runner architecture and implementation plan](docs/coding-runner.md).
 
 ## Run locally
@@ -178,20 +181,50 @@ Use `python -m nq` to run without installing. Submissions are never retried auto
 
 ## Coding runner architecture
 
-The planned `coding-runner` service will own execution schedules, queue claims,
-isolated repository workspaces, coding agents, validation, commits, pushes, pull
-requests, and completion reporting. Django owns queue state and settings; Celery
+The planned `coding-runner` service will:
+
+1. Claim a task and read the current GitHub issue and all comments, including every
+   page of the discussion. Manual tasks use their title and instructions.
+2. Research the issue against the repository and relevant sources, then save an
+   implementation plan with acceptance criteria and validation steps.
+3. Hand the plan and source context to the code runner, which creates or reuses the
+   task branch and implements the solution.
+4. Test the branch, inspect the diff, and record validation results.
+5. After required checks pass, push the branch and create or reuse a PR linking the
+   original issue, then report the actual PR URL to the queue.
+
+Django owns queue state, saved plans, run visibility, and all runner settings in
+the web UI. Settings will include processing days/time ranges and timezone, a
+global minimum remaining-usage percentage, execution limits, research/planning
+and implementation backends/models, credential selections, and retention. Project
+pages will provide overrides plus setup and validation commands. Celery
 Beat and its worker continue to own scheduled issue discovery. Issue sync and
 coding execution have separate schedules. The Celery greeting task remains a demo.
+
+Processing will be gated by both the allowed schedule and the global usage
+reserve. For example, **40% minimum remaining usage** allows queue work only while
+more than 40% of each participating backend account's allowance remains. At 40% or
+less, processing stops at a safe checkpoint across all projects, with no new
+claims or model work. The UI will show remaining usage and the blocking reason;
+missing or unsupported usage readings block processing when enforcement is enabled.
+An in-flight call may cross the threshold before it can pause. Processing resumes
+when usage is above the reserve and the schedule permits it. See the
+[schedule and usage policy](docs/coding-runner.md#processing-schedule-and-global-usage-reserve)
+for account/window handling and recovery.
 
 The runner will use the existing HTTP API at `http://nightly-queue:8000` on the
 Compose network, with its own workspace and secret configuration. It will not
 connect directly to PostgreSQL or mount the live application's source directory.
-GitHub push/PR credentials and coding backend credentials will be configured for
-the runner separately from the issue-import token selected in Settings. The
-existing API does not expose stored project credentials.
+Runner credentials will be managed through the web UI and selected separately
+from the issue-import token. The existing API does not expose stored project
+credentials; scoped runner credential delivery must be implemented. Queue
+connectivity/authentication, encryption keys, and container/volume wiring remain
+deployment configuration. Commands arriving as untrusted issue or research data
+require user confirmation before execution, surfaced through the web UI.
 
-The service, execution settings, and recovery behavior are not implemented yet.
+The service, comment retrieval, research/planning handoff, runner settings UI,
+credential delivery, and recovery behavior are not implemented yet. The current
+Settings page only configures API credentials and the issue-import interval.
 See [the implementation plan](docs/coding-runner.md) for scope and acceptance criteria.
 
 ## Issue discovery operations
@@ -236,18 +269,24 @@ history.
 
 The planned runner will:
 
-1. Run continuously or during a configured execution window.
-2. Claim an item with a unique runner execution ID. Stop claiming when `item` is `null`.
-3. Check out the returned **top-level** `repository_url` and `base_branch`, then
-   create or reuse `branch_name` (`nq/<item-id>`). A blank base branch means the
-   remote default. These checkout settings stay fixed across retries; the nested
-   project reflects current settings.
-4. Run the selected coding agent with the title and instructions. Pass inputs as data, without
-   interpolating them into shell commands.
-5. Validate the changes, commit, push the task branch, and create or reuse a pull request.
+1. Run only when enabled, within the configured processing schedule, and above the
+   global remaining-usage reserve when that control is enabled.
+2. Claim an item with a unique runner execution ID. Wait for the polling interval
+   when `item` is `null`.
+3. Prepare the workspace using the returned **top-level** `repository_url` and
+   `base_branch`, and retain `branch_name` (`nq/<item-id>`) for implementation.
+   A blank base branch means the remote default. These checkout settings stay
+   fixed across retries; the nested project reflects current settings.
+4. Fetch the full issue discussion for GitHub tasks, research the problem, and save
+   an implementation plan. Pass inputs as data, without interpolating them into
+   shell commands. Claim responses do not contain issue comments or a plan.
+5. Hand the plan to the code runner to create or reuse the task branch and implement
+   the solution. Validate the branch; after required checks pass, commit, push, and
+   create or reuse a pull request linking the original issue when applicable.
 6. Finish with the returned `claim_token` and status `succeeded` plus the actual PR
    URL in `result_url`, or `failed` with an `error_summary`.
-7. Repeat while the execution window and configured task limit allow it.
+7. Repeat while the schedule, global usage reserve, and configured task limit allow
+   it. Recheck gates before new stages or model work and preserve paused progress.
 
 Claims are atomic. Only the current token can finish a running item. Invalid
 input returns 400, wrong tokens 401, missing items 404, wrong methods 405, and
