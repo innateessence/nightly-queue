@@ -10,6 +10,7 @@ class Project(models.Model):
     base_branch = models.CharField(
         max_length=200, blank=True, validators=[validate_branch]
     )
+    autonomous = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

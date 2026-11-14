@@ -38,6 +38,7 @@
             <h3>{{ project.name }}</h3>
             <p class="item-project"><a href="{{ project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ project.repository_url }}</a></p>
             <p class="item-project">Base branch: {{ project.base_branch|default:"Repository default" }}</p>
+            <p class="item-project">Mode: {{ project.autonomous|yesno:"Autonomous,Manual" }}</p>
             <div class="item-footer"><a class="empty-link" href="{% url 'index' %}?project={{ project.pk }}">View queue <span aria-hidden="true">↗</span></a></div>
           </article>
         {% empty %}

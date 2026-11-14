@@ -21,6 +21,16 @@ docker compose exec nightly-queue python manage.py createsuperuser
    instructions, and priority.
 3. Use n8n to process items oldest first. Priority does not change their order.
 
+The **Autonomous** toggle on project creation and editing records whether a
+project should automatically find open issues and create a pull request for each.
+It defaults to off, including for existing projects. The project list shows the
+selected mode, and the API exposes it as the boolean `autonomous` on each project,
+including projects nested in queue item responses.
+
+Issue discovery and PR automation are not implemented yet; enabling the toggle
+only saves the preference. That workflow will be built separately, and its runner
+has not been chosen yet.
+
 The queue and project pages have no login requirement: keep them local/private.
 API access requires
 `Authorization: Bearer <NQ_API_TOKEN>`; an unset token disables the API. Use HTTPS

@@ -11,6 +11,7 @@ def project_data(project):
         "name": project.name,
         "repository_url": project.repository_url,
         "base_branch": project.base_branch,
+        "autonomous": project.autonomous,
     }
 
 

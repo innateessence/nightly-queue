@@ -164,6 +164,13 @@ class APITests(TestCase):
         response = self.post("api_claim", {})
         self.assertEqual(response.json()["item"]["id"], first.pk)
 
+    def test_claim_includes_current_project_autonomous_mode(self):
+        enqueue_item(project=self.project, title="Work")
+        self.project.autonomous = True
+        self.project.save()
+        response = self.post("api_claim", {})
+        self.assertIs(response.json()["item"]["project"]["autonomous"], True)
+
     def test_claim_skips_running_items(self):
         first = enqueue_item(project=self.project, title="First")
         second = enqueue_item(project=self.project, title="Second")
