@@ -1,7 +1,9 @@
 # nightly-queue
 
-Queue work for your GitHub projects. Django stores it; n8n claims items and runs
-an agent on a nightly schedule.
+Queue work for your GitHub projects. Django stores tasks and imports issues.
+A dedicated `coding-runner` Docker Compose service is planned to execute queued
+work with Codex, Claude Code, or OpenCode and deliver pull requests.
+See the [coding runner architecture and implementation plan](docs/coding-runner.md).
 
 ## Run locally
 
@@ -19,7 +21,9 @@ docker compose exec nightly-queue python manage.py createsuperuser
    blank to use the repository default.
 2. Open [the queue](http://127.0.0.1:7777/) and add work with a title, optional
    instructions, and priority.
-3. Use n8n to process items oldest first. Priority does not change their order.
+3. Items are ready for a runner to claim through the API, oldest first. Priority
+   does not change their order. Built-in task execution is planned; the current
+   stack stores work and imports issues but does not execute coding tasks.
 
 The **Autonomous** toggle on project creation and editing records whether a
 project should automatically find open issues and create a pull request for each.
@@ -64,7 +68,7 @@ are logged by project ID and retried on the next scheduled run; other projects
 continue importing. Clearing the GitHub selection pauses imports. The GitLab API
 credential selector accepts existing GitLab tokens for future integrations;
 repository URLs and issue imports currently support GitHub only. Creating pull
-requests still requires a separately configured runner.
+requests is part of the planned `coding-runner` service.
 
 The queue, project, credential, and settings pages have no login requirement.
 This is a single-user app for a private LAN.
@@ -140,7 +144,7 @@ URLs still support GitHub only.
 
 ## Move existing SQLite data
 
-Stop n8n executions and app writes first. Keep a backup of `db.sqlite3`.
+Stop any task runners and app writes first. Keep a backup of `db.sqlite3`.
 After setting up `.env`, export the current schema's data and import into an empty PostgreSQL database:
 
 ```sh
@@ -153,7 +157,7 @@ docker compose run --rm --no-deps -T nightly-queue python manage.py dumpdata \
 docker compose exec nightly-queue python manage.py loaddata .cache/sqlite-export.json
 ```
 
-The export opens SQLite read-only. Verify projects and queue items before resuming n8n.
+The export opens SQLite read-only. Verify projects and queue items before resuming task runners.
 
 ## Use the CLI
 
@@ -172,11 +176,26 @@ Use an existing project ID from `nq projects`. Successful submissions print the
 item ID; errors exit nonzero. `NQ_URL` defaults to `http://127.0.0.1:8000`.
 Use `python -m nq` to run without installing. Submissions are never retried automatically.
 
-## Connect n8n
+## Coding runner architecture
 
-Celery Beat owns scheduled issue discovery. n8n owns work execution schedules,
-cloning, and agent execution. Configure its GitHub authentication separately;
-this repo does not install a workflow. The Celery greeting task remains a demo.
+The planned `coding-runner` service will own execution schedules, queue claims,
+isolated repository workspaces, coding agents, validation, commits, pushes, pull
+requests, and completion reporting. Django owns queue state and settings; Celery
+Beat and its worker continue to own scheduled issue discovery. Issue sync and
+coding execution have separate schedules. The Celery greeting task remains a demo.
+
+The runner will use the existing HTTP API at `http://nightly-queue:8000` on the
+Compose network, with its own workspace and secret configuration. It will not
+connect directly to PostgreSQL or mount the live application's source directory.
+GitHub push/PR credentials and coding backend credentials will be configured for
+the runner separately from the issue-import token selected in Settings. The
+existing API does not expose stored project credentials.
+
+The service, execution settings, and recovery behavior are not implemented yet.
+See [the implementation plan](docs/coding-runner.md) for scope and acceptance criteria.
+
+## Issue discovery operations
+
 Beat stores its schedule in `/tmp/celerybeat-schedule` inside its container;
 recreating the container resets Beat's minute check timer. The import interval and
 last scheduled attempt remain in the database.
@@ -194,6 +213,8 @@ instead of executing them eagerly without the credential key.
 No API token is passed as a Celery task argument or returned in
 its result.
 
+## Runner API
+
 All API paths below start with `/api/v1/` and require the bearer token.
 POST bodies must be JSON with `Content-Type: application/json`.
 
@@ -201,7 +222,7 @@ POST bodies must be JSON with `Content-Type: application/json`.
 | --- | --- | --- |
 | `GET /projects/` | — | `{"projects": [...]}` |
 | `POST /items/` | `{"project_id": 12, "title": "Add export", "instructions": "CSV", "priority": "normal"}` | HTTP 201, `{"item": {...}}`; instructions and priority are optional |
-| `POST /items/claim/` | `{"execution_ref": "n8n-execution-id"}` or `{}` | `{"item": {...}}` or `{"item": null}` |
+| `POST /items/claim/` | `{"execution_ref": "runner:<run-id>"}` or `{}` | `{"item": {...}}` or `{"item": null}` |
 | `POST /items/123/finish/` | `{"claim_token": "<UUID from claim>", "status": "succeeded", "result_url": "https://github.com/owner/repo/pull/1"}` | Updated item |
 
 Claims select the oldest eligible item across manual work and imported issues.
@@ -213,25 +234,26 @@ remain visible but cannot be claimed. Existing `/auto/` bookmarks redirect to th
 main queue. The merge migration preserves item IDs, issue metadata, and execution
 history.
 
-Build a workflow that:
+The planned runner will:
 
-1. Runs on your nightly schedule.
-2. Claims an item with the n8n execution ID. Stops when `item` is `null`.
-3. Checks out the returned **top-level** `repository_url` and `base_branch`, then
-   creates or reuses `branch_name` (`nq/<item-id>`). A blank base branch means the
+1. Run continuously or during a configured execution window.
+2. Claim an item with a unique runner execution ID. Stop claiming when `item` is `null`.
+3. Check out the returned **top-level** `repository_url` and `base_branch`, then
+   create or reuse `branch_name` (`nq/<item-id>`). A blank base branch means the
    remote default. These checkout settings stay fixed across retries; the nested
    project reflects current settings.
-4. Runs the agent with the title and instructions. Pass inputs as data, without
+4. Run the selected coding agent with the title and instructions. Pass inputs as data, without
    interpolating them into shell commands.
-5. Finishes with the returned `claim_token` and status `succeeded` or `failed`.
-   Optionally include an HTTP(S) `result_url` or an `error_summary`.
-6. Repeats while the execution window remains open.
+5. Validate the changes, commit, push the task branch, and create or reuse a pull request.
+6. Finish with the returned `claim_token` and status `succeeded` plus the actual PR
+   URL in `result_url`, or `failed` with an `error_summary`.
+7. Repeat while the execution window and configured task limit allow it.
 
 Claims are atomic. Only the current token can finish a running item. Invalid
 input returns 400, wrong tokens 401, missing items 404, wrong methods 405, and
 stale claims or repeated completion 409.
 
-Interrupted items stay running. Stop the old n8n execution and agent, then select
+Interrupted items currently stay running. Stop the old runner execution and agent, then select
 **Requeue failed/interrupted work** in admin. This clears the old token and
 attempt results while preserving checkout settings and the branch. There is no
 automatic recovery. If a claim or finish request times out, inspect the item in
