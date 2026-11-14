@@ -101,7 +101,7 @@ class QueueServiceTests(TestCase):
         self.assertEqual(claim_next().base_branch, "")
 
     def test_requeue_clears_attempt_state(self):
-        first = claim_next(execution_ref="n8n:123")
+        first = claim_next(execution_ref="runner:123")
         finish_item(
             item_id=first.pk,
             claim_token=first.claim_token,

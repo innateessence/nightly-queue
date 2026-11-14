@@ -55,7 +55,7 @@ class QueueItemAdmin(admin.ModelAdmin):
 
     @admin.action(
         permissions=["change"],
-        description="Requeue failed/interrupted work (stop its n8n run first)",
+        description="Requeue failed/interrupted work (stop its runner first)",
     )
     def requeue_stopped_work(self, request, queryset):
         count = requeue_items(queryset)

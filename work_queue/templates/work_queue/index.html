@@ -46,14 +46,14 @@
           <div class="field">
             <label for="{{ form.instructions.id_for_label }}">Instructions <span class="optional">optional</span></label>
             {{ form.instructions }}
-            <p class="field-hint">Give your future workflow enough detail to get started.</p>
+            <p class="field-hint">Give the coding agent enough detail to get started.</p>
           </div>
           <div class="field">
             <label for="{{ form.priority.id_for_label }}">Priority</label>
             {{ form.priority }}
           </div>
           <button class="button-primary" type="submit"><span aria-hidden="true">＋</span> Add to queue</button>
-          <p class="form-footnote">Saved for your nightly n8n workflow.</p>
+          <p class="form-footnote">Saved for your coding runner.</p>
           <p class="field-hint">GitHub issues from autonomous projects join this queue at the interval set in <a href="{% url 'api_settings' %}">Settings</a>. Use “Sync issues now” to import them immediately.</p>
         </form>
       </section>
@@ -123,7 +123,7 @@
         </div>
         <aside class="integration-note">
           <span class="integration-icon" aria-hidden="true">↳</span>
-          <div><strong>Ready for your nightly workflow.</strong><p>n8n can claim queued work through the API. Manual work and open GitHub issues are processed oldest first. Configure execution and the agent separately.</p></div>
+          <div><strong>Ready for a coding runner.</strong><p>Manual work and open GitHub issues are processed oldest first. Built-in task execution is planned.</p></div>
         </aside>
       </section>
     </div>

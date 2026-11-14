@@ -147,14 +147,14 @@ class APITests(TestCase):
 
     def test_claim_returns_execution_settings(self):
         item = enqueue_item(project=self.project, title="Work")
-        response = self.post("api_claim", {"execution_ref": "n8n:123"})
+        response = self.post("api_claim", {"execution_ref": "runner:123"})
         claimed = response.json()["item"]
         self.assertEqual(claimed["id"], item.pk)
         self.assertEqual(claimed["status"], "running")
         self.assertEqual(claimed["repository_url"], self.project.repository_url)
         self.assertEqual(claimed["base_branch"], "develop")
         self.assertEqual(claimed["branch_name"], f"nq/{item.pk}")
-        self.assertEqual(claimed["execution_ref"], "n8n:123")
+        self.assertEqual(claimed["execution_ref"], "runner:123")
         self.assertIsNotNone(claimed["started_at"])
         self.assertTrue(uuid.UUID(claimed["claim_token"]))
 
