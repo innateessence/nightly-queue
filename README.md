@@ -48,6 +48,46 @@ Back up PostgreSQL with:
 docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > backup.sql
 ```
 
+## Repository credentials
+
+GitHub tokens and SSH private keys are stored encrypted in PostgreSQL. Generate
+an encryption key once after building the app image:
+
+```sh
+docker compose run --rm --no-deps nightly-queue python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+```
+
+Set `NQ_CREDENTIAL_KEY` to that value in your untracked `.env`, then recreate the
+app container with `./run.sh --build`. For a native setup, export the variable
+and run `python manage.py migrate`. There is no default encryption key; credential
+creation and decryption fail if it is missing or invalid. Existing projects keep
+working without one until you add credentials.
+
+Sign in to [Django admin](http://127.0.0.1:7777/admin/) and add a **Credential**.
+Choose **GitHub token** or **SSH private key** and paste the secret. SSH keys can
+use OpenSSH or PEM format; supply the passphrase if the key is encrypted. To
+associate it with a repository, edit the project's **Credential** field in admin.
+Multiple projects can share a credential. A credential cannot be deleted while
+projects reference it.
+
+Saved secrets are never filled back into forms. Leave the secret blank when
+editing to keep it; paste a new value to replace it. Replacing an SSH key also
+requires its passphrase again, if encrypted. The credential type cannot be changed
+after creation. Credential management requires admin permissions. The public
+project forms cannot assign credentials, and existing APIs do not expose them.
+
+Back up the encryption key separately from PostgreSQL and keep it out of Git.
+Losing or replacing it makes saved credentials unreadable. Database exports
+contain ciphertext, but names and credential types remain readable. Secrets and
+SSH passphrases use [Fernet authenticated encryption](https://cryptography.io/en/stable/fernet/).
+Use HTTPS when submitting credentials over a network.
+
+This adds storage and project associations. Runners do not retrieve or use these
+credentials yet; there is no credential-decryption HTTP endpoint. Trusted server
+code can explicitly call `project.credential.get_secret()` to obtain a dictionary
+with `secret` and `passphrase`. Do not log or serialize that result into queue
+responses.
+
 ## Move existing SQLite data
 
 Stop n8n executions and app writes first. Keep a backup of `db.sqlite3`.
@@ -84,7 +124,8 @@ Use `python -m nq` to run without installing. Submissions are never retried auto
 
 ## Connect n8n
 
-n8n owns scheduling, GitHub credentials, cloning, and agent execution. This repo
+n8n owns scheduling, cloning, and agent execution. Until a runner integration is
+added, configure its GitHub authentication separately. This repo
 does not install a workflow. The Celery greeting task is only a demo.
 Beat stores its schedule in `/tmp/celerybeat-schedule` inside its container;
 recreating the container resets this demo schedule.
@@ -126,6 +167,7 @@ admin before retrying.
 ## Development
 
 - `projects/`: project models, validation, admin, and API.
+- `credentials/`: encrypted repository credentials and admin forms.
 - `work_queue/`: queue models, services, UI, API, and recovery.
 - `nightly_queue/`: Django/Celery configuration and shared API helpers.
 - `nq/`: standalone standard-library CLI.

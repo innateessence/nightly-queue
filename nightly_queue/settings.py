@@ -31,6 +31,7 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() == "true"
 
 # Machine API authentication; an unset token disables the API.
 NQ_API_TOKEN = os.environ.get("NQ_API_TOKEN", "")
+NQ_CREDENTIAL_KEY = os.environ.get("NQ_CREDENTIAL_KEY", "")
 
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",")
 
@@ -44,6 +45,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "credentials",
     "projects",
     "work_queue",
 ]
