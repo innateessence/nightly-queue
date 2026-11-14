@@ -1,13 +1,17 @@
+from celery.result import EagerResult
 from django.contrib import messages
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from django.views.generic import ListView
+from kombu.exceptions import OperationalError
 
 from projects.models import Project
 
 from .forms import QueueItemForm
 from .models import QueueItem
+from .services import claimable_items
+from .tasks import import_auto_issues
 
 
 class Index(ListView):
@@ -16,7 +20,7 @@ class Index(ListView):
 
     def render_queue(self, request, form):
         items = QueueItem.objects.select_related("project")
-        queue_count = items.filter(status=QueueItem.Status.QUEUED).count()
+        queue_count = claimable_items().count()
         query = request.GET.get("q", "").strip()
         priority = request.GET.get("priority", "")
         project = request.GET.get("project", "")
@@ -58,8 +62,50 @@ class Index(ListView):
 
 
 @require_POST
+def sync_issues(request):
+    try:
+        result = import_auto_issues.delay()
+    except OperationalError:
+        messages.error(
+            request,
+            "Unable to start issue sync. Please try again shortly.",
+        )
+        return redirect("index")
+    if not isinstance(result, EagerResult):
+        messages.success(
+            request,
+            "Issue sync started for all autonomous projects. Refresh the queue shortly to see new items.",
+        )
+        return redirect("index")
+    if not result.successful():
+        messages.error(
+            request, "Issue sync failed. Please try again or check the server logs."
+        )
+        return redirect("index")
+    summary = result.result
+    if summary["skipped"]:
+        messages.error(
+            request,
+            "Issue sync skipped. Check the GitHub API credential in Settings and try again.",
+        )
+        return redirect("index")
+    text = f"Issue sync finished. Projects synced: {summary['projects']}. New items: {summary['created']}."
+    if summary["failed"]:
+        messages.warning(
+            request,
+            f"{text} Projects that could not be synced: {summary['failed']}. Check GitHub access and try again.",
+        )
+    else:
+        messages.success(request, text)
+    return redirect("index")
+
+
+@require_POST
 def remove_item(request, pk):
-    get_object_or_404(QueueItem, pk=pk)
+    item = get_object_or_404(QueueItem, pk=pk)
+    if item.source == QueueItem.Source.GITHUB:
+        messages.error(request, "Imported issues are managed on GitHub.")
+        return redirect("index")
     removable = QueueItem.objects.filter(pk=pk).exclude(status=QueueItem.Status.RUNNING)
     removed, _ = removable.delete()
     if not removed:

@@ -8,7 +8,7 @@
       <div>
         <p class="eyebrow">LESS BUSYWORK. MORE TOMORROW.</p>
         <h1 id="page-title">Leave it for the night.</h1>
-        <p class="subtitle">Capture the work now. Make room for what’s next.</p>
+        <p class="subtitle">Manual work and GitHub issues, together in one queue.</p>
       </div>
       <div class="queue-total"><span class="status-dot" aria-hidden="true"></span> {{ queue_count }} item{{ queue_count|pluralize }} queued</div>
     </section>
@@ -54,13 +54,17 @@
           </div>
           <button class="button-primary" type="submit"><span aria-hidden="true">＋</span> Add to queue</button>
           <p class="form-footnote">Saved for your nightly n8n workflow.</p>
+          <p class="field-hint">GitHub issues from autonomous projects join this queue hourly. Use “Sync issues now” to import them immediately. Choose a token in <a href="{% url 'api_settings' %}">Settings</a>.</p>
         </form>
       </section>
 
       <section class="queue-section" aria-labelledby="queue-title">
         <div class="queue-heading">
           <div><h2 id="queue-title">Your queue <span class="count-badge">{{ queue_count }}</span></h2><p>A clear head starts with a clear list.</p></div>
-          {% if items %}<span class="order-label">Oldest first</span>{% endif %}
+          <form method="post" action="{% url 'sync_issues' %}">
+            {% csrf_token %}
+            <button class="button-filter" type="submit">Sync issues now</button>
+          </form>
         </div>
         <form method="get" class="queue-filters" role="search" aria-label="Search work items">
           <label class="sr-only" for="queue-search">Search title and instructions</label>
@@ -83,16 +87,18 @@
             <article class="panel queue-item">
               <div class="item-meta">
                 <span class="queued-label"><span class="status-dot" aria-hidden="true"></span> {{ item.get_status_display }}</span>
+                <span class="order-label">{{ item.get_source_display }}</span>
                 <span class="priority priority-{{ item.priority }}">{{ item.get_priority_display }} priority</span>
               </div>
               <h3>{{ item.title }}</h3>
+              {% if item.issue_number %}<p class="item-project"><a href="{{ item.issue_repository|slice:':-4' }}/issues/{{ item.issue_number }}" target="_blank" rel="noopener noreferrer">Issue #{{ item.issue_number }}</a> · {{ item.get_issue_state_display }}</p>{% endif %}
               <p class="item-project"><a href="{{ item.project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ item.project.name }}</a> · #{{ item.project_id }}{% if item.branch_name %} · {{ item.branch_name }}{% endif %}</p>
               {% if item.instructions %}<p class="item-instructions">{{ item.instructions }}</p>{% endif %}
               {% if item.result_url %}<p class="item-project"><a href="{{ item.result_url }}" target="_blank" rel="noopener noreferrer">View result</a></p>{% endif %}
               {% if item.error_summary %}<p class="item-instructions">{{ item.error_summary }}</p>{% endif %}
               <div class="item-footer">
                 <span>Added <time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at|date:"M j, Y · H:i T" }}</time></span>
-                {% if item.status != 'running' %}<form method="post" action="{% url 'remove_item' item.pk %}">
+                {% if item.source == 'manual' and item.status != 'running' %}<form method="post" action="{% url 'remove_item' item.pk %}">
                   {% csrf_token %}
                   <button class="button-remove" type="submit" aria-label="Remove {{ item.title }} from queue">Remove</button>
                 </form>{% endif %}
@@ -117,7 +123,7 @@
         </div>
         <aside class="integration-note">
           <span class="integration-icon" aria-hidden="true">↳</span>
-          <div><strong>Ready for your nightly workflow.</strong><p>n8n can claim queued work through the API. Configure its schedule, GitHub credentials, and agent separately; adding work does not start a run.</p></div>
+          <div><strong>Ready for your nightly workflow.</strong><p>n8n can claim queued work through the API. Manual work and open GitHub issues are processed oldest first. Configure execution and the agent separately.</p></div>
         </aside>
       </section>
     </div>

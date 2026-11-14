@@ -15,6 +15,10 @@ from .services import claim_next, finish_item
 def item_data(item, *, include_claim=False):
     data = {
         "id": item.pk,
+        "source": item.source,
+        "issue_number": item.issue_number,
+        "issue_repository": item.issue_repository,
+        "issue_state": item.issue_state,
         "project": project_data(item.project),
         "title": item.title,
         "instructions": item.instructions,

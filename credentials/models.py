@@ -101,3 +101,44 @@ class Credential(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class APISettings(models.Model):
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    github_credential = models.ForeignKey(
+        Credential,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="github_api_settings",
+        limit_choices_to={"provider": "github", "kind": "token"},
+    )
+    gitlab_credential = models.ForeignKey(
+        Credential,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="gitlab_api_settings",
+        limit_choices_to={"provider": "gitlab", "kind": "token"},
+    )
+
+    def clean(self):
+        super().clean()
+        if self.pk != 1:
+            raise ValidationError("Only one API settings record is allowed.")
+        for provider in Credential.Provider.values:
+            field = f"{provider}_credential"
+            credential = getattr(self, field)
+            if credential is None:
+                continue
+            if (
+                credential.provider != provider
+                or credential.kind != Credential.Kind.TOKEN
+            ):
+                raise ValidationError(
+                    {field: f"Select a {provider.title()} token credential."}
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
