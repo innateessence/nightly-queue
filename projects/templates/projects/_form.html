@@ -10,13 +10,16 @@
     {% if field.widget_type == "checkbox" %}
       <label class="checkbox-label" for="{{ field.id_for_label }}">
         {{ field }}
-        <span>{{ field.label }}</span>
+        <span class="checkbox-copy">
+          <span id="{{ field.auto_id }}_label">{{ field.label }}</span>
+          {% if field.help_text %}<span class="field-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>{% endif %}
+        </span>
       </label>
     {% else %}
       <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span class="required">*</span>{% else %} <span class="optional">optional</span>{% endif %}</label>
       {{ field }}
+      {% if field.help_text %}<p class="field-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</p>{% endif %}
     {% endif %}
-    {% if field.help_text %}<p class="field-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</p>{% endif %}
     {% for error in field.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
   </div>
 {% endfor %}

@@ -65,7 +65,9 @@ class ProjectViewTests(TestCase):
         field = response.context["form"]["autonomous"]
         self.assertFalse(field.value())
         self.assertContains(response, 'type="checkbox" name="autonomous"')
-        self.assertContains(response, "Requires an automation workflow.")
+        self.assertContains(
+            response, "Find open issues and create a pull request for each."
+        )
 
     def test_create_without_toggle_saves_manual_project(self):
         self.client.post(self.url, self.data)

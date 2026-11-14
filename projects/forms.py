@@ -11,7 +11,7 @@ class ProjectForm(forms.ModelForm):
         help_texts = {
             "repository_url": "Use an HTTPS URL, such as https://github.com/owner/repo.",
             "base_branch": "Leave blank to use the repository's default branch.",
-            "autonomous": "Find open issues and create a pull request for each."
+            "autonomous": "Find open issues and create a pull request for each.",
         }
         widgets = {
             "name": forms.TextInput(attrs={"placeholder": "e.g. Nightly queue"}),
@@ -20,6 +20,9 @@ class ProjectForm(forms.ModelForm):
             ),
             "base_branch": forms.TextInput(attrs={"placeholder": "Repository default"}),
             "autonomous": forms.CheckboxInput(
-                attrs={"aria-describedby": "id_autonomous_helptext"}
+                attrs={
+                    "aria-labelledby": "id_autonomous_label",
+                    "aria-describedby": "id_autonomous_helptext",
+                }
             ),
         }
