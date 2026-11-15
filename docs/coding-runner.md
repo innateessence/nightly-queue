@@ -258,6 +258,11 @@ two surviving agents from operating on the same task.
 
 ## Implementation order and acceptance
 
+See the [gap analysis and feature-branch backlog](runner-feature-branches.md) for
+the current-code comparison, branch dependencies, and per-branch acceptance
+criteria. It splits the milestones below into reviewable changes and establishes
+run ownership, recovery records, and approvals before live agent execution.
+
 1. Add the runner package, image, Compose service, isolated volumes, and lifecycle
    loop. Prove authenticated connectivity without claiming production work during
    startup checks.

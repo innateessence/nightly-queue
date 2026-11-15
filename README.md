@@ -226,6 +226,8 @@ The service, comment retrieval, research/planning handoff, runner settings UI,
 credential delivery, and recovery behavior are not implemented yet. The current
 Settings page only configures API credentials and the issue-import interval.
 See [the implementation plan](docs/coding-runner.md) for scope and acceptance criteria.
+The [feature-branch backlog](docs/runner-feature-branches.md) compares the current
+code with that architecture and lays out implementation dependencies and checks.
 
 ## Issue discovery operations
 
