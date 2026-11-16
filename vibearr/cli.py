@@ -61,7 +61,12 @@ def create_parser():
     description = "Add work to vibearr."
     parser = argparse.ArgumentParser(prog="vibearr", description=description)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("projects", help="List existing project IDs and repositories.")
+    projects = commands.add_parser(
+        "projects", help="List existing project IDs and repositories."
+    )
+    projects.add_argument(
+        "--json", action="store_true", help="Print the API response as JSON."
+    )
     add = commands.add_parser("add", help="Queue work for an existing project.")
     add.add_argument("title")
     add.add_argument("--project", required=True, type=positive_id)
@@ -83,9 +88,12 @@ def validate_server_url(base_url):
     parsed.port
 
 
-def list_projects(base_url, token):
+def list_projects(base_url, token, json_output=False):
     response = request_api(base_url, token, "projects/")
     projects = response["projects"]
+    if json_output:
+        print(json.dumps(response, ensure_ascii=False))
+        return
     if not projects:
         print("No projects. Create one in Django admin first.")
         return
@@ -129,7 +137,7 @@ def main(argv=None):
         return 1
     try:
         if args.command == "projects":
-            list_projects(base_url, token)
+            list_projects(base_url, token, json_output=args.json)
             return 0
         add_item(base_url, token, args)
         return 0
