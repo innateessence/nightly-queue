@@ -1,15 +1,19 @@
 import copy
 from datetime import datetime, timedelta, timezone
 import hashlib
+import importlib.util
 import json
 import unittest
 from uuid import uuid4
 
-from vibearr_executor.artifacts import pack, result_manifest
-from vibearr_executor.contracts import Conflict
 from vibearr_runner.native_codex import CodexEvents, NativeCodexAdapter, codex_profile
 from vibearr_runner.native_sessions import NativeSession, NativeSessionError
 from vibearr_runner.policy import default_execution_policy
+
+EXECUTOR_INSTALLED = importlib.util.find_spec("vibearr_executor") is not None
+if EXECUTOR_INSTALLED:
+    from vibearr_executor.artifacts import pack, result_manifest
+    from vibearr_executor.contracts import Conflict
 
 
 TOKEN = "test-codex-token-0123456789"
@@ -106,6 +110,10 @@ class ExecutorFixture:
         return result_manifest(source, exported), exported
 
 
+@unittest.skipUnless(
+    EXECUTOR_INSTALLED,
+    "Install the native-runtime extra for executor-backed native session tests.",
+)
 class NativeCodexTests(unittest.TestCase):
     def setUp(self):
         self.client = ExecutorFixture()

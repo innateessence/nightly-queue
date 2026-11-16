@@ -137,6 +137,7 @@ result = runtime_diagnostics(default_execution_policy())
 assert result['runtime_ready'] is False and 'vibearr-executor' in result['reason']
 """
         self.run_command([str(executable), "-I", "-c", missing], root)
+        self.run_command([str(executable), "-I", "-m", "vibearr_runner.verify"], root)
         wheel = self.executor_wheel(root)
         self.run_command(
             [

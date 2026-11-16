@@ -89,6 +89,23 @@ class NativeAdapter(Protocol):
 
     def outcome(self, session: NativeSession, source: bytes) -> dict: ...
 
+    def diagnostics(
+        self, policy: dict, credential: dict, *, model=None, proof=None
+    ) -> dict: ...
+
+    def prepare_auth_probe(
+        self,
+        *,
+        run_id: str,
+        operation_id: str,
+        model: str,
+        policy: dict,
+        deadline: str,
+        credential: dict,
+    ) -> NativeSession: ...
+
+    def authentication_result(self, session: NativeSession) -> dict: ...
+
 
 class NativeBackendRegistry:
     def create(self, provider: str, client) -> NativeAdapter:
