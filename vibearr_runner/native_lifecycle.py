@@ -575,11 +575,13 @@ class NativeLifecycle:
         item = {**self.run["item"], "repository_url": repository["repository_url"]}
         manager = self.host.workspaces
         if isinstance(manager, WorkspaceManager):
+            from .native_clone import NativeClone
+
             manager.require_new_branch = True
             remote = SupervisorGit(token=token, read=self.read)
-            manager.remote_git = lambda arguments, cwd=None: remote.command(
-                arguments, item["repository_url"], self.journal.directory, cwd
-            )
+            clone = NativeClone(self, manager, remote, item)
+            manager.resume_clone = clone.recover()
+            manager.remote_git = clone.command
         directory = manager.directory / self.run_id
         recover_import(directory, self.journal, self.state)
         remaining = max(

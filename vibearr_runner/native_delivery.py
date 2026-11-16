@@ -141,12 +141,16 @@ class NativeDelivery:
             self.data["push_dispatched"] = True
             self.host.save()
             try:
-                transport.push(checkout, commit)
+                transport.push_once(checkout, commit)
             except DeliveryError:
                 # Even a nonzero Git exit can follow a completed remote receive.
                 raise ReconciliationRequired(
                     "Push outcome requires read-only reconciliation of the same ref."
                 ) from None
+            if transport.observed_remote(checkout) != commit:
+                raise ReconciliationRequired(
+                    "Pushed branch is not visible; retain the same publication."
+                )
         self.data["pushed_sha"] = commit
         self.host.save()
         self.fact(workspace)

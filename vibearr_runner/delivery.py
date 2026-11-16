@@ -192,7 +192,14 @@ class GitHubDeliveryClient:
         except HTTPError as exc:
             status = exc.code
             retry_at = github_retry_at(exc.headers)
-            limited = status == 429 or status == 403 and retry_at > time.time()
+            limited = (
+                status == 429
+                or status == 403
+                and (
+                    exc.headers.get("Retry-After") is not None
+                    or exc.headers.get("X-RateLimit-Remaining") == "0"
+                )
+            )
             exc.close()
             if method == "GET" and (status >= 500 or limited):
                 raise DeliveryReadUnavailable(
@@ -273,7 +280,7 @@ class SupervisorGit:
     def command(
         self, arguments: list[str], repository_url: str, directory, cwd=None
     ) -> str:
-        if self.read and arguments and arguments[0] == "ls-remote":
+        if self.read and arguments and arguments[0] in {"ls-remote", "clone", "fetch"}:
             key = "git:" + json.dumps([repository_url, arguments])
             return self.read(
                 key, lambda: self._command(arguments, repository_url, directory, cwd)
@@ -354,7 +361,7 @@ class SupervisorGit:
                         b"error: 504",
                     )
                 )
-                if arguments[0] == "ls-remote" and transient:
+                if arguments[0] in {"ls-remote", "clone", "fetch"} and transient:
                     raise DeliveryReadUnavailable(
                         "Git remote read is temporarily unavailable."
                     )
@@ -363,7 +370,7 @@ class SupervisorGit:
                 )
             return result.stdout.decode().strip()
         except (OSError, subprocess.TimeoutExpired, UnicodeError):
-            if arguments[0] == "ls-remote":
+            if arguments[0] in {"ls-remote", "clone", "fetch"}:
                 raise DeliveryReadUnavailable(
                     "Git remote read is temporarily unavailable."
                 ) from None
@@ -401,6 +408,11 @@ class SupervisorGit:
             return
         if checkpoint is not None:
             checkpoint()
+        self.push_once(workspace, commit)
+        if self.observed_remote(workspace) != commit:
+            raise DeliveryUnknown("Pushed branch could not be verified.")
+
+    def push_once(self, workspace: Workspace, commit: str):
         # Push itself remains a non-forced fast-forward check, including races.
         self.remote(
             workspace,
@@ -412,8 +424,6 @@ class SupervisorGit:
                 commit + ":refs/heads/" + workspace.branch_name,
             ],
         )
-        if self.observed_remote(workspace) != commit:
-            raise DeliveryUnknown("Pushed branch could not be verified.")
 
 
 def description(plan: dict, evidence: dict) -> str:
