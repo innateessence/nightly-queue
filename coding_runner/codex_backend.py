@@ -158,11 +158,17 @@ class ProcessTransport:
                 return value
             finally:
                 if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGTERM)
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
                     try:
                         process.wait(timeout=0.2)
                     except subprocess.TimeoutExpired:
-                        os.killpg(process.pid, signal.SIGKILL)
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
                 process.wait()
                 with self.lock:
                     self.process = None

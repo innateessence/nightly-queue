@@ -2,6 +2,7 @@ import copy
 import io
 import json
 import os
+import signal
 import sys
 import tempfile
 import threading
@@ -418,6 +419,44 @@ class TransportTests(unittest.TestCase):
         finally:
             timer.join()
         self.assertIsNone(transport.process)
+
+    def assert_exit_before_signal_is_reaped(self, target_signal):
+        duration = 0.3 if target_signal == signal.SIGKILL else 0.02
+        transport = FakeProcess("import time; time.sleep(" + str(duration) + ")")
+        backend = CodexBackend(grant, transport=transport)
+        killpg = os.killpg
+        exited = []
+
+        def exit_before_signal(pid, signum):
+            if signum != target_signal:
+                return
+            process = transport.process
+            self.assertIsNotNone(process)
+            process.wait = Mock(wraps=process.wait)
+            process.wait(timeout=1)
+            exited.append(process)
+            killpg(pid, signum)
+
+        with patch(
+            "coding_runner.codex_backend.os.killpg", side_effect=exit_before_signal
+        ):
+            with self.assertRaises(BackendInterrupted):
+                backend.research(
+                    BackendRequest(ACCOUNT, "model", "", {}),
+                    progress=Mock(),
+                    checkpoint=Mock(side_effect=[True, True, False]),
+                    stop=threading.Event(),
+                )
+        self.assertEqual(len(exited), 1)
+        self.assertEqual(exited[0].returncode, 0)
+        self.assertGreaterEqual(exited[0].wait.call_count, 2)
+        self.assertIsNone(transport.process)
+
+    def test_exit_before_cleanup_sigterm_preserves_interruption_and_reaps(self):
+        self.assert_exit_before_signal_is_reaped(signal.SIGTERM)
+
+    def test_exit_before_cleanup_sigkill_preserves_interruption_and_reaps(self):
+        self.assert_exit_before_signal_is_reaped(signal.SIGKILL)
 
 
 class WorkerTests(unittest.TestCase):
