@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -111,7 +112,11 @@ def claim_item(item, *, execution_ref=""):
     return running.filter(pk=item.pk, claim_token=token).first()
 
 
-def finish_item(*, item_id, claim_token, status, result_url="", error_summary=""):
+def finish_item(
+    *, item_id, claim_token, status, result_url="", error_summary="", runner_run=None
+):
+    from runner_control.models import Run
+
     if status not in (QueueItem.Status.SUCCEEDED, QueueItem.Status.FAILED):
         raise ValidationError({"status": "Choose succeeded or failed."})
     result_field = QueueItem._meta.get_field("result_url")
@@ -123,6 +128,11 @@ def finish_item(*, item_id, claim_token, status, result_url="", error_summary=""
         raise ValidationError({"result_url": exc.messages})
     running = QueueItem.objects.filter(pk=item_id, status=QueueItem.Status.RUNNING)
     claimed = running.filter(claim_token=claim_token)
+    owned = Run.objects.filter(item_id=item_id, state=Run.State.ACTIVE)
+    if runner_run is None and owned.exists():
+        return 0
+    if runner_run is not None and not owned.filter(pk=runner_run.pk).exists():
+        return 0
     return claimed.update(
         status=status,
         finished_at=timezone.now(),
@@ -131,10 +141,23 @@ def finish_item(*, item_id, claim_token, status, result_url="", error_summary=""
     )
 
 
+@transaction.atomic
 def requeue_items(items):
     """Stop the previous workflow before requeuing."""
+    from runner_control.models import Run
+    from runner_control.services import lock_controller
+
+    lock_controller()
     statuses = [QueueItem.Status.RUNNING, QueueItem.Status.FAILED]
     retryable = items.filter(status__in=statuses)
+    item_ids = list(retryable.values_list("pk", flat=True))
+    previous = Run.objects.filter(item_id__in=item_ids).exclude(
+        state=Run.State.OBSOLETE
+    )
+    previous.filter(finished_at__isnull=True).update(finished_at=timezone.now())
+    previous.update(
+        state=Run.State.OBSOLETE, active_slot=None, updated_at=timezone.now()
+    )
     return retryable.update(
         status=QueueItem.Status.QUEUED,
         claim_token=None,

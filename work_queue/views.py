@@ -1,6 +1,7 @@
 from celery.result import EagerResult
 from django.contrib import messages
 from django.db.models import Q
+from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from django.views.generic import ListView
@@ -107,7 +108,13 @@ def remove_item(request, pk):
         messages.error(request, "Imported issues are managed on GitHub.")
         return redirect("index")
     removable = QueueItem.objects.filter(pk=pk).exclude(status=QueueItem.Status.RUNNING)
-    removed, _ = removable.delete()
+    try:
+        removed, _ = removable.delete()
+    except ProtectedError:
+        messages.error(
+            request, "Work with runner history must be retained for recovery."
+        )
+        return redirect("index")
     if not removed:
         messages.error(request, "Stop and requeue running work before removing it.")
         return redirect("index")

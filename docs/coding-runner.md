@@ -2,6 +2,10 @@
 
 ## Status
 
+Durable runner identities, attempts, evidence, and reconciliation are implemented
+in the [runner control API](runner-run-api.md). The execution workflow below
+remains disabled pending the later feature branches and controlled release checks.
+
 The next execution component is a dedicated `coding-runner` Docker Compose service
 in this repository. This document defines the planned implementation. The current
 stack stores tasks, imports GitHub issues, and exposes claim/finish APIs; it does

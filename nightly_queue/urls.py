@@ -22,4 +22,5 @@ urlpatterns = [
     path("", include("credentials.urls")),
     path("", include("projects.urls")),
     path("", include("work_queue.urls")),
+    path("api/v1/runner/", include("runner_control.urls")),
 ]
