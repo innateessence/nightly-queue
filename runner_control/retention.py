@@ -61,31 +61,57 @@ def acknowledge(runner, run_id, claim_token, finish_digest):
     return retention
 
 
+def eligible_runs(runner):
+    return Run.objects.filter(
+        runner=runner,
+        state=Run.State.COMPLETED,
+        finished_at__isnull=False,
+        retention__reporting_acknowledged_at__isnull=False,
+    ).exclude(approvals__decision="pending")
+
+
+def purge_candidates(runner, now=None):
+    now = now or timezone.now()
+    effective = policy()
+    documents = models.Q(
+        finished_at__lte=now - timedelta(days=effective["document_days"]),
+        retention__documents_removed_at__isnull=True,
+        approvals__isnull=True,
+    )
+    logs = models.Q(
+        finished_at__lte=now - timedelta(days=effective["log_days"]),
+        retention__logs_removed_at__isnull=True,
+    )
+    return (
+        eligible_runs(runner)
+        .filter(documents | logs)
+        .distinct()
+        .order_by("finished_at")[:100]
+    )
+
+
 def plan(runner, now=None):
     now = now or timezone.now()
     effective = policy()
     cutoff = now - timedelta(days=effective["workspace_days"])
-    candidates = Run.objects.filter(
-        runner=runner, state=Run.State.COMPLETED, finished_at__lte=cutoff
+    candidates = (
+        eligible_runs(runner)
+        .filter(finished_at__lte=cutoff, retention__workspace_removed_at__isnull=True)
+        .order_by("finished_at")[:100]
     )
-    candidates = candidates.filter(retention__reporting_acknowledged_at__isnull=False)
-    candidates = candidates.filter(
-        retention__workspace_removed_at__isnull=True
-    ).order_by("finished_at")[:100]
-    workspaces = [str(run.pk) for run in candidates if eligible(run)]
     log_cutoff = now - timedelta(days=effective["log_days"])
-    logs = Run.objects.filter(
-        runner=runner,
-        state=Run.State.COMPLETED,
-        finished_at__lte=log_cutoff,
-        retention__reporting_acknowledged_at__isnull=False,
-        retention__local_logs_removed_at__isnull=True,
-    ).order_by("finished_at")[:100]
+    logs = (
+        eligible_runs(runner)
+        .filter(
+            finished_at__lte=log_cutoff, retention__local_logs_removed_at__isnull=True
+        )
+        .order_by("finished_at")[:100]
+    )
     return {
         "schema_version": 1,
         "policy": effective,
-        "workspaces": workspaces,
-        "logs": [str(run.pk) for run in logs if eligible(run)],
+        "workspaces": [str(run.pk) for run in candidates],
+        "logs": [str(run.pk) for run in logs],
     }
 
 

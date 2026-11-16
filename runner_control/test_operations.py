@@ -237,6 +237,88 @@ class RetentionTests(TestCase):
         self.assertEqual(plan_response.json()["workspaces"], [str(self.run.pk)])
         self.assertEqual(plan_response.headers["Cache-Control"], "no-store")
 
+    def older_acknowledged_runs(self):
+        runs = [
+            Run(
+                runner=self.runner,
+                state="completed",
+                finished_at=timezone.now() - timedelta(days=101),
+            )
+            for _ in range(100)
+        ]
+        Run.objects.bulk_create(runs)
+        RunRetention.objects.bulk_create(
+            [
+                RunRetention(run=run, reporting_acknowledged_at=timezone.now())
+                for run in runs
+            ]
+        )
+        return runs
+
+    def test_http_retention_advances_beyond_already_purged_runs(self):
+        runs = self.older_acknowledged_runs()
+        RunRetention.objects.filter(run__in=runs).update(
+            documents_removed_at=timezone.now(), logs_removed_at=timezone.now()
+        )
+        self.documents()
+        self.ack()
+        self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer test-token"
+        response = self.client.post(
+            reverse("runner_retention"), "{}", content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(self.run.plans.exists())
+        self.retention.refresh_from_db()
+        self.assertIsNotNone(self.retention.logs_removed_at)
+
+    def test_approval_context_preservation_does_not_starve_later_document_cleanup(self):
+        from .models import ActionApproval
+
+        runs = self.older_acknowledged_runs()
+        RunRetention.objects.filter(run__in=runs).update(logs_removed_at=timezone.now())
+        ActionApproval.objects.bulk_create(
+            [
+                ActionApproval(
+                    run=run,
+                    operation_id=uuid.uuid4(),
+                    action={},
+                    binding_digest="a" * 64,
+                    decision="denied",
+                )
+                for run in runs
+            ]
+        )
+        self.documents()
+        self.ack()
+        self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer test-token"
+        response = self.client.post(
+            reverse("runner_retention"), "{}", content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(self.run.contexts.exists())
+
+    def test_protected_approvals_do_not_starve_workspace_and_log_plans(self):
+        from .models import ActionApproval
+
+        runs = self.older_acknowledged_runs()
+        ActionApproval.objects.bulk_create(
+            [
+                ActionApproval(
+                    run=run,
+                    operation_id=uuid.uuid4(),
+                    action={},
+                    binding_digest="a" * 64,
+                )
+                for run in runs
+            ]
+        )
+        self.ack()
+        self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer test-token"
+        response = self.client.get(reverse("runner_retention"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["workspaces"], [str(self.run.pk)])
+        self.assertEqual(response.json()["logs"], [str(self.run.pk)])
+
     def test_machine_token_cannot_replace_browser_csrf_for_controls(self):
         from django.test import Client
 

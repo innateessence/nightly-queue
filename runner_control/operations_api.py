@@ -4,7 +4,7 @@ from nightly_queue.api import read_body, string_field
 
 from .api import run_response
 from .auth import runner_api_view
-from .retention import acknowledge, plan, purge_run, workspace_removed
+from .retention import acknowledge, plan, purge_candidates, purge_run, workspace_removed
 from .services import uuid_field
 
 
@@ -12,10 +12,7 @@ from .services import uuid_field
 def retention(request):
     if request.method == "POST":
         read_body(request, [])
-        candidates = request.runner_identity.runs.filter(
-            retention__reporting_acknowledged_at__isnull=False
-        )
-        for run in candidates.order_by("finished_at")[:100]:
+        for run in purge_candidates(request.runner_identity):
             run_response(lambda run=run: purge_run(run.pk))
     return JsonResponse(plan(request.runner_identity))
 
