@@ -119,7 +119,66 @@ class ControlledRelease:
             raise InvalidResponse("Controlled release authorization expired.")
         return entry
 
-    def claim(self, state, item_id: int):
+    def recover(self, state, gates, *, execution=True):
+        from .client import NotFoundError
+        from .processes import ProcessTracker
+        from .recovery import RecoveryCoordinator, ReconciliationRequired
+
+        ProcessTracker(self.journal, state).recover()
+        recovery = RecoveryCoordinator(self.client, self.journal, gates)
+        recovery.bind(state)
+        if (state.get("operation") or {}).get("kind") == "claim":
+            raise ReconciliationRequired(
+                "Controlled recovery cannot repeat an ordinary queue claim."
+            )
+        pending = state.get("release_claim")
+        if pending:
+            if state.get("run") or not execution:
+                raise ReconciliationRequired(
+                    "Resolve the controlled claim before other work."
+                )
+            pending_id = str(UUID(pending["run_id"]))
+            try:
+                remote = self.client.reconcile(pending_id)
+            except NotFoundError:
+                active = self.client.active().get("run")
+                if active or state.get("remote_active_run_id"):
+                    raise ReconciliationRequired(
+                        "Unknown owned work conflicts with the controlled claim."
+                    ) from None
+                # The original HTTP request may still commit after this lookup.
+                return None
+            else:
+                entry = self.authorization()
+                item = remote.get("item") or {}
+                if (
+                    remote["run"]["id"] != pending_id
+                    or remote["run"]["state"] != "active"
+                    or item.get("id") != pending["item_id"]
+                    or item.get("repository_url") != entry["repository_url"]
+                ):
+                    raise ReconciliationRequired(
+                        "Controlled claim recovery is outside its exact authorized item."
+                    )
+                self.claim(state, pending["item_id"], confirmed_existing=True)
+        local = state.get("run")
+        if not local and state.get("gates", {}).get("pending_claim"):
+            raise ReconciliationRequired(
+                "A pending claim lacks its controlled authorization intent."
+            )
+        active = self.client.active().get("run")
+        state["remote_active_run_id"] = active["id"] if active else None
+        if local and execution:
+            if (
+                local.get("item", {}).get("repository_url")
+                != self.authorization()["repository_url"]
+            ):
+                raise ReconciliationRequired(
+                    "Owned work is outside the designated controlled repository."
+                )
+        return recovery.reconcile(state)
+
+    def claim(self, state, item_id: int, *, confirmed_existing=False):
         self.authorization()
         if state.get("run") or state.get("operation"):
             raise InvalidResponse(
@@ -130,13 +189,20 @@ class ControlledRelease:
         from .maintenance import MINIMUM_FREE_BYTES
         import shutil
 
-        if shutil.disk_usage(self.journal.directory).free < MINIMUM_FREE_BYTES:
+        if (
+            not confirmed_existing
+            and shutil.disk_usage(self.journal.directory).free < MINIMUM_FREE_BYTES
+        ):
             raise InvalidResponse("Disk pressure blocks new controlled claims.")
         gates = GateEvaluator(self.journal)
         pending = state.get("release_claim")
         if pending and pending["item_id"] != item_id:
             raise InvalidResponse("Reconcile the designated controlled claim first.")
-        if not pending:
+        if confirmed_existing and not pending:
+            raise InvalidResponse(
+                "Controlled claim recovery requires its original durable intent."
+            )
+        if not confirmed_existing:
             configuration = self.client.configuration()
             configuration["execution_ready"] = True
             gates.adapters.update(
@@ -144,16 +210,21 @@ class ControlledRelease:
                     configuration["accounts"], ScopedCredentials(self.client)
                 )
             )
-            decision = gates.evaluate(configuration, state, checkpoint="claim")
+            decision = gates.evaluate(
+                configuration,
+                state,
+                checkpoint="claim",
+                retry_claim_id=pending["run_id"] if pending else None,
+            )
             self.client.gate_report(decision.data())
             if not decision.allowed:
                 raise InvalidResponse(
                     "Real schedule, pause, capacity, or usage gates block the controlled claim."
                 )
+        if not pending:
             pending = {"run_id": str(uuid4()), "item_id": item_id}
-            gates.prepare_claim(state, pending["run_id"], decision)
             state["release_claim"] = pending
-            self.journal.save(state)
+            gates.prepare_claim(state, pending["run_id"], decision)
         response = self.client.request("POST", self.path + "claim/", pending)
         if response["item"]["repository_url"] != self.authorization()["repository_url"]:
             raise InvalidResponse(
@@ -353,7 +424,6 @@ def main() -> int:
         Path(os.environ.get("NQ_RUNNER_STATE_DIR", "/var/lib/coding-runner"))
     ) as journal:
         state = journal.load()
-        from .recovery import RecoveryCoordinator
         from .gates import GateEvaluator
         from .backend_registry import BackendRegistry, ScopedCredentials
         from .lifecycle import Lifecycle
@@ -361,8 +431,14 @@ def main() -> int:
         import threading
 
         gates = GateEvaluator(journal)
-        RecoveryCoordinator(client, journal, gates).bind(state)
         harness = ControlledRelease(client, journal, args.qualification)
+        metadata_only = (
+            args.boundary
+            or args.record_result
+            or args.submit_evidence
+            or args.submit is not None
+        )
+        harness.recover(state, gates, execution=not metadata_only)
         if args.boundary:
             if not args.boundary_evidence:
                 parser.error(
@@ -386,9 +462,13 @@ def main() -> int:
             print(json.dumps(harness.submit(json.loads(args.submit.read_text()))))
             return 0
         authorization = harness.authorization()
-        if args.item_id:
+        if args.item_id and not state.get("run"):
             harness.claim(state, args.item_id)
         run_id = state.get("remote_active_run_id")
+        if (state.get("run") or {}).get("run", {}).get("state") == "completed":
+            parser.error(
+                "The scenario is completed; use --record-result before another designated scenario."
+            )
         if not run_id:
             parser.error(
                 "Name --item-id for the designated queued scenario, or restore its existing journal."

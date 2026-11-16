@@ -146,7 +146,10 @@ The concrete workflow, after those external prerequisites are satisfied:
    Only missing release qualification is bypassed for that owned test lifecycle.
    The harness pauses after actual PR creation at `restart_required`. Restart the
    harness process with the same volume; a second real PR lookup verifies one
-   unchanged PR, then only completion reporting resumes.
+   unchanged PR, then only completion reporting resumes. Every invocation first
+   stops recorded children and reconciles remote ownership. An uncertain model or
+   workspace outcome requires operator reconciliation. Lost scoped claim responses
+   retain their original UUID; retries that could create work recheck current gates.
 5. While the controlled run is active, verify the successful boundary workflow and
    its downloaded artifact using the selected repository credential:
 
