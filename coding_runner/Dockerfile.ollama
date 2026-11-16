@@ -1,0 +1,7 @@
+# syntax=docker/dockerfile:1
+FROM ollama/ollama:0.40.16@sha256:910d0d8107b538fb0894e63163eb195de0cc7aefcbc666dc62d3b18f71124592
+
+RUN mkdir /models && chown 10001:10001 /models
+USER 10001:10001
+ENTRYPOINT ["/bin/ollama"]
+CMD ["serve"]

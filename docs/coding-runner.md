@@ -307,3 +307,5 @@ foundation throughout this work.
 
 Claude support is an explicit [Messages API candidate](runner-claude-backend.md);
 native Claude Code is unsupported and execution remains release-gated.
+
+OpenCode support is an explicit [provider API candidate with optional Ollama](runner-opencode-ollama.md); native CLI execution remains unsupported.

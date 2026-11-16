@@ -116,6 +116,32 @@ services:
     networks:
       - runner-api
       - runner-egress
+      - runner-inference
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  runner-ollama:
+    profiles: ["ollama"]
+    build:
+      context: .
+      dockerfile: coding_runner/Dockerfile.ollama
+    image: nightly-queue-runner-ollama:0.40.16
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_MODELS: "/models"
+      OLLAMA_NO_CLOUD: "1"
+      HOME: "/tmp"
+    volumes:
+      - runner-ollama-models:/models
+    networks:
+      - runner-inference
+      - runner-egress
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
@@ -128,9 +154,12 @@ services:
 networks:
   runner-api:
     internal: true
+  runner-inference:
+    internal: true
   runner-egress:
 
 volumes:
   postgres-data:
   valkey-data:
   runner-data:
+  runner-ollama-models:

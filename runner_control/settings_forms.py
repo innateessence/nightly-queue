@@ -19,7 +19,7 @@ class RunnerSettingsForm(forms.ModelForm):
         for stage in ("research", "implementation"):
             self.fields[f"{stage}_model"].widget.attrs["list"] = "runner-claude-models"
             self.fields[f"{stage}_model"].help_text = (
-                "Claude uses the candidate Messages API transport; select an API model ID. Native Claude Code remains unsupported."
+                "Select the provider API model ID. Claude uses Messages API; OpenCode uses the selected connection provider (for example qwen3-coder:30b for Ollama). Native Claude Code and OpenCode CLI execution remain unsupported."
             )
             self.fields[f"{stage}_credential"].queryset = Credential.objects.filter(
                 provider__in=BACKENDS
@@ -111,6 +111,7 @@ class ProjectRunnerSettingsForm(forms.Form):
                     ),
                 )
             if key.endswith("model"):
+                value.help_text = "Use the selected provider model ID, including Ollama tag where needed; native CLI execution remains unsupported."
                 value.widget.attrs["list"] = "runner-claude-models"
             self.fields[key] = value
             entry = saved.get(key, {})

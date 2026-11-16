@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import timedelta
 
@@ -392,7 +393,6 @@ def verify_model_responses(responses, required_accounts):
         or not responses
         or any(
             not isinstance(row, dict)
-            or not valid_response_id(row.get("response_id"))
             or not isinstance(row.get("backend"), str)
             or not isinstance(row.get("model"), str)
             or type(row.get("credential_id")) is not int
@@ -405,6 +405,16 @@ def verify_model_responses(responses, required_accounts):
         raise RunConflict(
             "Live backend authentication and structured proposal evidence are required."
         )
+    for row in responses:
+        if row["backend"] != "opencode":
+            if row.get(
+                "receipt_kind", "provider_response_id"
+            ) != "provider_response_id" or not valid_response_id(
+                row.get("response_id")
+            ):
+                raise RunConflict("Hosted model response identity is missing.")
+            continue
+        verify_opencode_receipt(row, required_accounts)
     observed = {
         (
             row.get("backend"),
@@ -428,4 +438,62 @@ def verify_model_responses(responses, required_accounts):
     if not required.issubset(observed):
         raise RunConflict(
             "Not every selected account/model/credential version was exercised live."
+        )
+
+
+def verify_opencode_receipt(row, required_accounts):
+    from credentials.models import Credential
+    from coding_runner.opencode_connection import (
+        validate_connection,
+        valid_receipt_text,
+    )
+
+    keys = ("backend", "credential_id", "model", "secret_version", "transport")
+    if not any(
+        all(row.get(key) == account.get(key) for key in keys)
+        for account in required_accounts
+    ):
+        raise RunConflict(
+            "OpenCode receipt is outside the selected account/model scope."
+        )
+    credential = Credential.objects.filter(
+        pk=row["credential_id"],
+        provider="opencode",
+        kind="connection",
+        secret_version=row["secret_version"],
+        revoked_at__isnull=True,
+    ).first()
+    if credential is None:
+        raise RunConflict("Selected OpenCode connection is unavailable or rotated.")
+    try:
+        selected = validate_connection(json.loads(credential.get_secret()["secret"]))
+    except (ValueError, TypeError, KeyError, ValidationError):
+        raise RunConflict("Selected OpenCode connection cannot be verified.") from None
+    if (
+        row.get("inference_provider") != selected["provider"]
+        or row.get("endpoint") != selected["base_url"]
+    ):
+        raise RunConflict(
+            "OpenCode receipt does not match the selected inference connection."
+        )
+    kind = row.get("receipt_kind")
+    if selected["provider"] == "ollama":
+        digest = row.get("response_digest")
+        if (
+            kind != "local_response_digest"
+            or not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or row.get("response_id") is not None
+        ):
+            raise RunConflict(
+                "Local Ollama requires an explicitly typed raw HTTP response digest."
+            )
+        version = row.get("ollama_version")
+        if version is not None and not valid_receipt_text(version, 100):
+            raise RunConflict("Invalid reported Ollama version.")
+        return
+    response_id = row.get("response_id")
+    if kind != "provider_response_id" or not valid_response_id(response_id):
+        raise RunConflict(
+            "Hosted OpenCode connections require their provider response identity."
         )

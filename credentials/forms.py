@@ -1,3 +1,5 @@
+import json
+
 from django import forms
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.views.decorators.debug import sensitive_variables
@@ -42,6 +44,31 @@ class CredentialForm(forms.ModelForm):
         help_text="For an encrypted SSH key. Supply it again when replacing the key.",
     )
 
+    connection_provider = forms.ChoiceField(
+        required=False,
+        label="OpenCode inference provider",
+        choices=[
+            ("", "Use connection JSON or keep saved connection"),
+            ("ollama", "Trusted local Ollama"),
+            ("openai", "OpenAI API"),
+            ("anthropic", "Anthropic API"),
+            ("opencode", "OpenCode Console Chat API"),
+        ],
+        help_text="For OpenCode connection credentials. Native OpenCode CLI execution is unsupported; this uses a tool-free provider API candidate.",
+    )
+    connection_endpoint = forms.CharField(
+        required=False,
+        label="Ollama endpoint",
+        help_text="For local Ollama: http://runner-ollama:11434 or an explicitly trusted local IP/loopback host. No URL credentials, query or fragment. Hosted providers use fixed official endpoints.",
+    )
+    connection_api_key = forms.CharField(
+        required=False,
+        strip=False,
+        label="Inference API key",
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+        help_text="Required for hosted providers; optional for local Ollama. To rotate, supply the provider and complete replacement connection. Fields are never read back.",
+    )
+
     class Meta:
         model = Credential
         fields = ["name", "provider", "kind", "secret", "passphrase"]
@@ -62,11 +89,9 @@ class CredentialForm(forms.ModelForm):
             return
         self.fields["kind"].initial = Credential.Kind.TOKEN
         secret = self.fields["secret"]
-        secret.required = True
+        secret.required = False
         secret.error_messages["required"] = "Enter a secret value."
-        secret.help_text = (
-            "Paste a token, SSH key, Codex session JSON, or OpenCode connection JSON."
-        )
+        secret.help_text = "Paste a token, SSH key or Codex session JSON. For OpenCode, use the inference fields below or paste connection JSON."
         self.fields["passphrase"].help_text = (
             "Only needed for a passphrase-protected SSH key."
         )
@@ -74,6 +99,38 @@ class CredentialForm(forms.ModelForm):
     @sensitive_variables()
     def clean(self):
         data = super().clean()
+        connection_provider = data.get("connection_provider")
+        connection_fields = (
+            connection_provider
+            or data.get("connection_endpoint")
+            or data.get("connection_api_key")
+        )
+        if connection_fields:
+            if data.get("provider") != "opencode" or data.get("kind") != "connection":
+                self.add_error(
+                    "connection_provider",
+                    "Select OpenCode and connection type to use inference fields.",
+                )
+                return data
+            if not connection_provider or data.get("secret"):
+                self.add_error(
+                    "connection_provider",
+                    "Choose a provider and use either inference fields or connection JSON.",
+                )
+                return data
+            value = {"provider": connection_provider}
+            if data.get("connection_endpoint"):
+                value["base_url"] = data["connection_endpoint"]
+            if data.get("connection_api_key"):
+                value["api_key"] = data["connection_api_key"]
+            from coding_runner.opencode_connection import validate_connection
+
+            try:
+                validate_connection(value)
+            except ValueError as exc:
+                self.add_error("connection_provider", str(exc))
+                return data
+            data["secret"] = json.dumps(value)
         secret = data.get("secret", "")
         passphrase = data.get("passphrase", "")
         if not secret:

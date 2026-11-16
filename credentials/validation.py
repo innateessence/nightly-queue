@@ -1,5 +1,4 @@
 import json
-from urllib.parse import urlsplit
 
 from django.core.exceptions import ValidationError
 from django.views.decorators.debug import sensitive_variables
@@ -54,37 +53,9 @@ def validate_structured_secret(provider, kind, secret):
         return
     if provider != "opencode" or kind != "connection":
         invalid_material()
-    if set(value) - {"provider", "api_key", "base_url"}:
-        invalid_material()
-    if value.get("provider") not in ("openai", "anthropic", "opencode", "ollama"):
-        invalid_material()
-    if value.get("provider") != "ollama" and not token_text(value.get("api_key")):
-        invalid_material()
-    if "api_key" in value and not token_text(value["api_key"]):
-        invalid_material()
-    endpoint = value.get("base_url")
-    if value["provider"] == "ollama" and not endpoint:
-        invalid_material()
-    if endpoint is None:
-        return
-    if not isinstance(endpoint, str):
-        invalid_material()
+    from coding_runner.opencode_connection import validate_connection
+
     try:
-        parsed = urlsplit(endpoint)
-        valid = (
-            parsed.scheme in ("https", "http")
-            and parsed.hostname
-            and not parsed.username
-            and not parsed.password
-        )
-        valid = (
-            valid
-            and not parsed.query
-            and not parsed.fragment
-            and not any(char.isspace() for char in endpoint)
-        )
-        parsed.port
+        validate_connection(value)
     except ValueError:
-        invalid_material()
-    if not valid:
         invalid_material()
