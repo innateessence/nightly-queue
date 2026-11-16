@@ -134,6 +134,8 @@ class ApprovedExecutor:
     ) -> ExecutionResult:
         if not 0 < timeout <= 86400:
             raise ValueError("Command timeout is out of range.")
+        if workspace.workspace_id != self.broker.run_id:
+            raise ApprovalRequired("Workspace does not match the claimed run.")
         with workspace.locked():
             actual_digest = workspace.verify()
             source_digest = self.sources.current_digest(

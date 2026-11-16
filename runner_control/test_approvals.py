@@ -5,6 +5,7 @@ from unittest.mock import patch
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
+from coding_runner.approvals import ActionSpec
 from projects.models import Project
 from work_queue.services import enqueue_item, requeue_items
 
@@ -100,6 +101,32 @@ class ApprovalTests(TestCase):
         self.assertEqual(replay.json()["approval"]["id"], str(approval.pk))
         self.assertEqual(ActionApproval.objects.count(), 1)
         self.assertEqual(replay.json()["approval"]["decision"], "pending")
+
+    def test_foreign_workspace_cannot_request_under_this_claim(self):
+        action = {**self.action, "workspace_id": str(uuid4())}
+        self.assertEqual(self.request_approval(action=action).status_code, 409)
+        self.assertEqual(ActionApproval.objects.count(), 0)
+        self.assertEqual(Run.objects.get(pk=self.run_id).stage, "claimed")
+
+    def test_previously_saved_foreign_workspace_cannot_consume_permit(self):
+        approval = self.approval()
+        approval.action["workspace_id"] = str(uuid4())
+        approval.binding_digest = ActionSpec.from_data(approval.action).binding_digest
+        approval.decision = "approved"
+        approval.save()
+        self.assertEqual(self.consume(approval).status_code, 409)
+        approval.refresh_from_db()
+        self.assertIsNone(approval.consumed_at)
+
+    def test_previously_saved_foreign_workspace_cannot_receive_decision(self):
+        approval = self.approval()
+        approval.action["workspace_id"] = str(uuid4())
+        approval.binding_digest = ActionSpec.from_data(approval.action).binding_digest
+        approval.save()
+        with self.assertRaises(RunConflict):
+            self.approve(approval)
+        approval.refresh_from_db()
+        self.assertEqual(approval.decision, "pending")
 
     def test_changed_action_requires_a_new_decision(self):
         approval = self.approval()

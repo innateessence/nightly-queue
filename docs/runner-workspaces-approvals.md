@@ -10,6 +10,8 @@ private directory, checkout, lock, and protected metadata. Restarting preserves
 changes; a changed claim or incomplete checkout requires operator recovery. A
 remote task branch is preserved on retry. No reset, clean, force push, submodule
 initialization, or repository setup command runs during preparation.
+The task branch must differ from the explicit or resolved default base branch,
+including when recovering a previously saved workspace.
 
 Supervisor Git accepts HTTPS remotes without embedded credentials. The explicit
 `trusted_local_root` constructor option is only for controlled local fixture
@@ -65,6 +67,10 @@ Runner bearer authentication and an active exact claim are required for:
   a fresh `execution_id`: atomically consumes one approved decision. Only the
   first response grants `permit: true`. Every retry returns `permit: false`, even
   with the same execution ID. An ambiguous response must never trigger execution.
+
+The action workspace UUID must match the claimed run UUID. The API rejects a
+mismatch when requesting, deciding, or consuming approval; the broker and executor
+also reject cross-run dispatch before issuing a permit or starting a process.
 
 Only the CSRF-protected browser POST at `/runner/approvals/<uuid>/decision/`
 records approve/deny, matching the displayed digest. Decisions are immutable;

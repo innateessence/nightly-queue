@@ -14,7 +14,7 @@ from projects.models import Project
 from work_queue.services import enqueue_item
 
 from .auth import token_digest
-from .models import RunnerIdentity
+from .models import ActionApproval, RunnerIdentity
 
 
 class ApprovalBoundaryHTTPChecks(WorkspaceFixture, LiveServerTestCase):
@@ -78,6 +78,27 @@ class ApprovalBoundaryHTTPChecks(WorkspaceFixture, LiveServerTestCase):
         )
         with self.assertRaises(ApprovalRequired):
             restarted.execute(self.workspace, action, approval["id"])
+
+    def test_actual_executor_rejects_a_permit_for_another_workspace(self):
+        other = self.manager.prepare(str(uuid4()), self.item)
+        action = self.action(
+            ["/usr/bin/touch", "/workspace/cross-run-write"],
+            workspace_id=other.workspace_id,
+            base_revision=other.base_revision,
+            content_digest=other.verify(),
+        )
+        approval = ActionApproval.objects.create(
+            run_id=self.broker.run_id,
+            operation_id=uuid4(),
+            action=action.to_data(),
+            binding_digest=action.binding_digest,
+            decision="approved",
+        )
+        with self.assertRaises(ApprovalRequired):
+            self.executor.execute(other, action, str(approval.pk))
+        self.assertFalse((other.checkout / "cross-run-write").exists())
+        approval.refresh_from_db()
+        self.assertIsNone(approval.consumed_at)
 
     def test_concurrent_real_api_consumption_grants_one_permit(self):
         action = self.action()

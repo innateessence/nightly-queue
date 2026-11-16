@@ -169,6 +169,8 @@ class WorkspaceManager:
         validate_branch(branch)
         if base:
             validate_branch(base)
+            if branch == base:
+                raise WorkspaceError("Task branch must differ from the base branch.")
         local = False
         parsed = urlsplit(repository)
         if self.trusted_local_root and not parsed.scheme:
@@ -203,6 +205,10 @@ class WorkspaceManager:
                     raise WorkspaceError(
                         "A previous checkout has different claim settings."
                     )
+                if branch == workspace.resolved_base_branch:
+                    raise WorkspaceError(
+                        "Task branch must differ from the base branch."
+                    )
                 workspace.verify()
                 return workspace
             checkout = directory / "checkout"
@@ -230,6 +236,8 @@ class WorkspaceManager:
                     raise WorkspaceError("Remote default branch could not be resolved.")
                 resolved = symbolic[len(prefix) :]
             validate_branch(resolved)
+            if branch == resolved:
+                raise WorkspaceError("Task branch must differ from the base branch.")
             revision = git(
                 [
                     "rev-parse",

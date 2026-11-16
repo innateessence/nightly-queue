@@ -14,7 +14,8 @@ from .test_workspaces import WorkspaceFixture
 
 
 class OnePermit:
-    def __init__(self, approved=True):
+    def __init__(self, run_id, approved=True):
+        self.run_id = run_id
         self.approved = approved
         self.consumed = False
 
@@ -32,7 +33,9 @@ class BoundaryChecks(WorkspaceFixture, unittest.TestCase):
 
     def executor(self, broker=None, gate=None):
         return ApprovedExecutor(
-            broker or OnePermit(), self.sources, gate or (lambda: True)
+            broker or OnePermit(self.workspace.workspace_id),
+            self.sources,
+            gate or (lambda: True),
         )
 
     def execute(self, script, **kwargs):
@@ -126,9 +129,9 @@ class BoundaryChecks(WorkspaceFixture, unittest.TestCase):
     def test_injected_command_and_denied_action_do_not_execute(self):
         action = self.action(["/usr/bin/touch", "/workspace/injected"])
         with self.assertRaises(ApprovalRequired):
-            self.executor(OnePermit(approved=False)).execute(
-                self.workspace, action, str(uuid4())
-            )
+            self.executor(
+                OnePermit(self.workspace.workspace_id, approved=False)
+            ).execute(self.workspace, action, str(uuid4()))
         self.assertFalse((self.workspace.checkout / "injected").exists())
 
     def test_workspace_change_invalidates_even_approved_action(self):
@@ -162,7 +165,7 @@ class BoundaryChecks(WorkspaceFixture, unittest.TestCase):
 
     def test_closed_gate_never_consumes_approval(self):
         action = self.action(["/usr/bin/touch", "/workspace/injected"])
-        broker = OnePermit()
+        broker = OnePermit(self.workspace.workspace_id)
         with self.assertRaises(ApprovalRequired):
             self.executor(broker, lambda: False).execute(
                 self.workspace, action, str(uuid4())
@@ -172,7 +175,10 @@ class BoundaryChecks(WorkspaceFixture, unittest.TestCase):
     def test_research_checkout_is_read_only_even_with_human_approval(self):
         action = self.action(["/usr/bin/touch", "/workspace/research-write"])
         executor = ApprovedExecutor(
-            OnePermit(), self.sources, lambda: True, read_only=True
+            OnePermit(self.workspace.workspace_id),
+            self.sources,
+            lambda: True,
+            read_only=True,
         )
         result = executor.execute(self.workspace, action, str(uuid4()))
         self.assertNotEqual(result.exit_code, 0)

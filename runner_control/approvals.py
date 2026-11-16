@@ -25,6 +25,11 @@ def parse_action(data):
         ) from None
 
 
+def verify_workspace(action, run):
+    if action.workspace_id != str(run.pk):
+        raise RunConflict("Action workspace does not match the claimed run.")
+
+
 def approval_data(approval):
     return {
         "id": str(approval.pk),
@@ -49,6 +54,7 @@ def request_approval(*, runner, run_id, claim_token, operation_id, action):
     run = owned_run(runner, run_id)
     verify_active(run, claim_token)
     parsed = parse_action(action)
+    verify_workspace(parsed, run)
     previous = ActionApproval.objects.filter(run=run, operation_id=operation_id).first()
     if previous is not None:
         if previous.binding_digest != parsed.binding_digest:
@@ -88,7 +94,9 @@ def consume_approval(
     approval = owned_approval(runner, run_id, approval_id)
     if approval.binding_digest != binding_digest:
         raise RunConflict("Approval binding changed; request a new human decision.")
-    if parse_action(approval.action).binding_digest != binding_digest:
+    parsed = parse_action(approval.action)
+    verify_workspace(parsed, run)
+    if parsed.binding_digest != binding_digest:
         raise RunConflict("Stored action changed; request a new human decision.")
     if approval.decision != ActionApproval.Decision.APPROVED:
         raise RunConflict("This action has not been approved by a human.")
@@ -118,7 +126,9 @@ def decide_approval(approval_id, decision, binding_digest, note=""):
         raise ValidationError("Choose approve or deny.")
     if len(note) > 2000 or approval.binding_digest != binding_digest:
         raise ValidationError("The displayed action changed; reload before deciding.")
-    if parse_action(approval.action).binding_digest != binding_digest:
+    parsed = parse_action(approval.action)
+    verify_workspace(parsed, run)
+    if parsed.binding_digest != binding_digest:
         raise RunConflict("Stored action changed; request a new human decision.")
     if approval.decision != ActionApproval.Decision.PENDING:
         raise RunConflict("This approval already has a decision.")

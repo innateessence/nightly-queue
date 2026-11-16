@@ -93,7 +93,12 @@ class ApprovalBroker:
         self.run_id = str(UUID(run_id))
         self.claim_token = claim_token
 
+    def verify_workspace(self, action: ActionSpec) -> None:
+        if action.workspace_id != self.run_id:
+            raise ApprovalRequired("Action workspace does not match the claimed run.")
+
     def request(self, action: ActionSpec, operation_id: str) -> dict[str, Any]:
+        self.verify_workspace(action)
         payload = {
             "claim_token": self.claim_token,
             "operation_id": str(UUID(operation_id)),
@@ -104,6 +109,7 @@ class ApprovalBroker:
         )["approval"]
 
     def consume(self, approval_id: str, action: ActionSpec) -> str:
+        self.verify_workspace(action)
         approval_id = str(UUID(approval_id))
         execution_id = str(uuid4())
         payload = {

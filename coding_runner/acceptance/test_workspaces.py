@@ -1,6 +1,8 @@
 import hashlib
+import json
 import os
 import unittest
+from dataclasses import asdict, replace
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -54,6 +56,25 @@ class WorkspaceTests(WorkspaceFixture, unittest.TestCase):
             (restored.checkout / "README.md").read_text(), "work in progress"
         )
 
+    def test_task_branch_cannot_equal_explicit_base(self):
+        item = {**self.item, "base_branch": "trunk", "branch_name": "trunk"}
+        with self.assertRaisesRegex(WorkspaceError, "must differ"):
+            self.manager.prepare(str(uuid4()), item)
+
+    def test_task_branch_cannot_equal_resolved_remote_default(self):
+        item = {**self.item, "branch_name": "trunk"}
+        with self.assertRaisesRegex(WorkspaceError, "must differ"):
+            self.manager.prepare(str(uuid4()), item)
+
+    def test_restart_rejects_previously_saved_base_as_task_branch(self):
+        git(["checkout", "trunk", "--"], self.workspace.checkout)
+        saved = replace(self.workspace, branch_name="trunk")
+        metadata = {**asdict(saved), "directory": str(saved.directory)}
+        (saved.directory / "workspace.json").write_text(json.dumps(metadata))
+        item = {**self.item, "branch_name": "trunk"}
+        with self.assertRaisesRegex(WorkspaceError, "must differ"):
+            self.manager.prepare(saved.workspace_id, item)
+
     def test_retry_reuses_remote_task_branch_without_reset(self):
         git(["checkout", "-b", "task/example"], self.repository)
         (self.repository / "previous-work").write_text("preserve remote work")
@@ -70,6 +91,7 @@ class WorkspaceTests(WorkspaceFixture, unittest.TestCase):
             ],
             self.repository,
         )
+        git(["checkout", "trunk", "--"], self.repository)
         workspace = self.manager.prepare(str(uuid4()), self.item)
         self.assertTrue((workspace.checkout / "previous-work").exists())
 

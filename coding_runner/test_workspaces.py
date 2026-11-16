@@ -65,24 +65,47 @@ class WorkspaceFixture:
 
 
 class BrokerTests(unittest.TestCase):
-    def test_repeated_consumption_never_grants_another_permit(self):
-        class Client:
-            def request(self, method, path, payload):
-                return {"permit": False, "execution_id": payload["execution_id"]}
-
-        broker = ApprovalBroker(Client(), str(uuid4()), "claim")
-        data = {
+    def setUp(self):
+        self.run_id = str(uuid4())
+        self.data = {
             "argv": ["/usr/bin/true"],
             "mode": "exec",
             "source_kind": "plan",
             "source_reference": "plan/1",
             "source_digest": "a" * 64,
-            "workspace_id": str(uuid4()),
+            "workspace_id": self.run_id,
             "base_revision": "b" * 40,
             "content_digest": "c" * 64,
         }
+
+    def test_repeated_consumption_never_grants_another_permit(self):
+        class Client:
+            def request(self, method, path, payload):
+                return {"permit": False, "execution_id": payload["execution_id"]}
+
+        broker = ApprovalBroker(Client(), self.run_id, "claim")
         with self.assertRaises(ApprovalRequired):
-            broker.consume(str(uuid4()), ActionSpec.from_data(data))
+            broker.consume(str(uuid4()), ActionSpec.from_data(self.data))
+
+    def test_request_rejects_foreign_workspace_before_network_call(self):
+        class Client:
+            def request(self, method, path, payload):
+                raise AssertionError("Foreign workspace reached the API.")
+
+        broker = ApprovalBroker(Client(), self.run_id, "claim")
+        action = ActionSpec.from_data({**self.data, "workspace_id": str(uuid4())})
+        with self.assertRaises(ApprovalRequired):
+            broker.request(action, str(uuid4()))
+
+    def test_consumption_rejects_foreign_workspace_before_network_call(self):
+        class Client:
+            def request(self, method, path, payload):
+                raise AssertionError("Foreign workspace reached the API.")
+
+        broker = ApprovalBroker(Client(), self.run_id, "claim")
+        action = ActionSpec.from_data({**self.data, "workspace_id": str(uuid4())})
+        with self.assertRaises(ApprovalRequired):
+            broker.consume(str(uuid4()), action)
 
 
 if __name__ == "__main__":
