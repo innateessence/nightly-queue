@@ -100,3 +100,25 @@ builds and run-owned derived images. Terminal identity/digest tombstones prevent
 purged IDs from launching again. Unknown or running resources remain protected;
 shared artifacts and operator images are preserved. Historical validation,
 commit, PR and termination evidence stays readable after content expires.
+
+## Real acceptance
+
+Use a dedicated disposable queue database/project and a genuine new project
+cutoff. Publish a bounded owner-authored issue after that cutoff, import it
+normally, and configure the same qualified executor and selected credentials as
+production. Keep other projects out of this acceptance configuration.
+
+```sh
+python -m vibearr_runner.queue_acceptance --execute \
+  --state /private/acceptance-supervisor \
+  --project-id 1 --issue-number 123 \
+  --evidence /private/acceptance-delivery.json
+```
+
+This makes real model and GitHub requests. It runs normal controller cycles in
+successive supervisor processes with the same journal. It records restart
+checkpoints after agent completion, verified push, verified PR, and before
+completion reporting, then reads the acknowledged server delivery back. It
+refuses another project/issue and never clears an unknown invocation to continue.
+The ordinary background service keeps one supervisor process; this driver adds
+frequent restarts to exercise its durable recovery path.

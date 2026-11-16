@@ -244,6 +244,9 @@ class NativeDelivery:
         context = self.native["context"]["document"]
         source = context["source"]
         issue = source.get("issue_url", "")
+        if type(source.get("issue_number")) is int and source["issue_number"] > 0:
+            repository = self.data["workspace"]["repository"]
+            issue = f"https://github.com/{repository}/issues/{source['issue_number']}"
         lines = [
             source["title"],
             "",
