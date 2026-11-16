@@ -100,6 +100,13 @@ def boundary():
     Path("added.txt").write_text("isolated addition\n")
     Path("executable").write_text("#!/bin/sh\nexit 0\n")
     Path("executable").chmod(0o755)
+    subprocess.run(["/work/executable"], check=True)
+    for directory in ("/tmp", "/home/task"):
+        script = Path(directory) / "qualification-executable"
+        script.write_text("#!/bin/sh\nexit 0\n")
+        script.chmod(0o755)
+        subprocess.run([str(script)], check=True)
+    print("workspace-temp-home-execution-passed", flush=True)
     Path("delete.txt").unlink()
     Path("original.txt").write_text("changed\n")
     print(
@@ -272,13 +279,24 @@ def limits():
     )
     check(current > previous, "CPU contention did not trigger real cgroup throttling")
     print("workspace-pids-cpu-enforced", flush=True)
+
+
+def memory_exhaustion():
+    check(
+        Path("/sys/fs/cgroup/memory.max").read_text().strip() == str(256 * 1024 * 1024),
+        "Memory limit not applied",
+    )
+    check(
+        Path("/sys/fs/cgroup/memory.swap.max").read_text().strip() == "0",
+        "Swap must be disabled for the memory probe",
+    )
     print("memory-exhaustion-probe-started", flush=True)
     process = subprocess.run(
         [
             sys.executable,
             "-I",
             "-c",
-            "import pathlib; pathlib.Path('/proc/self/oom_score_adj').write_text('1000'); x = bytearray(512 * 1024 * 1024)",
+            "import pathlib; pathlib.Path('/proc/self/oom_score_adj').write_text('1000'); x = bytearray(512 * 1024 * 1024); x[::4096] = b'x' * (len(x) // 4096)",
         ],
         timeout=20,
     )
@@ -291,11 +309,14 @@ def limits():
         "No real cgroup OOM evidence",
     )
 
-    print("memory-pids-workspace-enforced", flush=True)
+    print("intentional-memory-exhaustion-observed", flush=True)
 
 
 def main():
     kind = sys.argv[1]
+    if kind == "oom":
+        memory_exhaustion()
+        return
     if kind == "pid-hold":
         forked = 0
         recorded = False
