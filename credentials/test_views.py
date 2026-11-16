@@ -54,11 +54,11 @@ class CredentialViewTests(TestCase):
         )
         self.assertEqual(
             list(form.fields["provider"].choices),
-            [("github", "GitHub"), ("gitlab", "GitLab")],
+            list(Credential.Provider.choices),
         )
         self.assertEqual(
             form.fields["kind"].choices[1:],
-            [("token", "Token"), ("ssh", "SSH"), ("secret", "Secret (other)")],
+            list(Credential.Kind.choices),
         )
 
     def test_gitlab_token_creation_shows_provider_and_type(self):

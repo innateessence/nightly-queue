@@ -64,7 +64,9 @@ class CredentialForm(forms.ModelForm):
         secret = self.fields["secret"]
         secret.required = True
         secret.error_messages["required"] = "Enter a secret value."
-        secret.help_text = "Paste a token, a complete SSH private key (OpenSSH or PEM), or another secret."
+        secret.help_text = (
+            "Paste a token, SSH key, Codex session JSON, or OpenCode connection JSON."
+        )
         self.fields["passphrase"].help_text = (
             "Only needed for a passphrase-protected SSH key."
         )
@@ -87,6 +89,7 @@ class CredentialForm(forms.ModelForm):
         if not kind:
             return data
         self.instance.kind = kind
+        self.instance.provider = data.get("provider", self.instance.provider)
         try:
             self.instance.set_secret(secret, passphrase)
         except ValidationError as exc:

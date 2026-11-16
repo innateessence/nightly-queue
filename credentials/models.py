@@ -7,7 +7,8 @@ from cryptography.hazmat.primitives.serialization import (
     load_ssh_private_key,
 )
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 from django.views.decorators.debug import sensitive_variables
 
 from .encryption import credential_cipher
@@ -17,11 +18,16 @@ class Credential(models.Model):
     class Provider(models.TextChoices):
         GITHUB = "github", "GitHub"
         GITLAB = "gitlab", "GitLab"
+        CODEX = "codex", "Codex"
+        CLAUDE = "claude", "Claude Code"
+        OPENCODE = "opencode", "OpenCode"
 
     class Kind(models.TextChoices):
         TOKEN = "token", "Token"
         SSH = "ssh", "SSH"
         SECRET = "secret", "Secret (other)"
+        SESSION = "session", "Codex session (JSON)"
+        CONNECTION = "connection", "OpenCode connection (JSON)"
 
     name = models.CharField(max_length=200, unique=True)
     provider = models.CharField(
@@ -29,6 +35,8 @@ class Credential(models.Model):
     )
     kind = models.CharField(max_length=20, choices=Kind.choices)
     encrypted_payload = models.TextField(editable=False)
+    secret_version = models.PositiveIntegerField(default=1, editable=False)
+    revoked_at = models.DateTimeField(null=True, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -42,13 +50,18 @@ class Credential(models.Model):
             raise ValidationError({"name": "Enter a credential name."})
         if not self.encrypted_payload:
             raise ValidationError("Enter a secret before saving the credential.")
+        self.validate_provider_kind()
         if not self.pk:
             return
-        kinds = Credential.objects.values_list("kind", flat=True)
-        original = kinds.filter(pk=self.pk).first()
-        if original is not None and original != self.kind:
+        original = (
+            Credential.objects.filter(pk=self.pk).values("kind", "provider").first()
+        )
+        if original is not None and original != {
+            "kind": self.kind,
+            "provider": self.provider,
+        }:
             raise ValidationError(
-                {"kind": "Create a new credential to use a different type."}
+                {"kind": "Create a new credential to use a different provider or type."}
             )
 
     @sensitive_variables()
@@ -59,7 +72,12 @@ class Credential(models.Model):
             raise ValidationError({"passphrase": "Enter a text passphrase."})
         if self.kind != self.Kind.SSH and passphrase:
             raise ValidationError({"passphrase": "Only SSH keys use a passphrase."})
-        if self.kind == self.Kind.TOKEN:
+        self.validate_provider_kind()
+        if self.kind in (self.Kind.SESSION, self.Kind.CONNECTION):
+            from .validation import validate_structured_secret
+
+            validate_structured_secret(self.provider, self.kind, secret)
+        elif self.kind == self.Kind.TOKEN:
             if any(character.isspace() for character in secret):
                 raise ValidationError({"secret": "Tokens cannot contain whitespace."})
         elif self.kind == self.Kind.SSH:
@@ -70,6 +88,19 @@ class Credential(models.Model):
         self.encrypted_payload = (
             credential_cipher().encrypt(payload.encode("utf-8")).decode("ascii")
         )
+
+    def validate_provider_kind(self):
+        allowed = {
+            self.Provider.GITHUB: (self.Kind.TOKEN, self.Kind.SSH, self.Kind.SECRET),
+            self.Provider.GITLAB: (self.Kind.TOKEN, self.Kind.SSH, self.Kind.SECRET),
+            self.Provider.CODEX: (self.Kind.TOKEN, self.Kind.SESSION),
+            self.Provider.CLAUDE: (self.Kind.TOKEN,),
+            self.Provider.OPENCODE: (self.Kind.CONNECTION,),
+        }
+        if self.kind not in allowed.get(self.provider, ()):
+            raise ValidationError(
+                {"kind": "Select a supported type for this provider."}
+            )
 
     @staticmethod
     @sensitive_variables()
@@ -93,11 +124,41 @@ class Credential(models.Model):
             raise ValidationError(
                 "Unable to decrypt this credential; check NQ_CREDENTIAL_KEY."
             ) from None
-        return json.loads(payload)
+        try:
+            value = json.loads(payload)
+            if set(value) != {"secret", "passphrase"}:
+                raise ValueError
+            if not all(isinstance(entry, str) for entry in value.values()):
+                raise ValueError
+            return value
+        except (ValueError, TypeError):
+            raise ValidationError(
+                "Credential data is invalid; replace the secret."
+            ) from None
 
     def save(self, *args, **kwargs):
-        self.full_clean()
-        return super().save(*args, **kwargs)
+        from runner_control.settings_models import RunnerSettings
+
+        with transaction.atomic():
+            RunnerSettings.objects.get_or_create(pk=1)
+            RunnerSettings.objects.select_for_update().get(pk=1)
+            original = Credential.objects.select_for_update().filter(pk=self.pk).first()
+            if original and original.revoked_at:
+                self.revoked_at = original.revoked_at
+            if original and original.encrypted_payload != self.encrypted_payload:
+                self.secret_version = original.secret_version + 1
+                fields = kwargs.get("update_fields")
+                if fields is not None:
+                    kwargs["update_fields"] = set(fields) | {
+                        "secret_version",
+                        "updated_at",
+                    }
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def revoke(self):
+        self.revoked_at = timezone.now()
+        self.save(update_fields=["revoked_at", "updated_at"])
 
     def __str__(self):
         return self.name
@@ -137,7 +198,7 @@ class APISettings(models.Model):
         super().clean()
         if self.pk != 1:
             raise ValidationError("Only one API settings record is allowed.")
-        for provider in Credential.Provider.values:
+        for provider in (Credential.Provider.GITHUB, Credential.Provider.GITLAB):
             field = f"{provider}_credential"
             credential = getattr(self, field)
             if credential is None:
