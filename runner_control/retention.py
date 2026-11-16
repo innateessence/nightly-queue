@@ -9,6 +9,7 @@ from .auth import token_digest
 from .models import ContextSnapshot, PlanVersion, Run, RunRetention
 from .services import RunConflict, lock_controller, owned_run
 from .settings_models import RunnerSettings
+from vibearr_runner.native_contract import ARTIFACT_KINDS, digest
 
 PRESERVED_EVIDENCE = {
     "verified_delivery",
@@ -20,6 +21,7 @@ PRESERVED_EVIDENCE = {
     "finish",
     "release",
 }
+PRESERVED_EVIDENCE.update(ARTIFACT_KINDS)
 
 
 def policy():
@@ -31,8 +33,16 @@ def policy():
     }
 
 
+def reported_terminal(run):
+    return run.state == Run.State.COMPLETED or (
+        run.state == Run.State.OBSOLETE
+        and run.configuration_snapshot.get("execution_kind") == "native"
+        and bool(run.finish_digest)
+    )
+
+
 def eligible(run):
-    if run.state != Run.State.COMPLETED or not run.finished_at:
+    if not reported_terminal(run) or not run.finished_at:
         return False
     if run.approvals.filter(decision="pending").exists():
         return False
@@ -44,7 +54,7 @@ def eligible(run):
 def acknowledge(runner, run_id, claim_token, finish_digest):
     lock_controller(runner)
     run = owned_run(runner, run_id)
-    if run.state != Run.State.COMPLETED or not run.finish_digest:
+    if not reported_terminal(run) or not run.finish_digest:
         raise RunConflict(
             "Only confirmed completed reporting can release retention protection."
         )
@@ -63,8 +73,15 @@ def acknowledge(runner, run_id, claim_token, finish_digest):
 
 def eligible_runs(runner):
     return Run.objects.filter(
+        models.Q(state=Run.State.COMPLETED)
+        | (
+            models.Q(
+                state=Run.State.OBSOLETE,
+                configuration_snapshot__execution_kind="native",
+            )
+            & ~models.Q(finish_digest="")
+        ),
         runner=runner,
-        state=Run.State.COMPLETED,
         finished_at__isnull=False,
         retention__reporting_acknowledged_at__isnull=False,
     ).exclude(approvals__decision="pending")
@@ -165,11 +182,27 @@ def purge_run(run_id, now=None):
             models.QuerySet.delete(contexts)
             retention.documents_removed = count
             retention.documents_removed_at = now
+            if run.configuration_snapshot.get("execution_kind") == "native":
+                original = run.source_snapshot
+                tombstone = {"purged": True, "digest": digest(original)}
+                Run.objects.filter(pk=run.pk).update(source_snapshot=tombstone)
+                from work_queue.models import QueueItem
+
+                newer = Run.objects.filter(
+                    item=run.item, created_at__gt=run.created_at
+                ).exclude(state=Run.State.OBSOLETE)
+                if not newer.exists() and run.item.source_snapshot == original:
+                    QueueItem.objects.filter(
+                        pk=run.item_id, source_snapshot=original
+                    ).update(source_snapshot=tombstone)
     if run.finished_at <= now - timedelta(days=effective["log_days"]):
         if retention.logs_removed_at is None:
             entries = run.evidence.exclude(kind__in=PRESERVED_EVIDENCE)
             retention.artifacts_removed = entries.count()
             entries.delete()
             retention.logs_removed_at = now
+            if run.native_status:
+                status = dict(run.native_status, detail="")
+                Run.objects.filter(pk=run.pk).update(native_status=status)
     retention.save()
     return retention

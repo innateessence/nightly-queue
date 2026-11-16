@@ -58,6 +58,12 @@ class QueueItemAdmin(admin.ModelAdmin):
         description="Requeue failed/interrupted work (stop its runner first)",
     )
     def requeue_stopped_work(self, request, queryset):
-        count = requeue_items(queryset)
-        message = f"Requeued {count} item(s); previous claim tokens are invalid."
+        result = requeue_items(queryset, return_summary=True)
+        message = (
+            f"Requeued {result['requeued']} item(s); previous claim tokens are invalid."
+        )
+        if result["pending"]:
+            message += f" Waiting for termination: {result['pending']}."
+        if result["held"]:
+            message += f" Held for delivery reconciliation: {result['held']}."
         self.message_user(request, message)

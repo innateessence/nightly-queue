@@ -9,6 +9,7 @@ from credentials.models import Credential
 from projects.models import Project
 from vibearr_runner.policy import ExecutionPolicy
 from vibearr_runner.native_evidence import native_evidence_contract
+from vibearr_executor import QUALIFICATION_VERSION, PROTOCOL_VERSION
 
 from .settings_models import ProjectRunnerSettings, RunnerSettings
 from .validators import OVERRIDE_FIELDS, validate_backend_model
@@ -145,14 +146,6 @@ def project_configuration(project, defaults, overrides, credentials):
                     "message": "Credential type is unsupported for this backend.",
                 }
             )
-    if not effective["validation_commands"]:
-        errors.append(
-            {
-                "field": "validation_commands",
-                "code": "required",
-                "message": "Configure required validation commands.",
-            }
-        )
     policy = ExecutionPolicy.from_data(effective["execution_policy"])
     return {
         "execution_kind": "native",
@@ -180,6 +173,7 @@ def project_configuration(project, defaults, overrides, credentials):
         "structurally_valid": not errors,
         "required_capabilities": sorted(set(capabilities)),
         "execution_ready": False,
+        "native_dispatch_available": True,
     }
 
 
@@ -259,20 +253,22 @@ def _configuration_document(saved):
             if reference in credentials
         ],
         "execution_ready": False,
-        "readiness_reason": "Native adapter and dispatch qualification are not installed.",
+        "native_dispatch_available": True,
+        "host_readiness": "supervisor-required",
+        "readiness_reason": "Native dispatch is installed; the supervisor must qualify current runtime, profiles, credentials, and source eligibility.",
     }
     document["execution_kind"] = "native"
     document["delivery_contract"] = native_evidence_contract()
     document["release_verification"] = {
         "qualified": False,
         "execution_kind": "native",
-        "reason": "Native adapter and dispatch are not installed. Qualify the installed OCI executor independently; legacy proposal execution is disabled.",
+        "reason": "Legacy release proofs do not qualify native execution. Current host runtime, profile, and authentication checks are required before claim.",
     }
     document["runtime_contract"] = {
         "schema_version": 1,
         "runtime": "docker-oci-v1",
-        "protocol_version": 1,
-        "qualification_version": 2,
+        "protocol_version": PROTOCOL_VERSION,
+        "qualification_version": QUALIFICATION_VERSION,
         "qualification_source": "authenticated_executor_capabilities",
         "requires_production_run": False,
     }
