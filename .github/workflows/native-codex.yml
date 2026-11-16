@@ -1,0 +1,35 @@
+name: Native Codex image
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: Check native Codex image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Build digest-pinned Codex and native tool host
+        run: docker build -f vibearr_executor/Codex.Dockerfile -t vibearr-ci-codex .
+      - name: Check installed native executables without credentials or network
+        run: |
+          image=$(docker image inspect vibearr-ci-codex --format '{{.Id}}')
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --user 1000:1000 --pids-limit 64 --memory 512m --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            --entrypoint /usr/local/bin/codex "$image" --version
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --user 1000:1000 --pids-limit 64 --memory 512m --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            --entrypoint /usr/local/bin/codex-code-mode-host "$image" --help
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --user 1000:1000 --pids-limit 64 --memory 512m --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            --entrypoint /usr/local/bin/python "$image" -I -m unittest \
+            vibearr_executor.test_codex_task vibearr_executor.test_secret_material -v
