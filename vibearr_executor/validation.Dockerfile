@@ -8,7 +8,7 @@ COPY vibearr_executor/validation-requirements.txt /opt/validation/requirements.t
 COPY requirements.txt /opt/validation/project-requirements.txt
 RUN python -m pip install --no-cache-dir -r /opt/validation/requirements.txt
 RUN python -m venv --copies /opt/application-python \
-    && /opt/application-python/bin/python -m pip install --no-cache-dir pip==25.0.1 setuptools==80.9.0 wheel==0.48.0
+    && /opt/application-python/bin/python -m pip install --no-cache-dir pip==25.0.1 setuptools==80.9.0 wheel==0.48.0 packaging==26.3
 COPY vibearr_executor /opt/executor/vibearr_executor
 RUN ln -s /opt/executor/vibearr_executor /usr/local/lib/python3.12/site-packages/vibearr_executor
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
