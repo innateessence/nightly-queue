@@ -3,21 +3,20 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import subprocess
 import shutil
+import importlib.util
 import tempfile
 import unittest
 from uuid import uuid4
 
-try:
-    from vibearr_executor.artifacts import pack, unpack
-    from vibearr_executor.contracts import Conflict, Rejected, digest
-    from vibearr_executor.validation_profile import CHECK_IDS, ValidationProfile
-
-    SDK_AVAILABLE = True
-except ImportError:
-    SDK_AVAILABLE = False
 from vibearr_runner.native_validation import CandidateSource, ValidationRunner
 from vibearr_runner.native_validation import DependencyBuilder, validation_diagnostics
 from vibearr_runner.policy import ExecutionPolicy
+
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor.artifacts import pack, unpack
+    from vibearr_executor.contracts import Conflict, Rejected, digest
+    from vibearr_executor.validation_profile import CHECK_IDS, ValidationProfile
 
 
 @unittest.skipUnless(
