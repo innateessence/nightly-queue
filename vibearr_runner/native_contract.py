@@ -20,6 +20,12 @@ def checked(operation):
             return operation(*args, **kwargs)
         except NativeContractError:
             raise
+        except ModuleNotFoundError as exc:
+            if exc.name and exc.name.startswith("vibearr_executor"):
+                raise NativeContractError(
+                    "Install vibearr-runner[native-runtime] to use executor-backed native metadata."
+                ) from None
+            raise
         except (
             ValueError,
             TypeError,

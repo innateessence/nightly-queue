@@ -1,9 +1,9 @@
 import hashlib
+import importlib.util
 import unittest
 from uuid import uuid4
+from unittest.mock import patch
 
-from vibearr_executor.artifacts import pack, result_manifest
-from vibearr_executor.validation_profile import ValidationProfile
 from vibearr_runner.native_contract import (
     NativeContractError,
     agent_result,
@@ -19,6 +19,11 @@ from vibearr_runner.native_contract import (
     validate_native_artifact,
 )
 from vibearr_runner.native_sessions import NativeSession
+
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor.artifacts import pack, result_manifest
+    from vibearr_executor.validation_profile import ValidationProfile
 
 
 def native_context():
@@ -77,7 +82,10 @@ def observed_operation():
     return original, changed, observed
 
 
-class NativeContractTests(unittest.TestCase):
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for executor-backed contract tests"
+)
+class NativeExecutorContractTests(unittest.TestCase):
     def test_safe_profile_round_trip_has_no_secret_selector(self):
         value = native_context()["validation_profile"]
         self.assertEqual(profile_reference(profile_from_reference(value)), value)
@@ -107,16 +115,6 @@ class NativeContractTests(unittest.TestCase):
         value["acceptance_criteria"] = ["a" * 4000] * 17
         with self.assertRaises(NativeContractError):
             validate_context(value)
-
-    def test_status_accepts_provider_text_session_id(self):
-        value = status_document(
-            sequence=1, stage="implementation", session_id="ses_provider-123"
-        )
-        self.assertEqual(value["session_id"], "ses_provider-123")
-
-    def test_status_rejects_boolean_sequence(self):
-        with self.assertRaises(NativeContractError):
-            status_document(sequence=True, stage="implementation")
 
     def test_receipt_rejects_boolean_success_code(self):
         _, _, observed = observed_operation()
@@ -189,6 +187,18 @@ class NativeContractTests(unittest.TestCase):
         with self.assertRaises(NativeContractError):
             agent_result(intent_id=str(uuid4()), session=session, outcome=outcome)
 
+
+class NativeContractTests(unittest.TestCase):
+    def test_status_accepts_provider_text_session_id(self):
+        value = status_document(
+            sequence=1, stage="implementation", session_id="ses_provider-123"
+        )
+        self.assertEqual(value["session_id"], "ses_provider-123")
+
+    def test_status_rejects_boolean_sequence(self):
+        with self.assertRaises(NativeContractError):
+            status_document(sequence=True, stage="implementation")
+
     def test_unknown_publication_cannot_confirm_termination(self):
         value = {
             "intent_id": str(uuid4()),
@@ -223,3 +233,19 @@ class NativeContractTests(unittest.TestCase):
     def test_invalid_native_artifact_is_rejected(self):
         with self.assertRaises(NativeContractError):
             validate_native_artifact("native_workspace", {"schema_version": 1})
+
+    def test_missing_optional_sdk_has_an_actionable_diagnostic(self):
+        original_import = __import__
+
+        def without_sdk(name, *args, **kwargs):
+            if name.startswith("vibearr_executor"):
+                raise ModuleNotFoundError(
+                    "Executor SDK is intentionally absent", name="vibearr_executor"
+                )
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=without_sdk):
+            with self.assertRaisesRegex(
+                NativeContractError, r"vibearr-runner\[native-runtime\]"
+            ):
+                profile_from_reference({})
