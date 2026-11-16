@@ -277,7 +277,7 @@ image. `native_agent_ready: false` means this executor does not attest native
 backend availability; feature 03 supplies that separate diagnostic. The runtime
 diagnostic can succeed before any production claim or model call.
 
-Qualification version 1 binds executor source digest, engine ID/version/API,
+Qualification version 2 binds executor source digest, engine ID/version/API,
 kernel, security options, cgroup/storage driver, active-run limit, denied host
 addresses, exact registry digests and installed immutable image contracts. Every
 distinct task image must have a complete actual host probe report. Changes or
@@ -292,11 +292,40 @@ The checks exercise hostile source/imports and forged receipts, selected-secret
 isolation, credential-free package installation, model HTTPS reachability without
 auth, offline validation, real ENOSPC/PID/OOM/CPU enforcement, restart-stable launch,
 detached descendant stop/export, and fresh PostgreSQL/cross-operation isolation.
-The deliberate OOM probe can end with the child or the probe process killed by
-the kernel. It passes only after the workspace/PID/CPU checks completed and the
-protected result records actual OOM/PID/throttling counters. The real nonzero exit
-is preserved in the report; this exception applies only to that fixed resource
-qualification recipe and cannot authorize a native delivery or passing validation.
+The workspace/PID/CPU probe must exit successfully and export its verified source
+before memory exhaustion runs in a separate, exact `smoke-oom-v1` operation. Its
+unchanged 256 MiB memory/no-swap limit can kill the allocating child, task process,
+or trusted init. Protected results must contain actual kernel OOM/limit counters.
+If init dies, only this fixed memory probe can use matching engine container/image/
+operation identity, memory/PID limits, `OOMKilled=true`, and exit 137 as boundary
+evidence. The runtime remains unknown until explicit stop confirms every descendant
+gone; the report keeps a null task exit and marks its workspace export unavailable.
+Ordinary unknowns, arbitrary signals, foreign identities and missing receipts never
+become successful tasks or validations. Protocol/schema stay at 1; version 1
+qualification reports must be replaced by all eleven version 2 checks.
+
+Qualification prints safe profile/operation progress and preserves unknown-state
+diagnostics, including engine exit/OOM metadata, before cleanup. It omits source,
+credentials, Docker argv and private engine error strings. A local four-iteration
+reproduction against accepted executor source `2b2a67a` produced three protected
+OOM results, then an unknown init with engine exit 137 and `OOMKilled=true`; the
+previous combined probe could not reliably preserve its own successful checks.
+The original CI failure had no phase/engine diagnostic, so its exact cause cannot
+be established retrospectively from that log alone.
+
+Before first dispatch and every unopened gate, the prepared profile must still
+match the current authorized profile's complete digest/data. A removed/replaced
+recipe cannot inherit another registry's successful qualification. Existing opened
+operations retain frozen readback/cancel access after revocation. Validation profile
+providers can extend `Runtime.registered_profile(manifest)` with current run-scoped
+certificate checks; they must not insert stale profiles into the static registry.
+
+Run-owned workspace, temporary files and HOME explicitly permit execution, with
+`nosuid,nodev` retained. Protected state/secrets remain `noexec`. Real qualification
+executes a shebang script from each run-owned mount, as well as verifying exported
+executable modes. Runner-only installations without the optional SDK skip only the
+SDK-dependent positive fixture and still test actionable missing-SDK diagnostics;
+source/native-extra environments run the full capability tests.
 Unit tests cover malformed archives, contracts, API auth/conflicts, DNS rebinding,
 and material qualification invalidation. No report substitutes these probes for
 feature 03's genuine authenticated native editing session or the later two-issue

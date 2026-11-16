@@ -13,7 +13,7 @@ from .artifacts import pack
 from .client import Client, ExecutorUnavailable
 from .contracts import Conflict, Rejected, digest
 from .qualify import smoke_profiles
-from .runtime import Runtime
+from .runtime import Runtime, task_tmpfs
 from .runtime import ResultInvalid
 from .engine import EngineError
 from .server import Handler, Server
@@ -63,6 +63,74 @@ class RuntimeContractTests(unittest.TestCase):
     def test_upload_rejects_digest_mismatch(self):
         with self.assertRaises(Rejected):
             self.runtime.upload("context", b"different", digest(self.context))
+
+    def ordinary_manifest(self):
+        from .contracts import Profile
+
+        base = next(entry for entry in self.profiles if entry.phase == "validation")
+        profile = Profile.parse(
+            {
+                **base.data(),
+                "profile_id": "previous-validation",
+                "argv": ["/usr/bin/true"],
+            }
+        )
+        self.runtime.profiles[profile.profile_id] = profile
+        manifest = {
+            **self.manifest,
+            "profile_id": profile.profile_id,
+            "profile_digest": profile.digest,
+            "phase": profile.phase,
+            "network_hosts": [],
+            "limits": asdict(profile.limits),
+        }
+        return profile, manifest
+
+    def test_removed_prepared_profile_cannot_use_a_new_registry_qualification(self):
+        profile, manifest = self.ordinary_manifest()
+        self.runtime.prepare(manifest)
+        self.runtime.profiles.pop(profile.profile_id)
+        with (
+            patch(
+                "vibearr_executor.qualification.capabilities",
+                return_value={"qualified": True},
+            ),
+            patch.object(self.runtime, "infrastructure") as infrastructure,
+            self.assertRaises(Rejected),
+        ):
+            self.runtime.start(manifest["operation_id"])
+        infrastructure.assert_not_called()
+
+    def test_replaced_prepared_profile_cannot_launch_its_old_recipe(self):
+        from .contracts import Profile
+
+        profile, manifest = self.ordinary_manifest()
+        self.runtime.prepare(manifest)
+        self.runtime.profiles[profile.profile_id] = Profile.parse(
+            {**profile.data(), "version": 2, "argv": ["/usr/bin/false"]}
+        )
+        with (
+            patch(
+                "vibearr_executor.qualification.capabilities",
+                return_value={"qualified": True},
+            ),
+            patch.object(self.runtime, "infrastructure") as infrastructure,
+            self.assertRaises(Rejected),
+        ):
+            self.runtime.start(manifest["operation_id"])
+        infrastructure.assert_not_called()
+
+    def test_run_owned_mounts_allow_exec_but_protected_state_does_not(self):
+        mounts = task_tmpfs({"workspace_mb": 64})
+        for path in ("/work", "/tmp", "/home/task"):
+            flags = mounts[path].split(",")
+            self.assertIn("exec", flags)
+            self.assertIn("nosuid", flags)
+            self.assertIn("nodev", flags)
+            self.assertNotIn("noexec", flags)
+        for path in ("/state", "/secrets"):
+            self.assertIn("noexec", mounts[path].split(","))
+            self.assertNotIn("exec", mounts[path].split(","))
 
     def test_unknown_run_holds_fence_before_another_run_can_launch(self):
         self.runtime.prepare(self.manifest)
@@ -163,6 +231,32 @@ class RuntimeContractTests(unittest.TestCase):
             result = self.runtime.status(record["operation_id"])
         self.assertEqual(result["state"], "unknown")
 
+    def test_stopped_init_reports_engine_evidence_without_inventing_a_task_result(self):
+        record = self.running_record()
+        engine_state = {
+            "Running": False,
+            "Status": "exited",
+            "ExitCode": 137,
+            "OOMKilled": True,
+            "FinishedAt": "2026-11-16T10:00:00Z",
+            "Error": "private-engine-detail",
+        }
+        with patch.object(self.runtime, "owned", return_value={"State": engine_state}):
+            result = self.runtime.status(record["operation_id"])
+        self.assertEqual(result["state"], "unknown")
+        self.assertNotIn("result", result)
+        self.assertEqual(
+            result["container_state"],
+            {
+                "status": "exited",
+                "exit_code": 137,
+                "oom_killed": True,
+                "finished_at": "2026-11-16T10:00:00Z",
+            },
+        )
+        self.assertNotIn("private-engine-detail", str(result))
+        self.assertTrue(self.runtime.record(record["operation_id"])["launch_intent"])
+
     def test_start_retry_does_not_exec_again_after_launch_gate_is_confirmed(self):
         record = self.running_record()
         expected = {"operation_id": record["operation_id"], "state": "running"}
@@ -174,6 +268,37 @@ class RuntimeContractTests(unittest.TestCase):
             patch.object(self.runtime.docker, "run") as engine,
         ):
             self.assertEqual(self.runtime.start(record["operation_id"]), expected)
+        engine.assert_not_called()
+
+    def test_revoked_running_profile_can_reconcile_without_opening_a_gate(self):
+        record = self.running_record()
+        self.runtime.profiles.pop(record["profile"]["profile_id"])
+        expected = {"operation_id": record["operation_id"], "state": "running"}
+        with (
+            patch.object(
+                self.runtime, "owned", return_value={"State": {"Running": True}}
+            ),
+            patch.object(self.runtime, "status", return_value=expected),
+            patch.object(self.runtime.docker, "run") as engine,
+        ):
+            self.assertEqual(self.runtime.start(record["operation_id"]), expected)
+        engine.assert_not_called()
+
+    def test_revoked_pending_profile_never_opens_its_unconfirmed_gate(self):
+        record = self.running_record()
+        record["gate_opened"] = False
+        self.runtime.save(record)
+        self.runtime.profiles.pop(record["profile"]["profile_id"])
+        with (
+            patch.object(
+                self.runtime, "owned", return_value={"State": {"Running": True}}
+            ),
+            patch.object(self.runtime, "harvest", return_value=False),
+            patch.object(self.runtime.docker, "run") as engine,
+        ):
+            result = self.runtime.start(record["operation_id"])
+        self.assertEqual(result["state"], "running")
+        self.assertIn("no longer authorized", result["wait_reason"])
         engine.assert_not_called()
 
     def test_replacement_container_id_cannot_be_adopted(self):

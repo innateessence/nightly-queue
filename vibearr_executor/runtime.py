@@ -49,6 +49,17 @@ class ResultInvalid(EngineError):
     pass
 
 
+def task_tmpfs(limits: dict) -> dict[str, str]:
+    workspace = limits["workspace_mb"]
+    return {
+        "/work": f"rw,nosuid,nodev,exec,size={workspace}m,uid=1000,gid=1000,mode=0700",
+        "/state": "rw,nosuid,nodev,noexec,size=64m,mode=0700",
+        "/secrets": "rw,nosuid,nodev,noexec,size=64k,mode=0711",
+        "/tmp": "rw,nosuid,nodev,exec,size=16m,mode=1777",
+        "/home/task": "rw,nosuid,nodev,exec,size=32m,uid=1000,gid=1000,mode=0700",
+    }
+
+
 class Runtime:
     def __init__(
         self,
@@ -159,6 +170,22 @@ class Runtime:
             "bytes": len(content),
         }
 
+    def registered_profile(self, manifest: dict) -> Profile | None:
+        return self.profiles.get(manifest.get("profile_id", ""))
+
+    def profile_is_current(self, record: dict) -> bool:
+        profile = self.registered_profile(record["manifest"])
+        return (
+            profile is not None
+            and profile.digest == record["manifest"]["profile_digest"]
+            and profile.data() == record["profile"]
+        )
+
+    def fenced_status(self, record: dict, reason: str) -> dict:
+        record["wait_reason"] = reason
+        self.save(record)
+        return self.status(record["operation_id"])
+
     def prepare(self, data: dict) -> dict:
         operation_id = identifier(data.get("operation_id"))
         with self.lock:
@@ -169,7 +196,7 @@ class Runtime:
                         "Operation identity already binds a different manifest."
                     )
                 return self.public(record)
-            profile = self.profiles.get(data.get("profile_id", ""))
+            profile = self.registered_profile(data)
             if profile is None:
                 raise Rejected("Runtime profile is not registered.")
             manifest = Manifest.parse(data, profile)
@@ -455,6 +482,14 @@ class Runtime:
                 raise Rejected("Prepare the operation first.")
             if record["state"] == "exited":
                 return self.public(record)
+            if record.get("launch_intent") and record.get("gate_opened"):
+                self.owned(record, record["name"])
+                return self.status(operation_id)
+            revoked = "Prepared runtime profile is no longer authorized; stop pending resources and prepare a new operation."
+            if not self.profile_is_current(record):
+                if record.get("launch_intent"):
+                    return self.fenced_status(record, revoked)
+                raise Rejected(revoked)
             from .qualification import capabilities
             from .qualify import smoke_profiles
 
@@ -462,6 +497,11 @@ class Runtime:
             probes = smoke_profiles(profile["image"], profile["database_image"])
             is_probe = any(candidate.data() == profile for candidate in probes)
             if not is_probe and not capabilities(self)["qualified"]:
+                if record.get("launch_intent"):
+                    return self.fenced_status(
+                        record,
+                        "Runtime qualification is stale; launch remains fenced pending reconciliation or stop.",
+                    )
                 raise Rejected(
                     "Installed runtime/profile qualification is missing or stale. Run automated boundary verification first."
                 )
@@ -503,6 +543,8 @@ class Runtime:
                         and existing["State"]["Running"]
                         and not record.get("gate_opened")
                     ):
+                        if not self.profile_is_current(record):
+                            return self.fenced_status(record, revoked)
                         try:
                             self.docker.run(
                                 "exec", record["name"], "touch", "/state/go"
@@ -566,17 +608,9 @@ class Runtime:
                     "8m",
                 ]
             )
-            mounts = {
-                "/work": f"size={limits['workspace_mb']}m,uid=1000,gid=1000,mode=0700",
-                "/state": "size=64m,mode=0700,noexec",
-                "/secrets": "size=64k,mode=0711,noexec",
-                "/tmp": "size=16m,mode=1777",
-                "/home/task": "size=32m,uid=1000,gid=1000,mode=0700",
-            }
+            mounts = task_tmpfs(limits)
             for destination, options in mounts.items():
-                arguments.extend(
-                    ("--tmpfs", f"{destination}:rw,nosuid,nodev,{options}")
-                )
+                arguments.extend(("--tmpfs", f"{destination}:{options}"))
             arguments.extend(
                 (
                     "--mount",
@@ -645,6 +679,8 @@ class Runtime:
             record["gate_intent"] = True
             record["state"] = "running"
             self.save(record)
+            if not self.profile_is_current(record):
+                return self.fenced_status(record, revoked)
             self.docker.run("exec", record["name"], "touch", "/state/go")
             record["gate_opened"] = True
             self.save(record)
@@ -747,6 +783,16 @@ class Runtime:
             else:
                 durable(self.path(operation_id) / "input" / "secret", b"")
                 record["state"] = "unknown"
+                engine_state = inspected["State"] if inspected is not None else {}
+                record["container_state"] = {
+                    "status": engine_state.get("Status", "missing"),
+                    "exit_code": engine_state.get("ExitCode"),
+                    "oom_killed": engine_state.get("OOMKilled"),
+                    "finished_at": engine_state.get("FinishedAt"),
+                }
+                record["wait_reason"] = (
+                    "Task container exited or disappeared before protected result readback; recovery is required."
+                )
                 self.save(record)
             return self.public(record)
 
@@ -794,6 +840,7 @@ class Runtime:
             "descendants_terminated",
             "result",
             "wait_reason",
+            "container_state",
         )
         return {key: record[key] for key in keys if key in record}
 
