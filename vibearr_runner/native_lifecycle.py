@@ -37,6 +37,10 @@ class NativeFailure(Exception):
     pass
 
 
+class NativeMetadataRejected(NativeFailure):
+    pass
+
+
 class NativeLifecycle:
     def __init__(self, host, *, executor=None, registry=None, validation_profile=None):
         from vibearr_executor.client import Client
@@ -268,7 +272,7 @@ class NativeLifecycle:
                 reason = "Native metadata was rejected and confirmed absent; terminate this attempt without replacing its execution."
                 if payload.get("kind") == "native_termination":
                     raise ReconciliationRequired(reason) from None
-                raise NativeFailure(reason) from None
+                raise NativeMetadataRejected(reason) from None
             self.state["request"].update(status="received", response=response)
             self.save()
             return response
@@ -971,11 +975,11 @@ class NativeLifecycle:
             "native_workspace", payload, f"workspace:{operation}"
         )
         self.native["candidate"] = payload
+        self.native["phase"] = "validation"
         if self.native.get("publication_revision"):
             from .native_revision import NativeRevision
 
             NativeRevision(self).activate_candidate()
-        self.native["phase"] = "validation"
         self.save()
         return "continue"
 

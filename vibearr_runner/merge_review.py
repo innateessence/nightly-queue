@@ -16,14 +16,21 @@ from .recovery import ReconciliationRequired
 
 def private_document(path):
     target = Path(path)
-    details = target.lstat()
-    if (
-        not stat.S_ISREG(details.st_mode)
-        or details.st_uid != os.getuid()
-        or stat.S_IMODE(details.st_mode) != 0o600
-    ):
-        raise ValueError("Trusted coordinator inputs must be owned regular0600 files.")
-    return json.loads(target.read_bytes())
+    descriptor = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as stream:
+        details = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(details.st_mode)
+            or details.st_uid != os.getuid()
+            or stat.S_IMODE(details.st_mode) != 0o600
+        ):
+            raise ValueError(
+                "Trusted coordinator inputs must be owned regular0600 files."
+            )
+        data = stream.read(262145)
+        if len(data) > 262144:
+            raise ValueError("Trusted coordinator input exceeds the size limit.")
+        return json.loads(data)
 
 
 def review_status(github, *, profile, binding, role, report_url):
@@ -47,6 +54,13 @@ def review_status(github, *, profile, binding, role, report_url):
     if not match or not match[2].startswith(configured["report_prefix"]):
         raise ValueError(
             "Review report must use the configured immutable control repository URL."
+        )
+    if (
+        configured["report_repository_id"] == workspace["repository_id"]
+        and match[1] == workspace["commit_sha"]
+    ):
+        raise ValueError(
+            "Publish AI review reports on a separate control branch without changing the candidate head."
         )
     identity, _ = github.repository(
         repository_url=f"https://github.com/{configured['report_repository']}.git"

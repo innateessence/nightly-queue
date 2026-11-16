@@ -1,6 +1,7 @@
 """One owned merge, followed by idempotent provider completion reporting."""
 
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from .delivery import DeliveryError, DeliveryUnknown, DeliveryRejected
 from .merge_contract import merge_profile
@@ -64,9 +65,12 @@ class NativeMerge:
                 "receipt": self.data["receipt"],
             },
         )
+        if "authorization_id" not in self.data:
+            self.data["authorization_id"] = str(uuid4())
+            self.host.save()
         identity = self.host.intent(
             payload,
-            f"merge:{self.delivery['publication_id']}:{self.workspace['commit_sha']}:{stage}",
+            f"merge:{self.delivery['publication_id']}:{self.data['authorization_id']}:{stage}",
         )
         self.data.setdefault("intents", {})[stage] = identity
         self.host.save()
@@ -161,9 +165,39 @@ class NativeMerge:
             run_id=self.host.run_id,
             context_digest=self.native["context"]["digest"],
         )
-        self.data["receipt"] = {"policy": policy, "checks": checks, "reviews": reviews}
+        receipt = {"policy": policy, "checks": checks, "reviews": reviews}
+        if self.data.get("intents") and self.data.get("receipt") != receipt:
+            self.terminal()
+            self.data.pop("intents", None)
+            self.data.pop("authorization_id", None)
+        self.data["receipt"] = receipt
         self.host.save()
-        self.register("merge")
+        from .native_lifecycle import NativeMetadataRejected
+
+        try:
+            self.register("merge")
+        except NativeMetadataRejected:
+            self.data["authorization_rejections"] = (
+                self.data.get("authorization_rejections", 0) + 1
+            )
+            self.data.pop("authorization_id", None)
+            self.host.save()
+            if self.data["authorization_rejections"] >= 3:
+                raise DeliveryError(
+                    "Current server merge authorization was rejected after three bounded attempts."
+                ) from None
+            if not self.host.checkpoint(force_source=True):
+                return "wait"
+            if github.base_sha(self.workspace) != self.workspace["base_revision"]:
+                return self.repair(
+                    "base_update", "Base moved during independent server authorization."
+                )
+            self.host.status(
+                "waiting",
+                reason="Provider authorization changed; reread current checks and AI reviews.",
+                validation_status="passed",
+            )
+            return "wait"
         if not self.host.checkpoint(force_source=True):
             return "wait"
         self.data["dispatched"] = True
@@ -174,7 +208,7 @@ class NativeMerge:
             # A405 may be an in-progress provider merge left by a timed-out call.
             # Only observation resolves ownership; this mutation is never replayed.
             pass
-        return self.reconcile()
+        return "continue"
 
     def reconcile(self):
         github = self.client(reconciliation=True)
@@ -203,6 +237,10 @@ class NativeMerge:
         self.host.artifact(
             "native_merge", payload, "merged:" + self.workspace["commit_sha"]
         )
+        if self.data.get("checkpoint") != "merged":
+            self.data["checkpoint"] = "merged"
+            self.host.save()
+            return "continue"
         return self.complete()
 
     def issue(self, github):

@@ -171,7 +171,6 @@ class NativeRevision:
             self.native.pop(key, None)
         self.native["phase"] = "validation"
         record["activated"] = True
-        self.host.save()
         self.activate_candidate()
         return "continue"
 
@@ -194,6 +193,7 @@ class NativeRevision:
         candidate = self.native["candidate"]["workspace"]
         if (
             not delivery
+            or not delivery.get("workspace")
             or delivery["workspace"]["commit_sha"] == candidate["commit_sha"]
         ):
             return
