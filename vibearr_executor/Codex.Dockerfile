@@ -1,5 +1,5 @@
 FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c
-LABEL io.vibearr.executor.protocol="1" io.vibearr.codex.version="0.169.0"
+LABEL io.vibearr.executor.protocol="1" io.vibearr.codex.version="0.169.0" io.vibearr.codex.review-purpose="1"
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git=1:2.39.5-0+deb12u3 iptables=1.8.9-2 ca-certificates=20230311+deb12u1 \
     && rm -rf /var/lib/apt/lists/* \

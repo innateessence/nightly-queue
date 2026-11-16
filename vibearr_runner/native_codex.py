@@ -155,6 +155,8 @@ class CodexEvents:
                 item.get("text"), str
             ):
                 event["text"] = item["text"][:4000]
+                if len(item["text"]) > 4000:
+                    event["text_truncated"] = True
             if item.get("type") == "command_execution" and isinstance(
                 item.get("command"), str
             ):
@@ -170,11 +172,12 @@ class NativeCodexAdapter:
     provider = "codex"
     version = CODEX_VERSION
     resume_supported = False
+    review_purpose_supported = True
 
     def __init__(self, client):
         self.client = client
 
-    def selected_profile(self, policy: ExecutionPolicy, kind: str):
+    def selected_profile(self, policy: ExecutionPolicy, kind: str, *, purpose="coding"):
         from vibearr_executor import QUALIFICATION_VERSION
         from vibearr_executor.contracts import Limits
 
@@ -199,6 +202,10 @@ class NativeCodexAdapter:
         for value in capabilities.get("profiles", []):
             if value.get("profile_id") != policy.runtime_profile:
                 continue
+            if purpose == "review" and value.get("native_review_purpose") is not True:
+                raise NativeSessionError(
+                    "Register and qualify a Codex image with the fixed review-purpose instruction boundary."
+                )
             profile = codex_profile(
                 value["image"],
                 kind,
@@ -244,12 +251,15 @@ class NativeCodexAdapter:
         policy: dict,
         deadline: str,
         credential: dict,
+        purpose: str = "coding",
     ) -> NativeSession:
         from vibearr_executor.codex_task import auth_material, context_data
         from vibearr_executor.contracts import Manifest, canonical, digest
         from vibearr_executor.secret_material import contains_secret
 
         selected = ExecutionPolicy.from_data(policy)
+        if purpose not in {"coding", "review"}:
+            raise NativeSessionError("Unsupported native Codex task purpose.")
         try:
             reference, material = credential["credential"], credential["material"]
             kind, secret = reference["kind"], material["secret"]
@@ -279,6 +289,8 @@ class NativeCodexAdapter:
                 "account_digest": digest(canonical(account)),
             }
         )
+        if purpose == "review":
+            context = context_data({**context, "purpose": "review"})
         encoded = canonical(context)
         if contains_secret(encoded, secret.encode()) or contains_secret(
             source, secret.encode()
@@ -286,7 +298,7 @@ class NativeCodexAdapter:
             raise NativeSessionError(
                 "Task source or prompt contains selected credential material."
             )
-        profile = self.selected_profile(selected, kind)
+        profile = self.selected_profile(selected, kind, purpose=purpose)
         capabilities = self.client.capabilities()
         if capabilities.get("qualified") is not True or not any(
             value.get("profile_digest") == profile.digest
@@ -324,6 +336,7 @@ class NativeCodexAdapter:
                 "image_digest": profile.image,
                 "runtime_binding_digest": capabilities.get("binding_digest"),
                 "manifest": manifest,
+                "purpose": purpose,
             }
         )
         self.client.upload("source", source)
@@ -354,6 +367,15 @@ class NativeCodexAdapter:
         ):
             raise NativeSessionError(
                 "Runtime qualification changed before native start; reconcile existing execution."
+            )
+        if session.purpose == "review" and not any(
+            value.get("profile_id") == session.manifest["profile_id"]
+            and value.get("image") == session.image_digest
+            and value.get("native_review_purpose") is True
+            for value in capabilities.get("profiles", [])
+        ):
+            raise NativeSessionError(
+                "Installed native image does not provide the qualified review-purpose boundary."
             )
         return self.client.start(self.bound(session))
 
@@ -525,6 +547,11 @@ class NativeCodexAdapter:
             profile = self.selected_profile(
                 ExecutionPolicy.from_data(policy), reference["kind"]
             )
+            review_supported = any(
+                value.get("profile_id") == profile.profile_id
+                and value.get("native_review_purpose") is True
+                for value in self.client.capabilities().get("profiles", [])
+            )
             if proof is not None:
                 if not isinstance(proof, dict):
                     raise NativeSessionError(
@@ -565,6 +592,7 @@ class NativeCodexAdapter:
                     )
                 return {
                     "native_adapter_available": True,
+                    "native_review_supported": review_supported,
                     "auth_available": True,
                     "authenticated": True,
                     "native_agent_ready": True,
@@ -574,6 +602,7 @@ class NativeCodexAdapter:
                 }
             return {
                 "native_adapter_available": True,
+                "native_review_supported": review_supported,
                 "auth_available": True,
                 "authenticated": False,
                 "native_agent_ready": False,

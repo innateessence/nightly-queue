@@ -20,14 +20,24 @@ class NativeSession:
     image_digest: str
     runtime_binding_digest: str
     manifest: dict
+    purpose: str = "coding"
 
     def to_data(self) -> dict:
-        return json.loads(json.dumps(asdict(self)))
+        value = asdict(self)
+        if self.purpose == "coding":
+            value.pop("purpose")
+        return json.loads(json.dumps(value))
 
     @classmethod
     def from_data(cls, value: dict) -> "NativeSession":
-        if not isinstance(value, dict) or set(value) != set(cls.__dataclass_fields__):
+        expected = set(cls.__dataclass_fields__)
+        if not isinstance(value, dict) or set(value) not in (
+            expected,
+            expected - {"purpose"},
+        ):
             raise NativeSessionError("Invalid native session record.")
+        if value.get("purpose", "coding") not in {"coding", "review"}:
+            raise NativeSessionError("Unsupported native session purpose.")
         manifest = value.get("manifest")
         account = value.get("account")
         if not isinstance(manifest, dict) or not isinstance(account, dict):
@@ -75,6 +85,7 @@ class NativeAdapter(Protocol):
         policy: dict,
         deadline: str,
         credential: dict,
+        purpose: str = "coding",
     ) -> NativeSession: ...
 
     def start(self, session: NativeSession) -> dict: ...

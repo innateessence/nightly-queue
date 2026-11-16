@@ -37,6 +37,10 @@ def validate_review_intent(value):
                 "Native review roles are independent and root."
             )
         session = NativeSession.from_data(data["session"])
+        if session.purpose != "review":
+            raise contract.NativeContractError(
+                "Review intent requires the fixed instruction-isolated review purpose."
+            )
         contract.account(session.account)
         contract.manifest(session.manifest)
         if session.manifest["phase"] != "agent":

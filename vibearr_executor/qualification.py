@@ -41,6 +41,7 @@ def binding(runtime: Runtime) -> dict:
         if profile.database_image
     }
     for image in sorted(workers | databases):
+        review_purpose = False
         try:
             installed = json.loads(runtime.docker.run("image", "inspect", image))[0]
             contract = installed["Config"].get("Labels", {}) or {}
@@ -48,9 +49,13 @@ def binding(runtime: Runtime) -> dict:
                 image not in workers
                 or contract.get("io.vibearr.executor.protocol") == "1"
             )
+            review_purpose = contract.get("io.vibearr.codex.review-purpose") == "1"
         except EngineError:
             present = False
-        images[image] = {"installed_contract": present}
+        images[image] = {
+            "installed_contract": present,
+            "native_review_purpose": review_purpose,
+        }
     return {
         "protocol_version": PROTOCOL_VERSION,
         "qualification_version": QUALIFICATION_VERSION,
@@ -121,6 +126,9 @@ def capabilities(runtime: Runtime) -> dict:
                 "network_hosts": list(profile.network_hosts),
                 "backend_secret_env": profile.backend_secret_env,
                 "database_image": profile.database_image,
+                "native_review_purpose": current["images"]
+                .get(profile.image, {})
+                .get("native_review_purpose", False),
             }
             for profile in [
                 *runtime.profiles.values(),

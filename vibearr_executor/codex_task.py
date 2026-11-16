@@ -144,15 +144,21 @@ def auth_material(kind: str, secret: str, *, runtime=False) -> str:
 
 
 def context_data(value):
-    if not isinstance(value, dict) or set(value) != {
+    expected = {
         "schema_version",
         "adapter",
         "model",
         "prompt",
         "auth_kind",
         "account_digest",
-    }:
+    }
+    if not isinstance(value, dict) or set(value) not in (
+        expected,
+        expected | {"purpose"},
+    ):
         raise ValueError("Invalid Codex task context.")
+    if "purpose" in value and value["purpose"] != "review":
+        raise ValueError("Only the fixed review purpose may extend the coding context.")
     if (
         type(value["schema_version"]) is not int
         or value["schema_version"] != 1
@@ -248,6 +254,8 @@ def launch(
         "web_search": "disabled",
         "cli_auth_credentials_store": "file",
     }
+    if context.get("purpose") == "review":
+        overrides["project_doc_max_bytes"] = 0
     for key, value in overrides.items():
         if key == "projects":
             literal = '{"/work"={trust_level="untrusted"}}'

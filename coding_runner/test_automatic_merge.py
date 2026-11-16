@@ -384,8 +384,10 @@ class MergeHost:
         self.snapshot = {"effective": {"merge_profile": profile()}}
         self.native = {
             "attempt": 0,
+            "ci_started_at": datetime.now(timezone.utc).isoformat(),
             "deadline": (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat(),
             "workspace_id": str(uuid4()),
+            "candidate": {"workspace": workspace(), "source_digest": "f" * 64},
             "context": {
                 "id": str(uuid4()),
                 "digest": "d" * 64,
@@ -434,6 +436,13 @@ class MergeHost:
 
 
 class MergeLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        coordinator = patch(
+            "vibearr_runner.native_reviews.NativeReviews.step", return_value="complete"
+        )
+        coordinator.start()
+        self.addCleanup(coordinator.stop)
+
     def test_base_change_after_paused_unstarted_intent_releases_only_that_fence(self):
         host = MergeHost()
         host.native["candidate"] = {"workspace": workspace()}

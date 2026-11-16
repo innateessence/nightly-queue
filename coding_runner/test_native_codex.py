@@ -137,6 +137,44 @@ class NativeCodexTests(unittest.TestCase):
     def prepare(self):
         return self.adapter.prepare(**self.request)
 
+    def test_review_purpose_requires_qualified_image_contract_before_preparation(self):
+        with self.assertRaises(NativeSessionError):
+            self.adapter.prepare(**self.request, purpose="review")
+        self.assertEqual(self.client.prepared, {})
+        self.assertEqual(self.client.starts, 0)
+
+    def test_review_session_binds_fixed_purpose_in_trusted_context(self):
+        original = self.client.capabilities
+
+        def capabilities():
+            value = original()
+            value["profiles"][0]["native_review_purpose"] = True
+            return value
+
+        self.client.capabilities = capabilities
+        uploaded = []
+        upload = self.client.upload
+
+        def capture(kind, content):
+            uploaded.append((kind, content))
+            return upload(kind, content)
+
+        self.client.upload = capture
+        session = self.adapter.prepare(**self.request, purpose="review")
+        self.assertEqual(session.purpose, "review")
+        self.assertEqual(session.to_data()["purpose"], "review")
+        context = next(content for kind, content in uploaded if kind == "context")
+        self.assertEqual(json.loads(context)["purpose"], "review")
+        self.assertEqual(
+            session.manifest["context_digest"], hashlib.sha256(context).hexdigest()
+        )
+
+    def test_old_coding_session_round_trip_preserves_immutable_shape(self):
+        session = self.prepare()
+        value = session.to_data()
+        self.assertNotIn("purpose", value)
+        self.assertEqual(NativeSession.from_data(value).to_data(), value)
+
     def completed_events(self):
         return (
             json.dumps({"type": "thread.started", "thread_id": str(uuid4())})

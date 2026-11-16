@@ -107,7 +107,20 @@ class NativeDelivery:
         suffix = "pr" if pull else "push"
         if self.native.get("publication_history"):
             suffix = workspace["commit_sha"] + ":" + suffix
-        self.host.artifact("native_delivery", payload, "publication-fact:" + suffix)
+        key = "publication-fact:" + suffix
+        self.host.artifact("native_delivery", payload, key)
+        if (
+            pull
+            and self.host.policy.delivery_mode == "merge"
+            and "ci_started_at" not in self.native
+        ):
+            saved = self.native.get("metadata", {}).get(key, {})
+            if not saved.get("acknowledged") or not saved.get("created_at"):
+                raise ReconciliationRequired(
+                    "Original server PR publication timestamp is unavailable; retain the same delivery."
+                )
+            self.native["ci_started_at"] = saved["created_at"]
+            self.host.save()
 
     def step(self):
         if self.data.get(

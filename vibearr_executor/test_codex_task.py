@@ -150,6 +150,34 @@ class CodexTaskTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             context_data({**self.context, "argv": ["other"]})
 
+    def test_review_purpose_disables_implicit_project_instructions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            arguments, _, _ = launch(
+                {**self.context, "purpose": "review"},
+                "selected-key-0123456789",
+                home=root / "home",
+                binary=self.binary(root),
+            )
+        self.assertIn("project_doc_max_bytes=0", arguments)
+
+    def test_coding_purpose_preserves_existing_instruction_behavior(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            arguments, _, _ = launch(
+                self.context,
+                "selected-key-0123456789",
+                home=root / "home",
+                binary=self.binary(root),
+            )
+        self.assertFalse(
+            any(value.startswith("project_doc_max_bytes=") for value in arguments)
+        )
+
+    def test_purpose_cannot_supply_arbitrary_launch_configuration(self):
+        with self.assertRaises(ValueError):
+            context_data({**self.context, "purpose": {"project_doc_max_bytes": 999999}})
+
     def test_fixed_launch_uses_clean_home_and_only_selected_auth(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

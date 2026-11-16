@@ -90,7 +90,11 @@ class NativeMerge:
             )
         self.data["profile"] = profile
         if "deadline" not in self.data:
-            deadline = datetime.now(timezone.utc) + timedelta(
+            if "ci_started_at" not in self.native:
+                raise DeliveryError(
+                    "Original server PR publication timestamp is required before CI/merge."
+                )
+            deadline = datetime.fromisoformat(self.native["ci_started_at"]) + timedelta(
                 seconds=profile["ci_timeout_seconds"]
             )
             if "ci_deadline" not in self.native:
@@ -117,6 +121,11 @@ class NativeMerge:
                 )
             policy = github.policy(self.workspace, profile)
             checks = github.checks(self.workspace, self.pull["number"], profile)
+            from .native_reviews import NativeReviews
+
+            progress = NativeReviews(self.host).step(profile)
+            if progress != "complete":
+                return progress
             reviews = github.reviews(
                 self.workspace,
                 self.pull["number"],

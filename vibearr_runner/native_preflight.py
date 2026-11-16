@@ -125,6 +125,13 @@ class NativePreflight:
                 diagnostic = adapter.diagnostics(
                     policy.to_data(), grant, model=model, proof=entry.get("proof")
                 )
+                if (
+                    policy.delivery_mode == "merge"
+                    and diagnostic.get("native_review_supported") is not True
+                ):
+                    raise NativeSessionError(
+                        "Selected backend/image lacks the qualified native review purpose; PR-only mode remains available."
+                    )
                 if diagnostic.get("native_agent_ready") is True:
                     report.update(ready=True, reason=diagnostic["reason"])
                     ready.append(project_id)

@@ -244,6 +244,8 @@ class NativeLifecycle:
                     "Native metadata acknowledgement differs from the frozen operation."
                 )
             record["acknowledged"] = True
+            if isinstance(evidence.get("created_at"), str):
+                record["created_at"] = evidence["created_at"]
             self.save()
         return record["operation_id"]
 
@@ -939,6 +941,14 @@ class NativeLifecycle:
             journal=self.journal,
             state=self.state,
         )
+        if (
+            self.native.get("delivery")
+            and self.native["attempt"]
+            and commit == data["request"]["source_commit"]
+        ):
+            raise NativeFailure(
+                "Published repair produced no new committed source change; the original PR is preserved."
+            )
         source = CandidateSource.from_git(workspace.checkout, commit)
         files = unpack(source.archive)
         if "requirements.txt" not in files:
@@ -1224,7 +1234,10 @@ class NativeLifecycle:
     def terminate(self):
         from .native_contract import termination_record, intent_operations
         from .native_merge import NativeMerge
+        from .native_reviews import NativeReviews
 
+        if self.native.get("reviews"):
+            NativeReviews(self).terminal()
         if self.native.get("merge"):
             NativeMerge(self).terminal()
 

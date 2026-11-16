@@ -42,6 +42,20 @@ class QualificationTests(unittest.TestCase):
         self.assertFalse(result["native_agent_ready"])
         self.assertEqual(result["instance_id"], self.runtime.instance)
 
+    def test_old_image_contract_does_not_claim_review_purpose(self):
+        with patch("vibearr_executor.qualification.binding", return_value=self.binding):
+            result = capabilities(self.runtime)
+        self.assertTrue(
+            all(value["native_review_purpose"] is False for value in result["profiles"])
+        )
+
+    def test_changed_review_image_contract_invalidates_original_proof(self):
+        changed = copy.deepcopy(self.binding)
+        changed["images"][self.image]["native_review_purpose"] = True
+        with patch("vibearr_executor.qualification.binding", return_value=changed):
+            result = capabilities(self.runtime)
+        self.assertFalse(result["qualified"])
+
     def test_instance_identity_survives_restart_and_changes_for_new_state(self):
         identity = self.runtime.instance
         self.runtime.close()

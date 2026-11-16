@@ -575,6 +575,10 @@ def validate_intent(value):
 
         fields(data, {"session", "workspace_id"})
         session = NativeSession.from_data(data["session"])
+        if session.purpose != "coding":
+            raise NativeContractError(
+                "Coding agent intent requires the original coding purpose."
+            )
         account(session.account)
         if session.account["backend"] != session.adapter:
             raise NativeContractError(
