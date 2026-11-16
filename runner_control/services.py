@@ -2,7 +2,6 @@ import hashlib
 import json
 import re
 import uuid
-from urllib.parse import urlsplit
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -187,6 +186,10 @@ def record_evidence(
     kind, payload, values = redact_run_payload(run, [kind, payload, values])
     if progress is not None:
         progress.update(zip(progress_fields, values))
+    if kind == "verified_delivery":
+        from .delivery import validate_delivery
+
+        validate_delivery(run, payload)
     evidence, created = append_evidence(run, operation_id, kind, payload)
     if created and progress is not None:
         for field, value in progress.items():
@@ -204,56 +207,9 @@ def record_evidence(
 
 
 def validate_success(run, result_url):
-    delivery = run.evidence.filter(kind="delivery").order_by("-pk").first()
-    validation = run.evidence.filter(kind="validation").order_by("-pk").first()
-    if delivery is None or validation is None:
-        raise ValidationError(
-            {"status": "Success requires delivery and validation evidence."}
-        )
-    entry = delivery.payload
-    try:
-        parsed = urlsplit(result_url)
-    except ValueError:
-        raise ValidationError(
-            {"result_url": "Send a valid pull request URL."}
-        ) from None
-    pull_request = parsed.scheme == "https" and re.fullmatch(
-        r"/[^/]+/[^/]+/pull/[1-9][0-9]*", parsed.path
-    )
-    delivered = (
-        entry.get("verified") is True and entry.get("pull_request_url") == result_url
-    )
-    commit = re.fullmatch(
-        r"[0-9a-f]{40}|[0-9a-f]{64}", str(entry.get("commit_sha", ""))
-    )
-    commands = validation.payload.get("commands")
-    validated = (
-        validation.payload.get("passed") is True
-        and isinstance(commands, list)
-        and bool(commands)
-    )
-    if validated:
-        validated = all(
-            isinstance(command, dict)
-            and isinstance(command.get("command"), str)
-            and bool(command["command"])
-            and type(command.get("exit_code")) is int
-            and command["exit_code"] == 0
-            for command in commands
-        )
-    if (
-        not pull_request
-        or parsed.username
-        or parsed.password
-        or not delivered
-        or not commit
-        or not validated
-    ):
-        raise ValidationError(
-            {
-                "status": "Success requires matching verified delivery and passing validation evidence."
-            }
-        )
+    from .delivery import validate_success as validate_delivery_success
+
+    validate_delivery_success(run, result_url)
 
 
 @transaction.atomic
