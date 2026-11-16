@@ -146,9 +146,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True)
     parser.add_argument("--binding", required=True)
-    parser.add_argument(
-        "--role", choices=("independent", "root", "external_root"), required=True
-    )
+    parser.add_argument("--role", choices=("independent", "root"), required=True)
     parser.add_argument("--report-url", required=True)
     parser.add_argument("--token-file", required=True)
     parser.add_argument("--state-file")

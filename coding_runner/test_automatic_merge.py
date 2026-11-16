@@ -31,8 +31,6 @@ def profile():
         "repository_id": 17,
         "actor_id": 25,
         "ci_timeout_seconds": 1800,
-        "review_timeout_seconds": 1200,
-        "control_base": "vibearr/reviews",
         "delete_branch": False,
         "checks": [
             {
@@ -48,8 +46,8 @@ def profile():
                 "role": role,
                 "context": "ai-review/" + role,
                 "creator_id": 25,
-                "report_repository": "owner/repo",
-                "report_repository_id": 17,
+                "report_repository": "owner/reports",
+                "report_repository_id": 18,
                 "report_prefix": "reports/",
             }
             for role in ("independent", "root")
@@ -138,7 +136,7 @@ def receipt(run_id="run"):
                 "status_id": index + 40,
                 "creator_id": 25,
                 "context": "ai-review/" + role,
-                "report_url": "https://github.com/owner/repo/blob/"
+                "report_url": "https://github.com/owner/reports/blob/"
                 + "e" * 40
                 + "/reports/"
                 + role
@@ -228,11 +226,6 @@ class Provider(MergeGitHub):
             return {"id": 25}
         if path == "/repos/owner/repo":
             return {"allow_squash_merge": True}
-        if "/git/ref/heads/vibearr%2Freviews" in path:
-            return {
-                "ref": "refs/heads/vibearr/reviews",
-                "object": {"type": "commit", "sha": "a" * 40},
-            }
         if "/rules/branches/" in path:
             return self.rules
         if "/rulesets/" in path:

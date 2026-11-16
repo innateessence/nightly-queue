@@ -22,8 +22,6 @@ def merge_profile(value):
             "checks",
             "reviews",
             "ci_timeout_seconds",
-            "review_timeout_seconds",
-            "control_base",
             "delete_branch",
         },
     )
@@ -34,14 +32,6 @@ def merge_profile(value):
     timeout = value["ci_timeout_seconds"]
     if type(timeout) is not int or not 1 <= timeout <= 86400:
         raise NativeContractError("CI wait must be between1 and86400 seconds.")
-    review_timeout = value["review_timeout_seconds"]
-    if type(review_timeout) is not int or not 60 <= review_timeout <= 3600:
-        raise NativeContractError(
-            "Aggregate AI review allowance must be between60 and3600 seconds."
-        )
-    from .native_contract import branch
-
-    branch(value["control_base"])
     if type(value["delete_branch"]) is not bool:
         raise NativeContractError("Branch cleanup must be explicit.")
     checks = value["checks"]
@@ -67,7 +57,7 @@ def merge_profile(value):
     if len(set(names)) != len(names):
         raise NativeContractError("Required check names must be unique.")
     reviews = value["reviews"]
-    if not isinstance(reviews, list) or len(reviews) not in {2, 3}:
+    if not isinstance(reviews, list) or len(reviews) != 2:
         raise NativeContractError("Configure independent and root AI review producers.")
     for entry in reviews:
         fields(
@@ -85,38 +75,14 @@ def merge_profile(value):
         positive(entry["report_repository_id"])
         for key in ("context", "report_repository", "report_prefix"):
             text(entry[key], 200)
-        if (
-            entry["report_prefix"].startswith("/")
-            or ".." in entry["report_prefix"]
-            or not entry["report_prefix"].endswith("/")
-        ):
+        if entry["report_prefix"].startswith("/") or ".." in entry["report_prefix"]:
             raise NativeContractError(
                 "Review report prefix must be repository relative."
             )
-    roles = {entry["role"] for entry in reviews}
-    if roles not in (
-        {"independent", "root"},
-        {"independent", "root", "external_root"},
-    ) or len(roles) != len(reviews):
+    if {entry["role"] for entry in reviews} != {"independent", "root"}:
         raise NativeContractError("Both independent and root AI review are required.")
-    if len({entry["context"] for entry in reviews}) != len(reviews):
+    if len({entry["context"] for entry in reviews}) != 2:
         raise NativeContractError("Review contexts must be distinct.")
-    builtin = [entry for entry in reviews if entry["role"] != "external_root"]
-    if any(
-        entry["report_repository_id"] != value["repository_id"]
-        or entry["creator_id"] != value["actor_id"]
-        for entry in builtin
-    ):
-        raise NativeContractError(
-            "Built-in reviews publish in the owned repository through the selected actor."
-        )
-    if (
-        len({(entry["report_repository"], entry["report_prefix"]) for entry in builtin})
-        != 1
-    ):
-        raise NativeContractError(
-            "Built-in review reports require one fixed control repository and path prefix."
-        )
     return copied(value)
 
 
@@ -188,7 +154,7 @@ def merge_receipt(value, profile, workspace):
     if len(set(names)) != len(names):
         raise NativeContractError("Merge checks must have unique trusted identities.")
     reviews = value["reviews"]
-    if not isinstance(reviews, list) or len(reviews) not in {2, 3}:
+    if not isinstance(reviews, list) or len(reviews) != 2:
         raise NativeContractError("Merge requires two trusted AI reviews.")
     for entry in reviews:
         fields(
@@ -208,11 +174,7 @@ def merge_receipt(value, profile, workspace):
         text(entry["context"], 200)
         text(entry["report_url"], 500)
         sha(entry["report_digest"])
-    roles = {entry["role"] for entry in reviews}
-    if roles not in (
-        {"independent", "root"},
-        {"independent", "root", "external_root"},
-    ) or len(roles) != len(reviews):
+    if {entry["role"] for entry in reviews} != {"root", "independent"}:
         raise NativeContractError("Merge requires independent and root reviews.")
     if profile is not None:
         profile = merge_profile(profile)
@@ -233,10 +195,6 @@ def merge_receipt(value, profile, workspace):
             raise NativeContractError(
                 "Merge receipt must cover the complete required check set."
             )
-        if roles != {entry["role"] for entry in profile["reviews"]}:
-            raise NativeContractError(
-                "Merge receipt must cover every configured AI review gate."
-            )
         for entry in reviews:
             configured = next(
                 value for value in profile["reviews"] if value["role"] == entry["role"]
@@ -252,7 +210,7 @@ def merge_receipt(value, profile, workspace):
 
 
 @checked
-def review_document(value, *, role, run_id, context_digest, workspace, pull_number):
+def review_report(value, *, role, run_id, context_digest, workspace, pull_number):
     fields(
         value,
         {
@@ -283,6 +241,7 @@ def review_document(value, *, role, run_id, context_digest, workspace, pull_numb
         "head_sha": workspace["commit_sha"],
         "base_sha": workspace["base_revision"],
         "tree_sha": workspace["tree_sha"],
+        "verdict": "no_p2_or_higher",
     }
     if any(value[key] != entry for key, entry in expected.items()):
         raise NativeContractError(
@@ -295,17 +254,7 @@ def review_document(value, *, role, run_id, context_digest, workspace, pull_numb
         raise NativeContractError("Review findings must be bounded.")
     for finding in findings:
         fields(finding, {"priority", "description"})
-        if finding["priority"] not in {"P0", "P1", "P2", "P3", "P4"}:
-            raise NativeContractError("Review findings require a supported priority.")
+        if finding["priority"] not in {"P3", "P4"}:
+            raise NativeContractError("Review has unresolved P2 or higher findings.")
         text(finding["description"], 2000)
-    blocked = any(entry["priority"] in {"P0", "P1", "P2"} for entry in findings)
-    if value["verdict"] != ("changes_requested" if blocked else "no_p2_or_higher"):
-        raise NativeContractError("Review verdict differs from its actual findings.")
     return copied(value)
-
-
-def review_report(value, **binding):
-    result = review_document(value, **binding)
-    if result["verdict"] != "no_p2_or_higher":
-        raise NativeContractError("Review has unresolved P2 or higher findings.")
-    return result

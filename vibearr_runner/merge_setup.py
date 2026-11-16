@@ -108,10 +108,6 @@ def setup_plan(github, profile, *, base, ruleset_id):
         "repository": name,
         "base": base,
         "base_sha": workspace["base_revision"],
-        "control_base": profile["control_base"],
-        "control_base_sha": github.base_sha(
-            {**workspace, "base_branch": profile["control_base"]}
-        ),
         "ruleset_id": ruleset_id,
         "original": original,
         "desired": desired,
