@@ -93,6 +93,7 @@ class ProjectTests(TestCase):
             github_repository_id=99,
             github_owner_id=42,
             github_default_branch="main",
+            github_authority_version=9,
             sync_lock_token=uuid.uuid4(),
             sync_lock_until=timezone.now(),
             sync_etags={"1": {"etag": "new"}},

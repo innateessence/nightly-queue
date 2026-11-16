@@ -430,6 +430,37 @@ class AutoImportTests(TestCase):
             QueueItem.objects.filter(project=other, issue_number=2).exists()
         )
 
+    @patch("work_queue.tasks.repository_issues")
+    def test_issue_page_cannot_apply_after_newer_repository_observation(self, fetch):
+        from .services import accept_repository_observation, repository_authority_state
+        from .test_selection import source_repository
+
+        import_issue(project=self.project, **issue())
+        item = QueueItem.objects.get(project=self.project)
+        expected_item = QueueItem.objects.values().get(pk=item.pk)
+
+        def page(*args, **kwargs):
+            current = Project.objects.get(pk=self.project.pk)
+            accept_repository_observation(
+                project=current,
+                repository=source_repository(
+                    owner_id=777, repository_url=current.repository_url
+                ),
+                expected=repository_authority_state(current),
+            )
+            return [issue(state="closed", labels=["vibearr:hold"])]
+
+        fetch.side_effect = page
+        with self.assertLogs("work_queue.tasks", level="WARNING"):
+            result = import_auto_issues()
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["projects"], 0)
+        self.assertEqual(QueueItem.objects.values().get(pk=item.pk), expected_item)
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.github_owner_id, 777)
+        self.assertEqual(self.project.github_authority_version, 2)
+        self.assertIsNone(self.project.sync_success_at)
+
 
 class ConditionalImportTests(TestCase):
     @patch("work_queue.github.github_read")

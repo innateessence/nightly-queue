@@ -432,6 +432,82 @@ class WorkSelectionTests(TestCase):
                 )
         self.assertEqual(QueueItem.objects.values().get(pk=claimed.pk), expected)
 
+    def assert_stale_repository_reply_preserves_newer_authority(self, newer):
+        original = source_issue()
+        import_issue(project=self.project, **original)
+        claimed = claim_next()
+        expected = QueueItem.objects.values().get(pk=claimed.pk)
+        requests = []
+
+        def repository(*args, **kwargs):
+            requests.append(True)
+            if len(requests) == 2:
+                Project.objects.filter(pk=self.project.pk).update(**newer)
+            return source_repository()
+
+        with (
+            patch("work_queue.github.repository_metadata", side_effect=repository),
+            patch("work_queue.github.read_issue", return_value=original),
+        ):
+            with self.assertRaisesMessage(
+                ValidationError, "Repository authority changed"
+            ):
+                refresh_issue_for_launch(
+                    item_id=claimed.pk, claim_token=claimed.claim_token, token="test"
+                )
+        self.project.refresh_from_db()
+        for field, value in newer.items():
+            self.assertEqual(getattr(self.project, field), value)
+        self.assertEqual(QueueItem.objects.values().get(pk=claimed.pk), expected)
+
+    def test_stale_owner_reply_cannot_restore_former_authority(self):
+        self.assert_stale_repository_reply_preserves_newer_authority(
+            {"github_owner_id": 777}
+        )
+
+    def test_stale_default_reply_cannot_unprotect_new_default(self):
+        self.assert_stale_repository_reply_preserves_newer_authority(
+            {"github_default_branch": "vibearr/issue-1"}
+        )
+
+    def test_stale_canonical_url_cannot_override_accepted_rename(self):
+        self.assert_stale_repository_reply_preserves_newer_authority(
+            {"repository_url": "https://github.com/new-owner/repo.git"}
+        )
+
+    def test_newer_identical_observation_fences_older_provider_reply(self):
+        from .services import accept_repository_observation, repository_authority_state
+
+        original = source_issue()
+        import_issue(project=self.project, **original)
+        claimed = claim_next()
+        requests = []
+
+        def repository(*args, **kwargs):
+            requests.append(True)
+            if len(requests) == 2:
+                current = Project.objects.get(pk=self.project.pk)
+                accept_repository_observation(
+                    project=current,
+                    repository=source_repository(),
+                    expected=repository_authority_state(current),
+                )
+            return source_repository()
+
+        with (
+            patch("work_queue.github.repository_metadata", side_effect=repository),
+            patch("work_queue.github.read_issue", return_value=original),
+        ):
+            with self.assertRaisesMessage(
+                ValidationError, "Repository authority changed"
+            ):
+                refresh_issue_for_launch(
+                    item_id=claimed.pk, claim_token=claimed.claim_token, token="test"
+                )
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.github_authority_version, 1)
+        self.assertEqual(self.project.github_owner_id, 42)
+
 
 class SourceMetadataTests(TestCase):
     def test_incomplete_provider_metadata_is_rejected(self):

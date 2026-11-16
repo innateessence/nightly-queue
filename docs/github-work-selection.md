@@ -161,3 +161,17 @@ server-owned GitHub identity, default-branch, enablement, and synchronization fi
 A stale name/form save cannot erase a synchronization result or permit repointing
 a bound repository. Synchronization also fences a changed configured repository
 before binding the response to work.
+
+
+Repository observations use the server-owned `github_authority_version` together
+with the complete accepted repository ID, owner ID, default branch, and canonical
+URL. Both polling and launch refresh capture that state before network collection
+and compare it under the project lock before applying any source changes. Every
+accepted observation advances the version, including identical metadata, so a
+newer accepted observation fences earlier in-flight replies. Import issue pages
+and the final synchronization cursor are also bound to the accepted authority
+state. A conflict waits for a fresh collection; it cannot restore an old owner,
+unprotect a new default, overwrite a rename, cancel work, or finalize comments.
+Normal project edits preserve this version with the other server-owned metadata.
+The migration initializes existing projects at version zero; the next accepted
+provider observation advances it without changing author/backfill settings.

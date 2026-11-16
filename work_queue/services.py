@@ -70,6 +70,44 @@ def issue_directives(body):
     return dependencies, branch, ""
 
 
+def repository_authority_state(project):
+    fields = (
+        "github_authority_version",
+        "github_repository_id",
+        "github_owner_id",
+        "github_default_branch",
+        "repository_url",
+    )
+    return {field: getattr(project, field) for field in fields}
+
+
+def verify_repository_authority(project, expected):
+    if repository_authority_state(project) != expected:
+        raise ValidationError(
+            "Repository authority changed during source collection; refresh and retry."
+        )
+
+
+@transaction.atomic
+def accept_repository_observation(*, project, repository, expected):
+    current = Project.objects.select_for_update().get(pk=project.pk)
+    verify_repository_authority(current, expected)
+    if (
+        current.github_repository_id
+        and current.github_repository_id != repository["repository_id"]
+    ):
+        raise ValidationError("Repository identity changed; observation is blocked.")
+    Project.objects.filter(pk=current.pk).update(
+        github_repository_id=repository["repository_id"],
+        github_owner_id=repository["owner_id"],
+        github_default_branch=repository["default_branch"],
+        repository_url=repository["repository_url"],
+        github_authority_version=current.github_authority_version + 1,
+    )
+    current.refresh_from_db()
+    return current
+
+
 @transaction.atomic
 def import_issue(
     *,
@@ -80,9 +118,12 @@ def import_issue(
     state,
     sync_lock_token=None,
     expected_revision=None,
+    expected_authority=None,
     **metadata,
 ):
     project = Project.objects.select_for_update().get(pk=project.pk)
+    if expected_authority is not None:
+        verify_repository_authority(project, expected_authority)
     if sync_lock_token is not None and (
         project.sync_lock_token != sync_lock_token
         or not project.sync_lock_until
@@ -494,6 +535,7 @@ def refresh_issue_for_launch(*, item_id, claim_token, token, runner=None, run_id
         )
     if runner is not None:
         verify_active(owned_run(runner, run_id), claim_token)
+    expected_authority = repository_authority_state(item.project)
     repository = None
     comments = None
     fresh = None
@@ -517,6 +559,7 @@ def refresh_issue_for_launch(*, item_id, claim_token, token, runner=None, run_id
         ):
             raise GitHubAPIError("Issue identity changed; launch is blocked.")
     return _apply_source_refresh(
+        expected_authority=expected_authority,
         project_id=item.project_id,
         item_id=item_id,
         claim_token=claim_token,
@@ -536,7 +579,16 @@ def verify_source_claim(item, claim_token):
 
 
 def _apply_source_refresh(
-    *, project_id, item_id, claim_token, repository, fresh, comments, runner, run_id
+    *,
+    expected_authority,
+    project_id,
+    item_id,
+    claim_token,
+    repository,
+    fresh,
+    comments,
+    runner,
+    run_id,
 ):
     from runner_control.auth import token_digest
     from runner_control.models import Run
@@ -581,18 +633,16 @@ def _apply_source_refresh(
             or repository["repository_id"] != project.github_repository_id
         ):
             raise ValidationError("Repository identity changed; launch is blocked.")
+        verify_repository_authority(project, expected_authority)
         import_issue(
             project=project,
             repository_id=item.github_repository_id,
             expected_revision=item.source_snapshot.get("revision"),
             **fresh,
         )
-        Project.objects.filter(pk=project.pk).update(
-            github_owner_id=repository["owner_id"],
-            github_default_branch=repository["default_branch"],
-            repository_url=repository["repository_url"],
+        project = accept_repository_observation(
+            project=project, repository=repository, expected=expected_authority
         )
-        project.refresh_from_db()
         item.refresh_from_db()
         item.project = project
         reason = source_wait_reason(item)

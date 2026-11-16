@@ -534,6 +534,197 @@ class SourceClaimConcurrencyTests(TransactionTestCase):
             Project.objects.values().get(pk=self.project.pk), expected["project"]
         )
 
+    def test_old_refresh_cannot_overwrite_real_newer_importer_observation(self):
+        import uuid
+        from threading import Event
+        from unittest.mock import patch
+        from django.core.exceptions import ValidationError
+        from credentials.models import APISettings, Credential
+        from runner_control.configuration import configuration_document
+        from runner_control.models import Run
+        from runner_control.services import claim_run
+        from .services import refresh_issue_for_launch
+        from .tasks import import_auto_issues
+        from .test_selection import source_repository
+
+        APISettings.objects.create(
+            github_credential=Credential.objects.get(name="GitHub")
+        )
+        run = claim_run(
+            runner=self.runner,
+            run_id=uuid.uuid4(),
+            configuration_revision=configuration_document()["revision"],
+        )
+        original = source_issue(
+            created_at=self.item.issue_created_at.isoformat(),
+            updated_at=self.item.issue_updated_at.isoformat(),
+        )
+        old_repository = source_repository()
+        newer_repository = source_repository(
+            owner_id=777,
+            default_branch="trunk",
+            repository_url="https://github.com/new-owner/repo.git",
+        )
+        final_read = Event()
+        synchronized = Event()
+        observations = []
+        expected_item = QueueItem.objects.values().get(pk=self.item.pk)
+        expected_run = Run.objects.values().get(pk=run.pk)
+        accepted = {}
+
+        def repository(*args, **kwargs):
+            observations.append(True)
+            if len(observations) == 2:
+                final_read.set()
+                self.assertTrue(synchronized.wait(5))
+            return old_repository
+
+        def refresh():
+            try:
+                self.bounded_connection()
+                with self.assertRaisesMessage(
+                    ValidationError, "Repository authority changed"
+                ):
+                    refresh_issue_for_launch(
+                        item_id=run.item_id,
+                        claim_token=run.item.claim_token,
+                        token="test",
+                        runner=self.runner,
+                        run_id=run.pk,
+                    )
+            finally:
+                connections.close_all()
+
+        def synchronize():
+            try:
+                self.bounded_connection()
+                self.assertTrue(final_read.wait(5))
+                self.assertEqual(import_auto_issues()["projects"], 1)
+                accepted.update(Project.objects.values().get(pk=self.project.pk))
+                self.assertEqual(accepted["github_owner_id"], 777)
+                synchronized.set()
+            finally:
+                connections.close_all()
+
+        with (
+            patch("work_queue.github.repository_metadata", side_effect=repository),
+            patch("work_queue.github.issue_comments", return_value=[]),
+            patch("work_queue.github.read_issue", return_value=original),
+            patch(
+                "work_queue.tasks.repository_metadata", return_value=newer_repository
+            ),
+            patch("work_queue.tasks.repository_issues", return_value=[]),
+        ):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                refreshing = pool.submit(refresh)
+                syncing = pool.submit(synchronize)
+                refreshing.result(timeout=10)
+                syncing.result(timeout=10)
+        self.assertEqual(Project.objects.values().get(pk=self.project.pk), accepted)
+        self.assertEqual(accepted["github_authority_version"], 1)
+        self.assertEqual(QueueItem.objects.values().get(pk=self.item.pk), expected_item)
+        self.assertEqual(Run.objects.values().get(pk=run.pk), expected_run)
+
+    def test_old_importer_cannot_overwrite_newer_refresh_authority(self):
+        import uuid
+        from threading import Event
+        from unittest.mock import patch
+        from django.core.exceptions import ValidationError
+        from credentials.models import APISettings, Credential
+        from runner_control.configuration import configuration_document
+        from runner_control.models import Run
+        from runner_control.services import claim_run
+        from .services import refresh_issue_for_launch, repository_authority_state
+        from .tasks import import_auto_issues
+        from .test_selection import source_repository
+
+        APISettings.objects.create(
+            github_credential=Credential.objects.get(name="GitHub")
+        )
+        run = claim_run(
+            runner=self.runner,
+            run_id=uuid.uuid4(),
+            configuration_revision=configuration_document()["revision"],
+        )
+        original = source_issue(
+            created_at=self.item.issue_created_at.isoformat(),
+            updated_at=self.item.issue_updated_at.isoformat(),
+        )
+        imported_read = Event()
+        refreshed = Event()
+        newer_repository = source_repository(
+            owner_id=777,
+            default_branch="trunk",
+            repository_url="https://github.com/new-owner/repo.git",
+        )
+        expected = {}
+
+        def importer_repository(*args, **kwargs):
+            imported_read.set()
+            self.assertTrue(refreshed.wait(5))
+            return source_repository()
+
+        def synchronize():
+            try:
+                self.bounded_connection()
+                with self.assertLogs("work_queue.tasks", level="WARNING"):
+                    result = import_auto_issues()
+                self.assertEqual(result["failed"], 1)
+                self.assertEqual(result["projects"], 0)
+            finally:
+                connections.close_all()
+
+        def refresh():
+            try:
+                self.bounded_connection()
+                self.assertTrue(imported_read.wait(5))
+                with self.assertRaisesMessage(
+                    ValidationError, "author is not permitted"
+                ):
+                    refresh_issue_for_launch(
+                        item_id=run.item_id,
+                        claim_token=run.item.claim_token,
+                        token="test",
+                        runner=self.runner,
+                        run_id=run.pk,
+                    )
+                expected["authority"] = repository_authority_state(
+                    Project.objects.get(pk=self.project.pk)
+                )
+                expected["item"] = QueueItem.objects.values().get(pk=self.item.pk)
+                expected["run"] = Run.objects.values().get(pk=run.pk)
+                refreshed.set()
+            finally:
+                connections.close_all()
+
+        with (
+            patch(
+                "work_queue.tasks.repository_metadata", side_effect=importer_repository
+            ),
+            patch("work_queue.tasks.repository_issues", return_value=[]) as issues,
+            patch(
+                "work_queue.github.repository_metadata", return_value=newer_repository
+            ),
+            patch("work_queue.github.issue_comments", return_value=[]),
+            patch("work_queue.github.read_issue", return_value=original),
+        ):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                syncing = pool.submit(synchronize)
+                refreshing = pool.submit(refresh)
+                syncing.result(timeout=10)
+                refreshing.result(timeout=10)
+        self.assertEqual(
+            repository_authority_state(Project.objects.get(pk=self.project.pk)),
+            expected["authority"],
+        )
+        self.assertEqual(expected["authority"]["github_owner_id"], 777)
+        self.assertEqual(expected["authority"]["github_authority_version"], 1)
+        self.assertEqual(
+            QueueItem.objects.values().get(pk=self.item.pk), expected["item"]
+        )
+        self.assertEqual(Run.objects.values().get(pk=run.pk), expected["run"])
+        issues.assert_not_called()
+
 
 class ProjectSyncEditConcurrencyTests(TransactionTestCase):
     def test_sync_metadata_survives_concurrent_stale_form_save(self):

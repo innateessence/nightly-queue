@@ -19,6 +19,7 @@ class Project(models.Model):
         null=True, blank=True, editable=False
     )
     github_default_branch = models.CharField(max_length=200, blank=True, editable=False)
+    github_authority_version = models.PositiveBigIntegerField(default=0, editable=False)
     permitted_author_ids = models.JSONField(default=list, blank=True)
     enabled_at = models.DateTimeField(null=True, blank=True, editable=False)
     backfill_issues = models.BooleanField(default=False)

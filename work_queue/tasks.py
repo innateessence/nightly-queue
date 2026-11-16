@@ -15,7 +15,13 @@ from projects.models import Project
 
 from .github import GitHubAPIError, repository_issues, repository_metadata
 from .models import QueueItem
-from .services import claim_auto_sync, import_issue
+from .services import (
+    claim_auto_sync,
+    import_issue,
+    accept_repository_observation,
+    repository_authority_state,
+    verify_repository_authority,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +67,7 @@ def import_auto_issues(scheduled=False):
         ):
             continue
         owned = Project.objects.filter(pk=project.pk, sync_lock_token=lock)
+        expected_authority = repository_authority_state(project)
         try:
             repository = repository_metadata(
                 project.repository_url, token, project.github_repository_id
@@ -72,13 +79,7 @@ def import_auto_issues(scheduled=False):
                 raise GitHubAPIError("Repository identity changed.")
             with transaction.atomic():
                 current = Project.objects.select_for_update().get(pk=project.pk)
-                if (
-                    current.repository_url != project.repository_url
-                    or current.github_repository_id != project.github_repository_id
-                ):
-                    raise GitHubAPIError(
-                        "Project repository configuration changed during synchronization."
-                    )
+                verify_repository_authority(current, expected_authority)
                 if (
                     current.sync_lock_token != lock
                     or not current.sync_lock_until
@@ -94,13 +95,10 @@ def import_auto_issues(scheduled=False):
                     github_repository_id=repository["repository_id"],
                     issue_repository=repository["repository_url"],
                 )
-                owned.update(
-                    github_repository_id=repository["repository_id"],
-                    github_owner_id=repository["owner_id"],
-                    github_default_branch=repository["default_branch"],
-                    repository_url=repository["repository_url"],
+                project = accept_repository_observation(
+                    project=current, repository=repository, expected=expected_authority
                 )
-            project.refresh_from_db()
+            expected_authority = repository_authority_state(project)
             etags = project.sync_etags.copy()
             for issue in repository_issues(project.repository_url, token, etags=etags):
                 if not owned.filter(sync_lock_until__gt=timezone.now()).update(
@@ -111,16 +109,20 @@ def import_auto_issues(scheduled=False):
                     import_issue(
                         project=project,
                         sync_lock_token=lock,
+                        expected_authority=expected_authority,
                         repository_id=repository["repository_id"],
                         **issue,
                     )
                 )
-            owned.update(
-                sync_success_at=timezone.now(),
-                sync_etags=etags,
-                sync_error="",
-                sync_not_before=None,
-            )
+            with transaction.atomic():
+                current = Project.objects.select_for_update().get(pk=project.pk)
+                verify_repository_authority(current, expected_authority)
+                owned.update(
+                    sync_success_at=timezone.now(),
+                    sync_etags=etags,
+                    sync_error="",
+                    sync_not_before=None,
+                )
         except (GitHubAPIError, ValidationError) as exc:
             logger.warning(
                 "Auto issue import failed for project %s; check API access and retry next scheduled sync.",
