@@ -1,5 +1,9 @@
 # Coding runner gap analysis and feature branches
 
+Historical implementation backlog. For the current development direction and
+feature branches, see the [autonomous AI queue pivot plan](autonomous-ai-queue-plan.md).
+The gap analysis below describes its original baseline, not the current code.
+
 This is the implementation backlog for [the runner architecture](coding-runner.md),
 based on the code at `7665437`. Branch names below are proposed implementation
 branches; this document does not create or implement them.

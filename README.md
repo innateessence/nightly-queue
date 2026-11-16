@@ -1,5 +1,10 @@
 # nightly-queue
 
+Development direction: see the [autonomous AI queue pivot plan](docs/autonomous-ai-queue-plan.md)
+for approval-free background execution, native coding agents, and using this
+repository's GitHub issues as its own development backlog. The plan describes
+future work; the runtime behavior below is unchanged.
+
 Queue work for your GitHub projects. Django stores tasks and imports issues.
 A dedicated, recoverable `coding-runner` service implements context, planning,
 implementation, validation, and PR delivery through separately scoped HTTP APIs.
