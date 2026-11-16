@@ -6,6 +6,7 @@ from .api import run_response
 from .auth import runner_api_view
 from .retention import acknowledge, plan, purge_candidates, purge_run, workspace_removed
 from .services import uuid_field
+from .plan_presentation import present_configuration_payload, qualification_runs
 
 
 @runner_api_view("GET", "POST")
@@ -71,7 +72,23 @@ def release_suite(request, qualification_id):
         )
 
     def response():
-        authorized(entry, request.runner_identity, configuration_document())
+        configuration = configuration_document()
+        authorized(entry, request.runner_identity, configuration)
+        secrets = [
+            request.headers.get("Authorization", "").split()[-1],
+            request.headers.get("X-NQ-Controller-Secret", ""),
+        ]
+        evidence, error = present_configuration_payload(
+            configuration,
+            entry.evidence,
+            runs=qualification_runs(entry),
+            secrets=secrets,
+            preserve_secret_versions=True,
+        )
+        if error:
+            from django.core.exceptions import ValidationError
+
+            raise ValidationError(error)
         return JsonResponse(
             {
                 "schema_version": 1,
@@ -85,7 +102,8 @@ def release_suite(request, qualification_id):
                     "qualified_at": (
                         entry.qualified_at.isoformat() if entry.qualified_at else None
                     ),
-                    "evidence": entry.evidence,
+                    "evidence": evidence,
+                    "evidence_presentation_only": evidence != entry.evidence,
                 },
             }
         )
@@ -188,7 +206,25 @@ def health(request):
         if type(data.get(key)) is not int or not 0 <= data[key] < 2**63:
             raise ValidationError({key: "Send a nonnegative integer."})
     data["blocking_reason"] = string_field(data, "blocking_reason", max_length=500)
+    from .configuration import configuration_document
+
+    secrets = [
+        request.headers.get("Authorization", "").split()[-1],
+        request.headers.get("X-NQ-Controller-Secret", ""),
+    ]
+    from .models import Run
+
+    active = Run.objects.filter(
+        runner=request.runner_identity, state=Run.State.ACTIVE
+    ).first()
+    safe, error = present_configuration_payload(
+        configuration_document(), data, run=active, secrets=secrets
+    )
+    if error:
+        raise ValidationError(error)
+    if active is not None:
+        safe["run_id"] = str(active.pk)
     RunnerHealth.objects.update_or_create(
-        runner=request.runner_identity, defaults={"report": data}
+        runner=request.runner_identity, defaults={"report": safe}
     )
     return JsonResponse({"received": True})

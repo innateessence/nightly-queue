@@ -3,6 +3,7 @@
 {% for evidence in runner_gate_evidence %}
   <article aria-label="{{ evidence.runner.name }} processing gates">
     <h4>{{ evidence.runner.name }}</h4>
+    {% if evidence.presentation_error %}<p role="status">{{ evidence.presentation_error }}</p>{% else %}
     {% if evidence.stale %}<p class="field-error">Report expired; waiting for fresh evidence.</p>{% endif %}
     {% if evidence.configuration_changed %}<p class="field-error">Configuration changed since this report.</p>{% endif %}
     <p>{{ evidence.report.allowed|yesno:"Policy permits processing,Processing blocked" }} · {{ evidence.report.checkpoint }} checkpoint</p>
@@ -17,5 +18,6 @@
         <p class="field-hint">{{ window.window_id }}: {{ window.remaining_percent|default_if_none:"unknown" }}% remaining · {{ window.status }} · Refreshed {{ window.observed_at }} · Reset {{ window.reset_at|default_if_none:"not reported" }}</p>
       {% endfor %}
     {% empty %}<p>No participating allowance readings reported.</p>{% endfor %}
+    {% endif %}
   </article>
 {% empty %}<p>No processing gate evidence has been received. Live execution remains disabled.</p>{% endfor %}

@@ -66,6 +66,15 @@ Raw command output is bounded at 1 MiB per execution, stored mode 0600 outside
 agent workspaces, and referenced by run/execution IDs in uploaded diagnostics.
 Raw logs are available to the operator through the protected volume, not the UI.
 
+Operator pages and report readbacks redact only currently selected credentials and
+credentials selected by the report's own saved run, including their retained secret
+versions. Missing selected material or encryption keys hide that content. Display
+copies never rewrite immutable context, plans, or stored evidence. Redacted release
+readbacks are marked presentation-only; deployment and credential-version metadata
+keep their original identity. The runner's executable configuration API is unchanged.
+A settings form containing selected secret material is withheld instead of saving
+redacted replacement instructions; remove the material through the trusted admin.
+
 A run is eligible only when completed and the owner has separately acknowledged
 receiving the exact finish result. A lost finish response, active or paused run,
 pending approval, uncertain operation, or unconfirmed child process protects data.

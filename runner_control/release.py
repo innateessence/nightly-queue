@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from .models import ReleaseQualification, Run
 from .services import RunConflict, json_digest, lock_controller
-from coding_runner.release_evidence import verify_boundary_workflow
+from coding_runner.release_evidence import valid_response_id, verify_boundary_workflow
 
 TRANSPORT = "codex-responses-structured-proposals-v1"
 CONTROL_FIELDS = {
@@ -277,6 +277,18 @@ def complete(entry_id, runner, report):
         raise RunConflict("Record the exact deployment-boundary workflow result URL.")
     success = qualified_run(entry, report.get("success_run_id"), "succeeded")
     failure = qualified_run(entry, report.get("failure_run_id"), "failed")
+    from .plan_presentation import present_configuration_payload
+
+    safe, error = present_configuration_payload(
+        configuration_document(),
+        report,
+        runs=[success, failure],
+        preserve_secret_versions=True,
+    )
+    if error or safe != report:
+        raise RunConflict(
+            "Release evidence cannot contain selected credential material or unavailable redaction."
+        )
     if not failure.error_summary or not failure.evidence.exists():
         raise RunConflict("Failed scenario lacks persisted useful diagnostics.")
     if not success.plans.exists() or not success.contexts.exists():
@@ -325,7 +337,11 @@ def complete(entry_id, runner, report):
         or not responses
         or any(
             not isinstance(row, dict)
-            or not row.get("response_id")
+            or not valid_response_id(row.get("response_id"))
+            or not isinstance(row.get("backend"), str)
+            or not isinstance(row.get("model"), str)
+            or type(row.get("credential_id")) is not int
+            or type(row.get("secret_version")) is not int
             or row.get("transport") != TRANSPORT
             for row in responses
         )

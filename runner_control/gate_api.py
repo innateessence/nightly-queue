@@ -13,6 +13,8 @@ from nightly_queue.api import read_body
 from .auth import runner_api_view
 from .gate_models import RunnerGateEvidence
 from .models import Run, RunnerIdentity
+from .configuration import configuration_document
+from .plan_presentation import report_run, present_configuration_payload
 
 
 REPORT_FIELDS = {
@@ -189,7 +191,12 @@ def validate_reading(reading):
 def evidence_data(evidence):
     if evidence is None:
         return None
-    return {"report": evidence.report, "received_at": evidence.received_at.isoformat()}
+    safe, error = present_configuration_payload(
+        configuration_document(), evidence.report, run=report_run(evidence)
+    )
+    if error:
+        raise ValidationError(error)
+    return {"report": safe, "received_at": evidence.received_at.isoformat()}
 
 
 @runner_api_view("GET")

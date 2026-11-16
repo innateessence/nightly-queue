@@ -2,9 +2,6 @@ import json
 
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.views.decorators.cache import never_cache
-from django.utils import timezone
-from django.utils.dateparse import parse_datetime
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_GET
 
@@ -12,12 +9,20 @@ from .models import Run, RunRetention, RunnerHealth
 from .configuration import configuration_document
 from .gate_models import RunnerGateEvidence
 from .plan_api import document_data
-from .plan_presentation import present_run
+from .plan_presentation import (
+    present_run,
+    report_run,
+    present_payload,
+    present_approval,
+    present_evidence,
+    present_global_record,
+    present_gates,
+    present_configuration,
+)
 from .plan_services import valid_handoff
 from .services import RunConflict
 
 
-@never_cache
 @require_GET
 def history(request):
     runs = Run.objects.select_related("item", "runner").order_by("-created_at", "-pk")
@@ -27,13 +32,13 @@ def history(request):
     page = Paginator(runs, 25).get_page(request.GET.get("page"))
     page.object_list = [present_run(run) for run in page]
     configuration = configuration_document()
-    reports = list(RunnerGateEvidence.objects.select_related("runner"))
-    for evidence in reports:
-        next_check = parse_datetime(evidence.report["next_check_at"])
-        evidence.stale = next_check is None or next_check <= timezone.now()
-        evidence.configuration_changed = (
-            evidence.report["configuration_revision"] != configuration["revision"]
-        )
+    reports = present_gates(
+        RunnerGateEvidence.objects.select_related("runner"), configuration
+    )
+    health = [
+        present_global_record(entry, configuration, run=report_run(entry))
+        for entry in RunnerHealth.objects.select_related("runner")
+    ]
     response = render(
         request,
         "runner_control/plan_history.html",
@@ -41,8 +46,8 @@ def history(request):
             "runs": page,
             "page": page,
             "state_filter": status,
-            "health_reports": RunnerHealth.objects.select_related("runner"),
-            "configuration": configuration,
+            "health_reports": health,
+            "configuration": present_configuration(configuration),
             "runner_gate_evidence": reports,
         },
     )
@@ -50,7 +55,6 @@ def history(request):
     return response
 
 
-@never_cache
 @require_GET
 def detail(request, run_id):
     run = get_object_or_404(Run.objects.select_related("item"), pk=run_id)
@@ -69,6 +73,19 @@ def detail(request, run_id):
     )
     contexts.object_list = [document_data(entry) for entry in contexts]
     plans.object_list = [document_data(entry) for entry in plans]
+    evidence = Paginator(run.evidence.order_by("pk"), 25).get_page(
+        request.GET.get("page")
+    )
+    evidence.object_list = [present_evidence(entry) for entry in evidence]
+    configuration, error = present_payload(
+        run, run.configuration_snapshot, preserve_secret_versions=True
+    )
+    delivery = (
+        run.evidence.filter(kind__in=["delivery", "verified_delivery"])
+        .order_by("-pk")
+        .first()
+    )
+    reason, reason_error = present_payload(run, reason)
     response = render(
         request,
         "runner_control/plan_detail.html",
@@ -76,16 +93,18 @@ def detail(request, run_id):
             "run": present_run(run),
             "contexts": contexts,
             "plans": plans,
-            "handoff_reason": reason,
+            "handoff_reason": reason if reason is not None else reason_error,
             "retention": RunRetention.objects.filter(run=run).first(),
-            "evidence_page": Paginator(run.evidence.order_by("pk"), 25).get_page(
-                request.GET.get("page")
+            "evidence_page": evidence,
+            "approvals": [
+                present_approval(approval) for approval in run.approvals.all()
+            ],
+            "configuration_json": (
+                json.dumps(configuration, indent=2)
+                if configuration is not None
+                else error
             ),
-            "approvals": run.approvals.all(),
-            "configuration_json": json.dumps(run.configuration_snapshot, indent=2),
-            "delivery": run.evidence.filter(kind__in=["delivery", "verified_delivery"])
-            .order_by("-pk")
-            .first(),
+            "delivery": present_evidence(delivery) if delivery is not None else None,
         },
     )
     response["Cache-Control"] = "no-store"

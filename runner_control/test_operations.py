@@ -193,7 +193,7 @@ class RetentionTests(TestCase):
         response = self.client.get(reverse("runner_plan_detail", args=[self.run.pk]))
         self.assertContains(response, "history tombstones")
         self.assertContains(response, "Test task")
-        self.assertEqual(response.headers["Cache-Control"].split(",")[0], "max-age=0")
+        self.assertIn("no-store", response.headers["Cache-Control"])
 
     def test_history_lists_runs_and_global_blocking_reason(self):
         response = self.client.get(reverse("runner_plan_history"))
@@ -549,3 +549,397 @@ class ReleaseEvidenceTests(TestCase):
         self.entry.save()
         with self.assertRaisesMessage(RunConflict, "expired"):
             complete(self.entry.pk, self.runner, self.report)
+
+    def post_release_report(self):
+        self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer fixture-token"
+        return self.client.post(
+            reverse("runner_release_suite", args=[self.entry.pk]),
+            json.dumps({"report": self.report}),
+            content_type="application/json",
+        )
+
+    def test_http_secret_response_identity_cannot_qualify_or_persist(self):
+        self.report["model_responses"][0]["response_id"] = "fixture-test-token"
+        response = self.post_release_report()
+        self.assertEqual(response.status_code, 409)
+        self.assertNotContains(response, "fixture-test-token", status_code=409)
+        self.entry.refresh_from_db()
+        self.assertIsNone(self.entry.qualified_at)
+        self.assertNotIn("live_report", self.entry.evidence)
+
+    def test_http_null_response_identity_cannot_poison_qualification(self):
+        self.report["model_responses"][0]["response_id"] = "response\x00identity"
+        self.assertEqual(self.post_release_report().status_code, 400)
+        self.entry.refresh_from_db()
+        self.assertIsNone(self.entry.qualified_at)
+
+    def test_http_surrogate_response_identity_cannot_poison_qualification(self):
+        self.report["model_responses"][0]["response_id"] = "response\ud800identity"
+        self.assertEqual(self.post_release_report().status_code, 400)
+        self.entry.refresh_from_db()
+        self.assertIsNone(self.entry.qualified_at)
+
+    def test_http_oversized_response_identity_cannot_qualify(self):
+        self.report["model_responses"][0]["response_id"] = "r" * 201
+        self.assertEqual(self.post_release_report().status_code, 409)
+        self.entry.refresh_from_db()
+        self.assertIsNone(self.entry.qualified_at)
+
+    def test_http_unhashable_response_account_is_rejected(self):
+        self.report["model_responses"][0]["model"] = ["invalid"]
+        self.assertEqual(self.post_release_report().status_code, 409)
+        self.entry.refresh_from_db()
+        self.assertIsNone(self.entry.qualified_at)
+
+
+@override_settings(NQ_CREDENTIAL_KEY=Fernet.generate_key().decode("ascii"))
+class OperatorPresentationTests(TestCase):
+    def setUp(self):
+        from credentials.models import Credential
+        from .configuration import configuration_document
+        from .models import ActionApproval, RunnerHealth
+        from .settings_models import RunnerSettings
+
+        self.runner = RunnerIdentity.objects.create(
+            name="Operator test", token_digest=token_digest("operator-test-token")
+        )
+        provision_controller(self)
+        self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer operator-test-token"
+        self.current = Credential(
+            name="Current selection", provider="codex", kind="token"
+        )
+        self.current.set_secret("previous-global-selection")
+        self.current.save()
+        self.current.set_secret("current-global-selection")
+        self.current.save()
+        self.historical = Credential(
+            name="Run selection", provider="codex", kind="token"
+        )
+        self.historical.set_secret("previous-run-selection")
+        self.historical.save()
+        self.historical.set_secret("current-run-selection")
+        self.historical.save()
+        self.settings = RunnerSettings.objects.get(pk=1)
+        self.settings.research_backend = self.settings.implementation_backend = "codex"
+        self.settings.research_model = self.settings.implementation_model = (
+            "fixture-model"
+        )
+        self.settings.research_credential = self.settings.implementation_credential = (
+            self.current
+        )
+        self.settings.save()
+        self.project = Project.objects.create(
+            name="Fixture project", repository_url="https://github.com/example/test"
+        )
+        self.item = enqueue_item(project=self.project, title="previous-run-selection")
+        self.run = Run.objects.create(
+            runner=self.runner,
+            item=self.item,
+            state="completed",
+            stage="finished",
+            finished_at=timezone.now(),
+            result_status="failed",
+            error_summary="current-run-selection",
+            wait_reason="previous-run-selection",
+            result_url="https://github.com/example/test/pull/1?detail=current-run-selection",
+            configuration_snapshot={
+                "effective": {"research_credential_id": self.historical.pk},
+                "instructions": "previous-run-selection and current-run-selection",
+            },
+        )
+        self.delivery = self.run.evidence.create(
+            operation_id=uuid.uuid4(),
+            kind="delivery",
+            payload={"diagnostic": "previous-run-selection"},
+        )
+        ActionApproval.objects.create(
+            run=self.run,
+            operation_id=uuid.uuid4(),
+            action={"argv": ["current-run-selection"]},
+            decision="denied",
+            decision_note="previous-run-selection",
+            binding_digest="a" * 64,
+        )
+        self.health = RunnerHealth.objects.create(
+            runner=self.runner,
+            report={
+                "free_bytes": 2000000000,
+                "removed": 0,
+                "missing": 0,
+                "busy": 0,
+                "blocking_reason": "previous-global-selection",
+            },
+        )
+        now = timezone.now()
+        from .gate_models import RunnerGateEvidence
+
+        self.gate = RunnerGateEvidence.objects.create(
+            runner=self.runner,
+            checked_at=now,
+            report={
+                "schema_version": 1,
+                "reserve_enabled": True,
+                "minimum_remaining_usage_percent": 40,
+                "interval": None,
+                "next_boundary": None,
+                "tasks_started": 0,
+                "run_id": str(self.run.pk),
+                "configuration_revision": configuration_document()["revision"],
+                "next_check_at": (now + timedelta(seconds=60)).isoformat(),
+                "checked_at": now.isoformat(),
+                "allowed": False,
+                "checkpoint": "periodic",
+                "reasons": ["usage_reserve"],
+                "readings": [
+                    {
+                        "backend": "codex",
+                        "credential_id": self.current.pk,
+                        "status": "reserve",
+                        "windows": [
+                            {
+                                "window_id": "previous-run-selection current-global-selection",
+                                "remaining_percent": 20,
+                                "status": "reserve",
+                                "observed_at": now.isoformat(),
+                                "reset_at": None,
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+    def assert_safe(self, response, *, global_values=False):
+        self.assertEqual(response.status_code, 200, response.content[:1000])
+        self.assertNotContains(response, "previous-run-selection")
+        self.assertNotContains(response, "current-run-selection")
+        if global_values:
+            self.assertNotContains(response, "previous-global-selection")
+            self.assertNotContains(response, "current-global-selection")
+        self.assertIn("no-store", response["Cache-Control"])
+
+    def test_detail_redacts_expanded_fields_without_rewriting_evidence(self):
+        response = self.client.get(reverse("runner_plan_detail", args=[self.run.pk]))
+        self.assert_safe(response)
+        self.assertContains(response, "[redacted]")
+        self.run.refresh_from_db()
+        self.delivery.refresh_from_db()
+        self.assertEqual(self.run.error_summary, "current-run-selection")
+        self.assertEqual(self.delivery.payload["diagnostic"], "previous-run-selection")
+        self.assertEqual(
+            self.run.approvals.get().decision_note, "previous-run-selection"
+        )
+
+    def test_history_scrubs_current_global_and_owned_historical_selections(self):
+        response = self.client.get(reverse("runner_plan_history"))
+        self.assert_safe(response, global_values=True)
+        self.assertContains(response, "[redacted]")
+        self.health.refresh_from_db()
+        self.assertEqual(
+            self.health.report["blocking_reason"], "previous-global-selection"
+        )
+
+    def test_gate_api_scrubs_historical_run_and_current_global_values(self):
+        response = self.client.get(reverse("runner_gates"))
+        self.assert_safe(response, global_values=True)
+        window = response.json()["evidence"]["report"]["readings"][0]["windows"][0]
+        self.assertEqual(window["window_id"], "[redacted] [redacted]")
+
+    def test_unavailable_selected_key_hides_expanded_content(self):
+        with override_settings(NQ_CREDENTIAL_KEY=""):
+            detail = self.client.get(reverse("runner_plan_detail", args=[self.run.pk]))
+            history = self.client.get(reverse("runner_plan_history"))
+            gate = self.client.get(reverse("runner_gates"))
+        self.assert_safe(detail)
+        self.assert_safe(history, global_values=True)
+        self.assertContains(detail, "unavailable")
+        self.assertContains(history, "unavailable")
+        self.assertEqual(gate.status_code, 400)
+        self.assertNotContains(gate, "previous-run-selection", status_code=400)
+
+    def test_unselected_broken_credential_is_not_decrypted(self):
+        from credentials.models import Credential
+
+        Credential.objects.create(
+            name="Unselected corrupt",
+            provider="codex",
+            kind="token",
+            encrypted_payload="invalid",
+        )
+        self.assert_safe(
+            self.client.get(reverse("runner_plan_history")), global_values=True
+        )
+        self.assert_safe(
+            self.client.get(reverse("runner_plan_detail", args=[self.run.pk]))
+        )
+
+    def test_health_api_redacts_selected_and_machine_secrets_before_storage(self):
+        from .test_support import CONTROLLER_SECRET
+
+        report = {
+            "free_bytes": 2000000000,
+            "minimum_free_bytes": 1000000000,
+            "removed": 0,
+            "missing": 0,
+            "busy": 0,
+            "blocking_reason": "previous-global-selection operator-test-token "
+            + CONTROLLER_SECRET,
+        }
+        response = self.client.post(
+            reverse("runner_health"),
+            json.dumps(report),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.health.refresh_from_db()
+        self.assertEqual(
+            self.health.report["blocking_reason"], "[redacted] [redacted] [redacted]"
+        )
+
+    def qualification(self):
+        from .configuration import configuration_document
+        from .models import ReleaseQualification
+        from .release import scope
+
+        return ReleaseQualification.objects.create(
+            runner=self.runner,
+            repository_url=self.project.repository_url,
+            scope_digest=scope(configuration_document()),
+            environment_digest="a" * 64,
+            code_revision="b" * 64,
+            authorization_note="Authorized test; previous-global-selection",
+            blocker="previous-run-selection",
+            expires_at=timezone.now() + timedelta(hours=1),
+            evidence={
+                "live_report": {
+                    "success_run_id": str(self.run.pk),
+                    "model_responses": [
+                        {"response_id": "previous-run-selection", "secret_version": 2}
+                    ],
+                }
+            },
+        )
+
+    def test_release_api_scrubs_selected_values_and_preserves_provenance(self):
+        entry = self.qualification()
+        response = self.client.get(reverse("runner_release_suite", args=[entry.pk]))
+        self.assert_safe(response, global_values=True)
+        result = response.json()["qualification"]
+        trace = result["evidence"]["live_report"]["model_responses"][0]
+        self.assertEqual(trace["secret_version"], 2)
+        self.assertEqual(trace["response_id"], "[redacted]")
+        self.assertTrue(result["evidence_presentation_only"])
+        self.assertEqual(result["code_revision"], entry.code_revision)
+        entry.refresh_from_db()
+        self.assertEqual(
+            entry.evidence["live_report"]["model_responses"][0]["response_id"],
+            "previous-run-selection",
+        )
+
+    def test_settings_release_and_gate_sections_use_safe_presentation(self):
+        self.qualification()
+        response = self.client.get(reverse("api_settings"))
+        self.assert_safe(response, global_values=True)
+        self.assertContains(response, "Controlled release verification")
+        self.assertContains(response, "[redacted]")
+
+    def test_project_selected_credentials_are_included_without_report_run(self):
+        from .settings_models import ProjectRunnerSettings
+
+        ProjectRunnerSettings.objects.create(
+            project=self.project,
+            overrides={
+                "research_credential_id": {
+                    "mode": "replace",
+                    "value": self.historical.pk,
+                }
+            },
+        )
+        self.gate.report["run_id"] = None
+        self.gate.save(update_fields=["report"])
+        response = self.client.get(reverse("runner_gates"))
+        self.assert_safe(response, global_values=True)
+
+    def test_missing_project_selected_credential_hides_global_reports(self):
+        from .settings_models import ProjectRunnerSettings
+
+        ProjectRunnerSettings.objects.create(
+            project=self.project,
+            overrides={"research_credential_id": {"mode": "replace", "value": 999999}},
+        )
+        response = self.client.get(reverse("runner_plan_history"))
+        self.assert_safe(response, global_values=True)
+        self.assertContains(response, "unavailable")
+
+    def test_machine_configuration_keeps_executable_contract(self):
+        from .configuration import configuration_document
+
+        expected = configuration_document()
+        response = self.client.get(reverse("runner_configuration"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected)
+        reference = next(
+            row
+            for row in response.json()["credentials"]
+            if row["id"] == self.current.pk
+        )
+        self.assertEqual(reference["secret_version"], 2)
+
+    def test_settings_form_withholds_secret_values_without_changing_configuration(self):
+        self.settings.research_instructions = "previous-global-selection"
+        self.settings.save()
+        response = self.client.get(reverse("api_settings"))
+        self.assert_safe(response, global_values=True)
+        self.assertContains(response, "Selected credential content is withheld")
+        self.assertNotContains(response, "Save coding runner settings")
+        machine = self.client.get(reverse("runner_configuration"))
+        self.assertEqual(
+            machine.json()["global"]["research_instructions"],
+            "previous-global-selection",
+        )
+        self.settings.refresh_from_db()
+        self.assertEqual(
+            self.settings.research_instructions, "previous-global-selection"
+        )
+
+    def test_health_report_keeps_its_owned_run_redaction_after_completion(self):
+        self.run.state, self.run.active_slot = "active", 1
+        self.run.save(update_fields=["state", "active_slot"])
+        report = {
+            "free_bytes": 2000000000,
+            "minimum_free_bytes": 1000000000,
+            "removed": 0,
+            "missing": 0,
+            "busy": 0,
+            "blocking_reason": "previous-run-selection current-global-selection",
+        }
+        response = self.client.post(
+            reverse("runner_health"),
+            json.dumps(report),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.health.refresh_from_db()
+        self.assertEqual(self.health.report["run_id"], str(self.run.pk))
+        self.assertEqual(self.health.report["blocking_reason"], "[redacted] [redacted]")
+        self.run.state, self.run.active_slot = "completed", None
+        self.run.save(update_fields=["state", "active_slot"])
+        self.health.report["blocking_reason"] = "previous-run-selection"
+        self.health.save(update_fields=["report"])
+        self.assert_safe(
+            self.client.get(reverse("runner_plan_history")), global_values=True
+        )
+
+    def test_release_metadata_exception_does_not_unmask_other_secret_fields(self):
+        entry = self.qualification()
+        entry.evidence["legacy"] = {
+            "password": "withhold-me",
+            "secret_version": "withhold-string-version",
+        }
+        entry.save(update_fields=["evidence"])
+        response = self.client.get(reverse("runner_release_suite", args=[entry.pk]))
+        self.assertEqual(response.status_code, 200)
+        legacy = response.json()["qualification"]["evidence"]["legacy"]
+        self.assertEqual(
+            legacy, {"password": "[redacted]", "secret_version": "[redacted]"}
+        )

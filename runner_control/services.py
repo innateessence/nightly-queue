@@ -129,7 +129,7 @@ def json_digest(value):
 
 
 @sensitive_variables()
-def redact_payload(value, secrets, depth=0):
+def redact_payload(value, secrets, depth=0, *, preserve_secret_versions=False):
     if depth > 20:
         raise ValidationError({"body": "Reduce JSON nesting to at most 20 levels."})
     if isinstance(value, str):
@@ -146,7 +146,15 @@ def redact_payload(value, secrets, depth=0):
                 value = re.sub(re.escape(secret), "[redacted]", value, flags=re.I)
         return value
     if isinstance(value, list):
-        return [redact_payload(item, secrets, depth + 1) for item in value]
+        return [
+            redact_payload(
+                item,
+                secrets,
+                depth + 1,
+                preserve_secret_versions=preserve_secret_versions,
+            )
+            for item in value
+        ]
     if isinstance(value, dict):
         result = {}
         for key, item in value.items():
@@ -155,9 +163,23 @@ def redact_payload(value, secrets, depth=0):
                 key,
                 re.I,
             )
-            safe_key = redact_payload(key, secrets, depth + 1)
+            safe_key = redact_payload(
+                key,
+                secrets,
+                depth + 1,
+                preserve_secret_versions=preserve_secret_versions,
+            )
+            metadata = key == "secret_version" and type(item) is int
+            sensitive = sensitive and not (preserve_secret_versions and metadata)
             result[safe_key] = (
-                "[redacted]" if sensitive else redact_payload(item, secrets, depth + 1)
+                "[redacted]"
+                if sensitive
+                else redact_payload(
+                    item,
+                    secrets,
+                    depth + 1,
+                    preserve_secret_versions=preserve_secret_versions,
+                )
             )
         return result
     return value
