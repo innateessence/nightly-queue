@@ -134,6 +134,11 @@ from vibearr_runner.policy import default_execution_policy
 import vibearr_runner.native_contract, coding_runner.native_contract
 assert vibearr_runner.native_contract is coding_runner.native_contract
 assert vibearr_runner.native_contract.status_document(sequence=1, stage='waiting')['sequence'] == 1
+import vibearr_runner.native_opencode, coding_runner.native_opencode
+assert vibearr_runner.native_opencode is coding_runner.native_opencode
+from vibearr_runner.native_sessions import NativeBackendRegistry
+assert NativeBackendRegistry().create('opencode', None).provider == 'opencode'
+assert NativeBackendRegistry().create('opencode', None).diagnostics(default_execution_policy(), {})['native_agent_ready'] is False
 requirements = importlib.metadata.requires('vibearr-runner') or []
 assert any('vibearr-executor' in value and 'native-runtime' in value for value in requirements)
 result = runtime_diagnostics(default_execution_policy())
@@ -194,7 +199,7 @@ import pathlib, sys
 import vibearr_executor, vibearr_executor.client, vibearr_executor.server
 root = pathlib.Path(vibearr_executor.__file__).parent
 assert root.is_relative_to(sys.prefix)
-for name in ('Dockerfile', 'Codex.Dockerfile', 'codex_task.py', 'secret_material.py', 'worker.py', 'firewall.py', 'proxy.py', 'smoke.py', 'pg_smoke.py'):
+for name in ('Dockerfile', 'Codex.Dockerfile', 'OpenCode.Dockerfile', 'codex_task.py', 'opencode_task.py', 'opencode_smoke.py', 'secret_material.py', 'worker.py', 'firewall.py', 'proxy.py', 'smoke.py', 'pg_smoke.py'):
     assert (root / name).is_file(), name
 for name in ('validation.Dockerfile', 'validation-requirements.txt', 'validation_black.toml', 'validation_ruff.toml', 'validation_mypy.ini'):
     assert (root / name).is_file(), name

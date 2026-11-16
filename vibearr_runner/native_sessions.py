@@ -113,4 +113,8 @@ class NativeBackendRegistry:
             from .native_codex import NativeCodexAdapter
 
             return NativeCodexAdapter(client)
+        if provider == "opencode":
+            from .native_opencode import NativeOpenCodeAdapter
+
+            return NativeOpenCodeAdapter(client)
         raise NativeSessionError("Selected provider has no installed native adapter.")

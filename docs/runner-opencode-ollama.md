@@ -1,5 +1,10 @@
 # OpenCode provider API candidate and optional Ollama
 
+For native coding sessions, see [Native OpenCode](native-opencode.md). The native
+adapter currently supports an explicitly selected OpenAI API-key connection; its
+live authentication/task acceptance remains pending. The historical proposal
+transport and optional Ollama notes below do not qualify a native runtime.
+
 The `opencode` backend selects a tool-free provider API transport. Native OpenCode
 CLI execution is unsupported. Neither installing the CLI nor saving a connection
 establishes integration readiness. Execution stays disabled until the controlled
