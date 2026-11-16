@@ -9,7 +9,7 @@ from credentials.models import Credential
 from projects.models import Project
 
 from .settings_models import ProjectRunnerSettings, RunnerSettings
-from .validators import OVERRIDE_FIELDS
+from .validators import OVERRIDE_FIELDS, validate_backend_model
 
 
 SCHEMA_VERSION = 1
@@ -57,6 +57,16 @@ def project_configuration(project, defaults, overrides, credentials):
         backend = effective[f"{stage}_backend"]
         if backend:
             capabilities.append(f"backend:{backend}")
+        try:
+            validate_backend_model(backend, effective[f"{stage}_model"])
+        except ValidationError as exc:
+            errors.append(
+                {
+                    "field": f"{stage}_model",
+                    "code": "invalid_model",
+                    "message": "; ".join(exc.messages),
+                }
+            )
         reference = effective[f"{stage}_credential_id"]
         if reference and reference in credentials:
             credential = credentials[reference]

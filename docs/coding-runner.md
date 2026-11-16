@@ -304,3 +304,6 @@ run ownership, recovery records, and approvals before live agent execution.
 Built-in execution is ready only after the service and these behaviors are
 implemented and verified. The existing queue API and issue importer remain the
 foundation throughout this work.
+
+Claude support is an explicit [Messages API candidate](runner-claude-backend.md);
+native Claude Code is unsupported and execution remains release-gated.
