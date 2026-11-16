@@ -14,6 +14,11 @@ from . import (
 from . import recovery_api, source_api
 
 urlpatterns = [
+    path(
+        "runs/<uuid:run_id>/native/delivery-recovery/",
+        native_api.delivery_recovery,
+        name="runner_delivery_recovery",
+    ),
     path("candidates/", native_api.native_candidates, name="runner_candidates"),
     path(
         "runs/<uuid:run_id>/native/status/",

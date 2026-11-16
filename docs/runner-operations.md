@@ -227,3 +227,44 @@ The concrete workflow, after those external prerequisites are satisfied:
 Screenshots in `docs/screenshots/runner-operations-*.png` show actual rendered
 browser pages with clearly labelled synthetic fixtures; they do not show live
 execution acceptance.
+
+## Recover a terminated automatic delivery
+
+A failed native run that already published a PR cannot be requeued for coding.
+When its original workspace and protected receipts remain available, the same
+controller can explicitly recover delivery once, using the scoped API and CLI:
+
+```sh
+python -m vibearr_runner.delivery_recovery --state /private/controller \
+  --run-id ORIGINAL_RUN_UUID --expected-finish-digest ORIGINAL_FAILED_FINISH_DIGEST \
+  --expected-publication-id ORIGINAL_PUBLICATION_UUID --expected-head-sha ORIGINAL_HEAD
+```
+
+This previews the retained local workspace and counted claim. Add `--execute` to
+request the single audited recovery generation, then run the normal supervisor
+with that same journal. The API requires the original failed completion to have
+positive termination and reporting acknowledgement, the latest queue item,
+current controller proof/configuration, an exact existing open PR, and no active
+run or unresolved merge. It archives the prior failure, finish digest, original
+acknowledgement, timestamps and consumed repairs before fencing a new claim token.
+Old tokens and old finish acknowledgements cannot affect the resumed generation.
+The original run ID, model session, context, paid operation IDs and task deadline
+remain unchanged; the task counter is not incremented or reset. A missing local
+workspace, private resource record or accounting checkpoint blocks recovery.
+
+Delivery recovery cannot obtain coding credentials or dispatch an agent. A changed
+base can consume the remaining ordinary repair allowance for a clean ancestry
+update and fresh credential-free validation, then all required CI for that new
+head. Each new revision has bounded validation/CI time inside the original task
+deadline. If the base is unchanged, the original CI deadline still applies.
+Conflicts or failed validation finish visibly without a model repair. Unknown
+merge outcomes retain the existing claim/fence and read-only reconciliation.
+A second recovery generation is rejected.
+
+Recovery completion uses a separate `delivery-recovery:1:complete` marker. The
+original failure comments and immutable recovery archive remain available. Run
+readback and acceptance receipts include this archive; acceptance also requires
+actual supervisor restarts around the final revision's validation operation and
+its new final acknowledgement. Migration `0013_nativedeliveryrecovery` must be
+applied before starting the updated API and supervisor. Older supervisors must
+not own a recovered run: its API descriptor requires explicit recovery restore.

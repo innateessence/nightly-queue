@@ -9,6 +9,7 @@ from uuid import uuid4
 from coding_runner.test_automatic_merge import MergeHost
 from vibearr_runner.native_contract import intent_document
 from vibearr_runner.native_lifecycle import NativeLifecycle
+from vibearr_runner.native_lifecycle import NativeFailure
 from vibearr_runner.native_revision import NativeRevision
 from vibearr_runner.native_validation import CandidateSource
 from vibearr_runner.workspaces import Workspace, git
@@ -101,7 +102,15 @@ class PublicationRevisionAcceptanceTests(unittest.TestCase):
                 "fetched": True,
             }
             host.native["validation"] = {"evidence": {"tree_sha": original.tree_sha}}
+            host.native["ci_deadline"] = "2000-01-01T00:00:00+00:00"
+            host.native["deadline:validation_timeout_seconds"] = (
+                "2000-01-01T00:00:00+00:00"
+            )
+            original_deadline = host.native["deadline"]
             self.assertEqual(NativeRevision(host).step(), "continue")
+            self.assertNotIn("ci_deadline", host.native)
+            self.assertNotIn("deadline:validation_timeout_seconds", host.native)
+            self.assertEqual(host.native["deadline"], original_deadline)
             current = host.native["candidate"]
             self.assertEqual(current["parents"], [delivered, updated_base])
             self.assertEqual(current["workspace"]["base_revision"], updated_base)
@@ -149,6 +158,11 @@ class PublicationRevisionAcceptanceTests(unittest.TestCase):
             host.executor = SimpleNamespace(
                 logs=lambda *args: b"actual validation diagnostic"
             )
+            host.native["delivery_recovery_generation"] = 1
+            with self.assertRaises(NativeFailure):
+                NativeLifecycle.repair(host, {"check_id": "django"})
+            self.assertEqual(host.native["attempt"], 1)
+            host.native.pop("delivery_recovery_generation")
             self.assertEqual(
                 NativeLifecycle.repair(
                     host,

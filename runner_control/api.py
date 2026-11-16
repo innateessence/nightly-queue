@@ -36,6 +36,7 @@ def evidence_data(evidence):
 def run_data(run):
     evidence = list(run.evidence.order_by("-pk")[:10])
     evidence_count = run.evidence.count()
+    recovery = getattr(run, "delivery_recovery", None)
     return {
         "id": str(run.pk),
         "runner_id": run.runner_id,
@@ -49,6 +50,16 @@ def run_data(run):
         "native_status": run.native_status,
         "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
         "native_outcome": run.native_outcome,
+        "delivery_recovery": (
+            {
+                "generation": 1,
+                "operation_id": str(recovery.operation_id),
+                "created_at": recovery.created_at.isoformat(),
+                "archive": recovery.archive,
+            }
+            if recovery
+            else None
+        ),
         "retry_requested_at": (
             run.retry_requested_at.isoformat() if run.retry_requested_at else None
         ),

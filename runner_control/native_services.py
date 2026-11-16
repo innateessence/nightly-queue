@@ -594,6 +594,8 @@ def validate_intent_binding(run, value, operation_id=None):
     ):
         raise RunConflict("Native dispatch exceeds its frozen policy/repair limit.")
     kind, data = value["kind"], value["data"]
+    if kind == "agent" and hasattr(run, "delivery_recovery"):
+        raise RunConflict("Delivery-only recovery cannot dispatch another agent.")
     if kind == "revision":
         bind_revision_intent(run, value)
         return

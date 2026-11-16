@@ -401,6 +401,7 @@ def evidence_document(
         "outcome": expected_outcome,
         "executor_observations": executor_observations or {},
         "completed_at": run["finished_at"],
+        "delivery_recovery": run.get("delivery_recovery"),
         "reporting_acknowledged": any(
             value["run_id"] == run_id
             and value.get("finish_digest") == run["finish_digest"]
