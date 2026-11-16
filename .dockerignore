@@ -20,3 +20,7 @@ run.sh
 Dockerfile
 .dockerignore
 docker-compose*.yml
+
+.venv/
+**/build/
+**/*.egg-info/
