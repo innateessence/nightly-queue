@@ -23,6 +23,7 @@ class Index(ListView):
         items = QueueItem.objects.select_related("project")
         queue_count = claimable_items().count()
         query = request.GET.get("q", "").strip()
+        status = request.GET.get("status", "")
         priority = request.GET.get("priority", "")
         project = request.GET.get("project", "")
         projects = Project.objects.all()
@@ -30,11 +31,15 @@ class Index(ListView):
             project = ""
         if project and not projects.filter(pk=project).exists():
             project = ""
+        if status not in QueueItem.Status.values:
+            status = ""
         if priority not in QueueItem.Priority.values:
             priority = ""
         if query:
             matching_text = Q(title__icontains=query) | Q(instructions__icontains=query)
             items = items.filter(matching_text)
+        if status:
+            items = items.filter(status=status)
         if priority:
             items = items.filter(priority=priority)
         if project:
@@ -54,12 +59,14 @@ class Index(ListView):
             "items": items,
             "queue_count": queue_count,
             "query": query,
+            "status": status,
+            "statuses": QueueItem.Status.choices,
             "priority": priority,
             "priorities": QueueItem.Priority.choices,
             "project": project,
             "projects": projects,
             "has_projects": projects.exists(),
-            "filtered": bool(query or priority or project),
+            "filtered": bool(query or status or priority or project),
         }
         return render(request, "work_queue/index.html", context)
 

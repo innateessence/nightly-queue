@@ -155,6 +155,118 @@ class QueueViewTests(TestCase):
         self.assertEqual(list(response.context["items"]), [item])
         self.assertFalse(response.context["filtered"])
 
+    def test_each_status_filters_items_and_preserves_selected_option(self):
+        items = {
+            status: self.create_item(title=label, status=status)
+            for status, label in QueueItem.Status.choices
+        }
+        for status, label in QueueItem.Status.choices:
+            with self.subTest(status=status):
+                response = self.client.get(reverse("index"), {"status": status})
+
+                self.assertEqual(list(response.context["items"]), [items[status]])
+                self.assertEqual(response.context["status"], status)
+                self.assertTrue(response.context["filtered"])
+                self.assertContains(response, "1 item found")
+                self.assertEqual(response.context["queue_count"], 1)
+                self.assertEqual(response.context["queue_total"], 1)
+                self.assertContains(
+                    response,
+                    f'<option value="{status}" selected>{label}</option>',
+                    html=True,
+                )
+                for value, option_label in QueueItem.Status.choices:
+                    if value != status:
+                        self.assertContains(
+                            response,
+                            f'<option value="{value}">{option_label}</option>',
+                            html=True,
+                        )
+
+    def test_absent_empty_and_invalid_status_mean_all_statuses(self):
+        items = [
+            self.create_item(title=label, status=status)
+            for status, label in QueueItem.Status.choices
+        ]
+        filters = [
+            {},
+            {"status": ""},
+            {"status": "unknown"},
+            {"status": "RUNNING"},
+            {"status": " queued "},
+            {"status": "status__in=queued"},
+            {"status": "queued' OR 1=1 --"},
+            {"status": "\x00"},
+            {"status": "進行中🌙"},
+            {"status": "x" * 10000},
+            {"status__in": "queued"},
+        ]
+        for params in filters:
+            with self.subTest(params=params):
+                response = self.client.get(reverse("index"), params)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(list(response.context["items"]), items)
+                self.assertEqual(response.context["status"], "")
+                self.assertFalse(response.context["filtered"])
+                self.assertContains(
+                    response, '<option value="">All statuses</option>', html=True
+                )
+                for value, label in QueueItem.Status.choices:
+                    self.assertContains(
+                        response, f'<option value="{value}">{label}</option>', html=True
+                    )
+
+    def test_status_combines_with_search_priority_and_project(self):
+        other_project = Project.objects.create(
+            name="Other", repository_url="https://github.com/example/other"
+        )
+        title_match = self.create_item(
+            title="Pricing report", status="failed", priority="high"
+        )
+        instructions_match = self.create_item(
+            title="Report",
+            instructions="PRICING details",
+            status="failed",
+            priority="high",
+        )
+        self.create_item(title="Pricing", status="queued", priority="high")
+        self.create_item(title="Pricing", status="failed", priority="low")
+        self.create_item(title="Unrelated", status="failed", priority="high")
+        QueueItem.objects.create(
+            project=other_project, title="Pricing", status="failed", priority="high"
+        )
+        params = {
+            "q": " pricing ",
+            "status": "failed",
+            "priority": "high",
+            "project": self.project.pk,
+        }
+
+        response = self.client.get(reverse("index"), params)
+
+        self.assertEqual(
+            list(response.context["items"]), [title_match, instructions_match]
+        )
+        self.assertContains(response, "2 items found")
+        params["status"] = "invalid"
+        response = self.client.get(reverse("index"), params)
+        self.assertEqual(len(response.context["items"]), 3)
+        self.assertEqual(response.context["status"], "")
+
+    def test_status_with_no_matches_shows_filtered_empty_state(self):
+        self.create_item(title="Queued work")
+
+        response = self.client.get(reverse("index"), {"status": "failed"})
+
+        self.assertEqual(list(response.context["items"]), [])
+        self.assertContains(response, "0 items found")
+        self.assertContains(response, "No matching work items.")
+        self.assertContains(response, "Clear filters")
+        self.assertNotContains(response, "Add your first item")
+        self.assertEqual(response.context["queue_count"], 1)
+        self.assertEqual(response.context["queue_total"], 1)
+
     def test_remove_item(self):
         item = self.create_item(title="Remove me")
         other = self.create_item(title="Keep me")

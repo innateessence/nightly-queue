@@ -69,6 +69,11 @@
         <form method="get" class="queue-filters" role="search" aria-label="Search work items">
           <label class="sr-only" for="queue-search">Search title and instructions</label>
           <input type="search" id="queue-search" name="q" value="{{ query }}" placeholder="Search your queue…">
+          <label class="sr-only" for="status-filter">Filter by status</label>
+          <select id="status-filter" name="status">
+            <option value="">All statuses</option>
+            {% for value, label in statuses %}<option value="{{ value }}"{% if status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
           <label class="sr-only" for="priority-filter">Filter by priority</label>
           <select id="priority-filter" name="priority">
             <option value="">All priorities</option>
@@ -111,7 +116,7 @@
               {% if filtered %}
               <span class="eyebrow">A LITTLE ROOM TO SEARCH</span>
               <h3>No matching work items.</h3>
-              <p>Try another search or priority. Your other items are still in the queue.</p>
+              <p>Try another search or filter. Your other items are still in the queue.</p>
               <a href="{% url 'index' %}" class="empty-link">Clear filters <span aria-hidden="true">↗</span></a>
               {% else %}
               <span class="eyebrow">A LITTLE SPACE TO THINK</span>
