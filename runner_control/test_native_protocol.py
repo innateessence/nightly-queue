@@ -809,6 +809,141 @@ class NativeProtocolTests(NativeProtocolMixin, TestCase):
         self.run.save(update_fields=["source_snapshot"])
         return fresh
 
+    def failed_import_during_native_attempt(self):
+        from credentials.models import APISettings
+        from work_queue.github import GitHubAPIError
+        from work_queue.tasks import import_auto_issues
+
+        fresh = self.github_source()
+        with (
+            patch("work_queue.github.read_issue", return_value=fresh),
+            patch("work_queue.github.issue_comments", return_value=[]),
+        ):
+            self.prepare_agent()
+        observation = {
+            "repository_id": 123,
+            "owner_id": 456,
+            "repository_url": self.project.repository_url,
+            "default_branch": "main",
+        }
+        APISettings.objects.update_or_create(
+            pk=1, defaults={"github_credential": self.github}
+        )
+        with (
+            patch("work_queue.tasks.repository_metadata", return_value=observation),
+            patch(
+                "work_queue.tasks.repository_issues",
+                side_effect=GitHubAPIError("Temporary discovery failure"),
+            ),
+        ):
+            result = import_auto_issues()
+        self.assertEqual(result["failed"], 1)
+        self.project.refresh_from_db()
+        self.assertTrue(self.project.sync_error)
+        return fresh, observation
+
+    def test_active_fresh_source_survives_advisory_import_failure(self):
+        fresh, observation = self.failed_import_during_native_attempt()
+        frozen = copy.deepcopy(self.run.source_snapshot)
+        advisory = self.project.sync_error
+        with (
+            patch("work_queue.github.repository_metadata", return_value=observation),
+            patch("work_queue.github.read_issue", return_value=fresh) as read,
+        ):
+            response = self.post(
+                "runner_refresh_source",
+                {"claim_token": str(self.claim), "mode": "continuation"},
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+        read.assert_called_once()
+        self.assertEqual(response.json()["source_snapshot"], frozen)
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.sync_error, advisory)
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.source_snapshot, frozen)
+        self.assertEqual(self.run.state, "active")
+
+    def continuation_response(self, fresh, observation):
+        with (
+            patch("work_queue.github.repository_metadata", return_value=observation),
+            patch("work_queue.github.read_issue", return_value=fresh),
+        ):
+            return self.post(
+                "runner_refresh_source",
+                {"claim_token": str(self.claim), "mode": "continuation"},
+            )
+
+    def test_failed_import_still_blocks_new_queued_selection(self):
+        from work_queue.services import (
+            claimable_items,
+            import_issue,
+            source_wait_reason,
+        )
+        from work_queue.test_selection import source_issue
+
+        self.failed_import_during_native_attempt()
+        fresh = source_issue(2, author_id=456)
+        import_issue(project=self.project, repository_id=123, **fresh)
+        queued = QueueItem.objects.select_related("project").get(issue_number=2)
+        self.assertEqual(
+            source_wait_reason(queued), "Waiting for successful GitHub reconciliation."
+        )
+        self.assertFalse(claimable_items().filter(pk=queued.pk).exists())
+        self.assertEqual(candidates(self.runner)["project_ids"], [])
+
+    def test_active_source_health_does_not_excuse_closed_issue(self):
+        fresh, observation = self.failed_import_during_native_attempt()
+        response = self.continuation_response(dict(fresh, state="closed"), observation)
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("Issue is closed", response.content.decode())
+
+    def test_active_source_health_does_not_excuse_hold_label(self):
+        fresh, observation = self.failed_import_during_native_attempt()
+        response = self.continuation_response(
+            dict(fresh, labels=["vibearr:hold"]), observation
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("Issue is held", response.content.decode())
+
+    def test_active_source_health_does_not_excuse_changed_body(self):
+        fresh, observation = self.failed_import_during_native_attempt()
+        response = self.continuation_response(
+            dict(fresh, body="Changed material instructions"), observation
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("instructions changed", response.content.decode())
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.source_snapshot["body"], fresh["body"])
+
+    def test_active_source_health_does_not_excuse_unpermitted_author(self):
+        fresh, observation = self.failed_import_during_native_attempt()
+        response = self.continuation_response(dict(fresh, author_id=789), observation)
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("author is not permitted", response.content.decode())
+
+    def test_active_source_health_still_requires_successful_fresh_provider_read(self):
+        from work_queue.github import GitHubAPIError
+
+        fresh, observation = self.failed_import_during_native_attempt()
+        frozen = copy.deepcopy(self.run.source_snapshot)
+        with (
+            patch("work_queue.github.repository_metadata", return_value=observation),
+            patch(
+                "work_queue.github.read_issue",
+                side_effect=GitHubAPIError("Unavailable"),
+            ),
+        ):
+            response = self.post(
+                "runner_refresh_source",
+                {"claim_token": str(self.claim), "mode": "continuation"},
+            )
+        self.assertEqual(response.status_code, 503, response.content)
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.source_snapshot, frozen)
+        self.assertEqual(self.run.state, "active")
+        self.project.refresh_from_db()
+        self.assertTrue(self.project.sync_error)
+
     def test_continuation_keeps_frozen_discussion_after_status_comment(self):
         fresh = self.github_source()
         comments = [{"id": 1, "body": "Frozen instructions"}]
