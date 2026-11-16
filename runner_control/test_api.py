@@ -476,7 +476,7 @@ class RunnerAPITests(TestCase):
         self.item.refresh_from_db()
         self.assertEqual(self.item.status, "running")
 
-    def test_success_requires_matching_delivery_and_passing_commands(self):
+    def test_legacy_unbound_delivery_cannot_authorize_success(self):
         token = self.claim_token()
         url = "https://github.com/example/repo/pull/1"
         self.artifact(
@@ -496,10 +496,10 @@ class RunnerAPITests(TestCase):
             self.finish(
                 token, status="succeeded", result_url=url, error_summary=""
             ).status_code,
-            200,
+            400,
         )
         self.item.refresh_from_db()
-        self.assertEqual(self.item.status, "succeeded")
+        self.assertEqual(self.item.status, "running")
 
     def test_latest_failing_validation_prevents_success(self):
         token = self.claim_token()
