@@ -91,6 +91,18 @@ function run_tests() {
     fail "One or more tests failed. :("
 }
 
+function run_runner_checks() {
+  local runner_image
+  runner_image="${COMPOSE_PROJECT_NAME:-nightly-queue}-runner-check"
+  testing "independent runner image and portable runtime/Git/recovery acceptance"
+  docker build -f coding_runner/Dockerfile -t "$runner_image" . || fail "runner image build"
+  docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+    --network none --tmpfs /tmp:rw,nosuid,size=512m \
+    --tmpfs /var/lib/coding-runner:rw,uid=10001,gid=10001,mode=700 \
+    --entrypoint python "$runner_image" -m coding_runner.verify || fail "runner checks"
+  pass "portable runner image acceptance; full deployment boundary qualification is separate"
+}
+
 function Main() {
   cd "$(dirname "$0")" || error "Failed to change directory to $(dirname "$0")"
 
@@ -111,6 +123,7 @@ function Main() {
     run_lints
     echo
     run_tests
+    run_runner_checks
   fi
 
 }

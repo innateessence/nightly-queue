@@ -27,7 +27,13 @@ def api_settings(request):
         data if runner_post else None, instance=runner_saved, prefix="runner"
     )
     if runner_post and runner_form.is_valid():
+        from runner_control.configuration import settings_values
+        from runner_control.release import observe_settings
+
+        previous = RunnerSettings.objects.filter(pk=1).first() or RunnerSettings()
+        before = settings_values(previous)
         runner_form.save()
+        observe_settings(before, settings_values(runner_form.instance))
         messages.success(
             request,
             "Coding runner settings saved. Live execution remains release-gated.",
@@ -49,7 +55,13 @@ def api_settings(request):
         evidence.configuration_changed = (
             evidence.report["configuration_revision"] != configuration["revision"]
         )
+    from runner_control.models import ReleaseQualification, RunnerIdentity
+
     context = {
+        "runner_identities": RunnerIdentity.objects.filter(enabled=True),
+        "release_qualifications": ReleaseQualification.objects.order_by("-created_at")[
+            :20
+        ],
         "form": form,
         "runner_form": runner_form,
         "runner_configuration": configuration,

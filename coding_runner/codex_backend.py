@@ -358,6 +358,17 @@ class CodexBackend:
                 ("Selected Codex API token is unavailable or unsupported.",),
                 CAPABILITIES,
             )
+        qualification = getattr(
+            self.credentials, "qualification", lambda account: None
+        )(account)
+        if qualification:
+            from .release import matches_deployment
+
+            grant = self.credentials(account)
+            current_version = grant.get("credential", {}).get("version")
+            valid = current_version == qualification.get("secret_version")
+            if valid and matches_deployment(qualification["verification"]):
+                return BackendReadiness(True, True, (), CAPABILITIES)
         return BackendReadiness(
             False,
             False,

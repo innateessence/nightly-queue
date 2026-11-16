@@ -4,7 +4,7 @@
 {% block content %}
 {% for approval in approvals %}
 <section class="card" style="padding:1.5rem; margin-bottom:1.5rem; overflow-wrap:anywhere">
-  <h2>{{ approval.item_title }}</h2>
+  <h2><a href="{% url 'runner_plan_detail' approval.run_id %}">{{ approval.item_title }}</a></h2>
   <p><strong>{{ approval.decision_display }}</strong>{% if approval.consumed_at %} · Execution permit consumed {{ approval.consumed_at }}{% endif %}</p>
   <p>Run {{ approval.run_id }} · Requested {{ approval.created_at }}</p>
   <p>Source: <strong>{{ approval.action.source_kind }}</strong> · {{ approval.action.source_reference }}</p>
@@ -27,7 +27,7 @@
     <button class="button-primary" name="decision" value="approved" type="submit">Approve this exact action once</button>
     <button class="button-secondary" name="decision" value="denied" type="submit">Deny</button>
   </form>
-  {% else %}<p>{{ approval.decision_note }}{% if approval.decided_at %} · Decided {{ approval.decided_at }}{% endif %}</p>{% endif %}
+  {% else %}{% if approval.run_state != 'active' and approval.decision == 'pending' %}<p>This run no longer owns execution. Its stale approval cannot be decided or consumed; its original context stays protected for reconciliation.</p>{% endif %}<p>{{ approval.decision_note }}{% if approval.decided_at %} · Decided {{ approval.decided_at }}{% endif %}</p>{% endif %}
 </section>
 {% empty %}<p>No action approvals have been requested.</p>{% endfor %}
 {% endblock %}

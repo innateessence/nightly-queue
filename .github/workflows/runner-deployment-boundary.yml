@@ -1,0 +1,41 @@
+name: Runner deployment boundary qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: 'Approved runner image at an immutable sha256 digest'
+        required: true
+      policy_artifact:
+        description: 'Absolute path of the reviewed Compose deployment overlay on this runner'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  boundary:
+    runs-on: [self-hosted, runner-deployment-qualification]
+    timeout-minutes: 20
+    steps:
+      - name: Verify the exact reviewed deployment
+        env:
+          RUNNER_IMAGE: ${{ inputs.image }}
+          RUNNER_POLICY: ${{ inputs.policy_artifact }}
+        run: |
+          case "$RUNNER_IMAGE" in *@sha256:*) ;; *) echo 'Immutable image digest required'; exit 1;; esac
+          test -f "$RUNNER_POLICY"
+          deployment_config=$(mktemp)
+          docker compose -f "$RUNNER_POLICY" config --format json > "$deployment_config"
+          python3 -c 'import json,os,sys; config=json.load(open(sys.argv[1])); assert config["services"]["coding-runner"]["image"] == os.environ["RUNNER_IMAGE"]' "$deployment_config"
+          rm "$deployment_config"
+          docker compose -f "$RUNNER_POLICY" run --rm --no-deps --entrypoint python coding-runner -m coding_runner.verify --boundary
+          docker compose -f "$RUNNER_POLICY" run --rm --no-deps --entrypoint python coding-runner -m coding_runner.release --probe
+      - name: Record qualification scope
+        env:
+          RUNNER_IMAGE: ${{ inputs.image }}
+          RUNNER_POLICY: ${{ inputs.policy_artifact }}
+        run: |
+          printf '%s\n' "$RUNNER_IMAGE"
+          sha256sum "$RUNNER_POLICY"
+          uname -r

@@ -22,6 +22,18 @@ class ScopedCredentials:
         ):
             raise ValueError("Owned-run credentials require a stage and claim token.")
 
+    def qualification(self, account):
+        proof = self.client.configuration().get("release_verification", {})
+        if proof.get("qualified") is not True:
+            return None
+        for entry in proof.get("accounts", []):
+            if all(
+                entry.get(key) == account.get(key)
+                for key in ("backend", "credential_id", "model")
+            ):
+                return {**entry, "verification": proof}
+        return None
+
     def __call__(self, account: dict[str, Any]) -> dict[str, Any]:
         if self.run_id is None:
             payload = {"scope": "preflight", **account}
@@ -60,6 +72,7 @@ class BackendRegistry:
         account = {
             "backend": provider,
             "credential_id": effective[f"{stage}_credential_id"],
+            "model": effective[f"{stage}_model"],
         }
         request = BackendRequest(
             account, effective[f"{stage}_model"], effective[f"{stage}_instructions"], {}

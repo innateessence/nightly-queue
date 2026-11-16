@@ -1,10 +1,40 @@
 from django.urls import path
 
-from . import api, approval_api, configuration_api, gate_api, plan_api, secrets
+from . import (
+    api,
+    approval_api,
+    configuration_api,
+    gate_api,
+    plan_api,
+    secrets,
+    operations_api,
+)
 
 from . import recovery_api
 
 urlpatterns = [
+    path("health/", operations_api.health, name="runner_health"),
+    path(
+        "release/<uuid:qualification_id>/",
+        operations_api.release_suite,
+        name="runner_release_suite",
+    ),
+    path(
+        "release/<uuid:qualification_id>/claim/",
+        operations_api.release_claim,
+        name="runner_release_claim",
+    ),
+    path("retention/", operations_api.retention, name="runner_retention"),
+    path(
+        "runs/<uuid:run_id>/retention/ack/",
+        operations_api.retention_ack,
+        name="runner_retention_ack",
+    ),
+    path(
+        "runs/<uuid:run_id>/retention/workspace/",
+        operations_api.retention_workspace,
+        name="runner_retention_workspace",
+    ),
     path(
         "runs/<uuid:run_id>/operations/<uuid:operation_id>/",
         recovery_api.operation_detail,

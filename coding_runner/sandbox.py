@@ -118,12 +118,14 @@ class ApprovedExecutor:
         periodic_gate: Callable[[], bool] | None = None,
         *,
         read_only: bool = False,
+        observer=None,
     ):
         self.broker = broker
         self.sources = sources
         self.gate = gate
         self.periodic_gate = periodic_gate or gate
         self.read_only = read_only
+        self.observer = observer
 
     def execute(
         self,
@@ -214,10 +216,15 @@ class ApprovedExecutor:
                 processes.reaped(process)
             output.seek(0)
             captured = output.read(1048576)
+        result = ExecutionResult(
+            execution_id, process.returncode, captured, interrupted
+        )
+        if self.observer:
+            self.observer(workspace, action, result)
         try:
             workspace.verify()
         except WorkspaceError:
             raise SandboxUnavailable(
                 "Command left unsafe workspace content; operator recovery is required."
             ) from None
-        return ExecutionResult(execution_id, process.returncode, captured, interrupted)
+        return result
