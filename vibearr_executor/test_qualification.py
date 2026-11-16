@@ -40,6 +40,19 @@ class QualificationTests(unittest.TestCase):
             result = capabilities(self.runtime)
         self.assertTrue(result["qualified"])
         self.assertFalse(result["native_agent_ready"])
+        self.assertEqual(result["instance_id"], self.runtime.instance)
+
+    def test_instance_identity_survives_restart_and_changes_for_new_state(self):
+        identity = self.runtime.instance
+        self.runtime.close()
+        self.runtime = Runtime(self.directory, smoke_profiles(self.image))
+        self.assertEqual(self.runtime.instance, identity)
+        with tempfile.TemporaryDirectory() as directory:
+            fresh = Runtime(Path(directory), smoke_profiles(self.image))
+            try:
+                self.assertNotEqual(fresh.instance, identity)
+            finally:
+                fresh.close()
 
     def test_material_source_engine_kernel_profile_or_egress_change_revokes(self):
         for key in (
