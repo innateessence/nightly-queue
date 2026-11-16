@@ -65,7 +65,7 @@ def acceptance(
     from vibearr_executor.qualify import Harness, qualify, require, smoke_profiles
 
     kind = credential["credential"]["kind"]
-    agent = codex_profile(image, kind)
+    agent = codex_profile(image, kind, database_image=database_image)
     validation = Profile(
         "codex-fixture-validation-v1",
         1,
@@ -142,6 +142,10 @@ def acceptance(
         )
         exported = unpack(outcome["source"])
         original = unpack(source)
+        require(
+            set(exported) == set(original),
+            "Native fixture left generated source or scratch files in its export",
+        )
         require(
             exported.get("test_answer.py") == original["test_answer.py"],
             "Native fixture changed its independent test",

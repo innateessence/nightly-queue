@@ -13,7 +13,15 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from .artifacts import pack
-from .codex_task import ARGV, HOSTS, SECRET_ENV, auth_material, context_data, launch
+from .codex_task import (
+    ARGV,
+    DATABASE_ENV,
+    HOSTS,
+    SECRET_ENV,
+    auth_material,
+    context_data,
+    launch,
+)
 from .contracts import Limits, Profile, digest
 from .runtime import Runtime
 
@@ -178,6 +186,98 @@ class CodexTaskTests(unittest.TestCase):
                     home=root / "home",
                     binary=self.binary(root, version="0.0.0"),
                 )
+
+    def test_only_executor_disposable_database_reaches_native_child(self):
+        password = "a" * 48
+        scoped = f"postgresql://task:{password}@172.20.0.2:5432/task"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.dict(
+                os.environ,
+                {
+                    DATABASE_ENV: scoped,
+                    "DATABASE_URL": "postgresql://production-db/private",
+                    "POSTGRES_PASSWORD": "unrelated-host-password",
+                    "GITHUB_TOKEN": "unrelated-host-token",
+                    "NO_PROXY": "127.0.0.11,10.0.0.0/8,host-gateway",
+                },
+            ):
+                _, environment, _ = launch(
+                    self.context,
+                    "selected-key-0123456789",
+                    home=root / "home",
+                    binary=self.binary(root),
+                )
+            self.assertEqual(environment["DATABASE_URL"], scoped)
+            self.assertEqual(environment["POSTGRES_DB"], "task")
+            self.assertEqual(environment["POSTGRES_USER"], "task")
+            self.assertEqual(environment["POSTGRES_PASSWORD"], password)
+            self.assertEqual(environment["POSTGRES_HOST"], "172.20.0.2")
+            self.assertEqual(environment["POSTGRES_PORT"], "5432")
+            self.assertEqual(environment["VIBEARR_POSTGRES_PASSWORD"], password)
+            self.assertEqual(environment["NO_PROXY"], "127.0.0.1,localhost")
+            self.assertEqual(environment["no_proxy"], "127.0.0.1,localhost")
+            self.assertEqual(environment["TMPDIR"], "/work")
+            self.assertEqual(environment["PYTHONDONTWRITEBYTECODE"], "1")
+            self.assertEqual(environment["PYTHONUNBUFFERED"], "1")
+            self.assertNotIn("GITHUB_TOKEN", environment)
+            self.assertNotIn("unrelated-host-password", environment.values())
+
+    def test_ambient_database_without_executor_marker_is_not_inherited(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.dict(
+                os.environ,
+                {
+                    "DATABASE_URL": "postgresql://production-db/private",
+                    "POSTGRES_PASSWORD": "host-password",
+                },
+            ):
+                _, environment, _ = launch(
+                    self.context,
+                    "selected-key-0123456789",
+                    home=root / "home",
+                    binary=self.binary(root),
+                )
+            self.assertNotIn("DATABASE_URL", environment)
+            self.assertNotIn("POSTGRES_PASSWORD", environment)
+
+    def test_host_database_cannot_masquerade_as_executor_disposable_database(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.dict(
+                os.environ,
+                {
+                    DATABASE_ENV: "postgresql://operator:host-password@127.0.0.1:5432/production"
+                },
+            ):
+                with self.assertRaises(ValueError):
+                    launch(
+                        self.context,
+                        "selected-key-0123456789",
+                        home=root / "home",
+                        binary=self.binary(root),
+                    )
+
+    def test_session_auth_files_stay_private_under_project_umask(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            previous = os.umask(0o022)
+            try:
+                context = {**self.context, "auth_kind": "session"}
+                _, _, prompt = launch(
+                    context,
+                    auth_material("session", session_secret()),
+                    home=root / "home",
+                    binary=self.binary(root),
+                )
+            finally:
+                os.umask(previous)
+            self.assertEqual((root / "home/.codex").stat().st_mode & 0o777, 0o700)
+            self.assertEqual(
+                (root / "home/.codex/auth.json").stat().st_mode & 0o777, 0o600
+            )
+            self.assertEqual(prompt.stat().st_mode & 0o777, 0o600)
 
     def test_fixture_process_hang_is_terminable(self):
         with tempfile.TemporaryDirectory() as temporary:
