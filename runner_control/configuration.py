@@ -261,7 +261,15 @@ def locked_configuration_snapshot(project, expected_revision):
         raise ValidationError(
             {"configuration": [error["message"] for error in effective["errors"]]}
         )
+    selected = {
+        value
+        for key, value in effective["effective"].items()
+        if key.endswith("credential_id") and value
+    }
     snapshot = {
+        "credential_references": [
+            entry for entry in document["credentials"] if entry["id"] in selected
+        ],
         "schema_version": SCHEMA_VERSION,
         "revision": document["revision"],
         "global": document["global"],

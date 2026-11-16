@@ -38,6 +38,12 @@ formats and live adapter compatibility remain outside this storage boundary.
 {"scope":"run","run_id":"<uuid>","claim_token":"<uuid>","purpose":"research"}
 ```
 
+Preflight requires a `RunnerPreflightGrant` for the authenticated runner and selected credential.
+Provision the runner identity with `provision_runner`, create the backend credential
+and select it in runner/project settings, then add a Runner preflight grant in Django
+admin choosing that runner and credential. Removing the grant blocks future preflight
+delivery; granting an unselected credential never permits delivery.
+
 Preflight permits only backend accounts present in the current authenticated
 configuration inventory, including project overrides. Issue and repository tokens
 are delivered only for owned active work. Run purposes are `research`,
@@ -65,6 +71,15 @@ before credential rows, matching claim snapshot lock ordering. Global selected
 references use PROTECT; project JSON replacement references are protected during
 instance and bulk deletion by a pre-delete check under the settings lock.
 
-Apply credential migration 0005 before deployment. It preserves existing encrypted
+Apply credential migrations 0005 and 0006 before deployment. It preserves existing encrypted
 payloads and initializes version 1 with no revocation. No real credentials or live
 backend calls are used by deterministic tests.
+
+
+Validation: the PostgreSQL suite passes 482 tests, including 26 selected-secret
+endpoint cases, credential storage/form/UI tests and schema upgrade preservation.
+Black, Ruff, mypy, Django checks and migration drift checks pass. The standalone
+CLI/runtime suites also pass. The rendered credential UI is recorded in
+[screenshot](screenshots/runner-credentials.png). No live provider login, allowance
+probe or backend invocation was performed; execution remains disabled pending the
+separate adapter/sandbox/release verification work.

@@ -214,3 +214,20 @@ class APISettings(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+class RunnerPreflightGrant(models.Model):
+    runner = models.ForeignKey(
+        "runner_control.RunnerIdentity", on_delete=models.CASCADE
+    )
+    credential = models.ForeignKey(Credential, on_delete=models.PROTECT)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["runner", "credential"], name="runner_preflight_credential"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.runner}: {self.credential}"

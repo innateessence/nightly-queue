@@ -4,7 +4,7 @@ from django.http import JsonResponse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_variables
 
-from credentials.models import Credential
+from credentials.models import Credential, RunnerPreflightGrant
 from nightly_queue.api import read_body, string_field
 
 from .auth import runner_api_view
@@ -37,7 +37,14 @@ def selected_reference(data, runner, document):
             account["backend"] == backend and account["credential_id"] == reference
             for account in document["accounts"]
         )
-        if type(reference) is not int or not selected:
+        granted = (
+            RunnerPreflightGrant.objects.select_for_update()
+            .filter(runner=runner, credential_id=reference)
+            .exists()
+            if type(reference) is int
+            else False
+        )
+        if type(reference) is not int or not selected or not granted:
             unavailable("This account is not selected for runner preflight.")
         return reference, backend
     if scope != "run" or set(data) != {"scope", "run_id", "claim_token", "purpose"}:

@@ -1,8 +1,9 @@
 from django.urls import path
 
-from . import api, configuration_api
+from . import api, configuration_api, secrets
 
 urlpatterns = [
+    path("secrets/", secrets.selected_secret, name="runner_selected_secret"),
     path(
         "configuration/", configuration_api.configuration, name="runner_configuration"
     ),

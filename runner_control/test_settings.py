@@ -457,18 +457,19 @@ class EffectiveConfigurationTests(ConfiguredProjectTestCase):
         self.assertFalse(document["execution_ready"])
         self.assertFalse(document["projects"][0]["execution_ready"])
 
-    def test_deleted_override_credential_fails_closed(self):
+    def test_missing_override_credential_fails_closed(self):
         other = Credential.objects.create(
             name="Temporary",
             provider="github",
             kind="token",
             encrypted_payload="temporary-encrypted-reference",
         )
+        reference = other.pk
+        other.delete()
         ProjectRunnerSettings.objects.create(
             project=self.project,
-            overrides={"issue_credential_id": {"mode": "replace", "value": other.pk}},
+            overrides={"issue_credential_id": {"mode": "replace", "value": reference}},
         )
-        other.delete()
         errors = effective_project_configuration(self.project)["errors"]
         self.assertTrue(any(error["code"] == "missing_credential" for error in errors))
 
