@@ -220,6 +220,7 @@ class NativeLifecycle:
 
     def checkpoint(self, *, force_source=False):
         self.resources.bind(self.run_id, self.executor)
+        self.resources.verify_dispatched(self.run_id, self.executor)
         if not self.host.checkpoint():
             self.resources.controls(self.run_id, self.executor, pause=True)
             self.native["paused"] = True
@@ -632,6 +633,7 @@ class NativeLifecycle:
                 return "wait"
             data["start_intent"] = True
             self.save()
+            self.resources.dispatch(self.run_id, session.manifest["operation_id"])
             adapter.start(session)
             self.status("implementation", force=True)
             return "running"
@@ -812,6 +814,7 @@ class NativeLifecycle:
             if observed["state"] == "prepared":
                 if not self.checkpoint(force_source=True):
                     return "wait"
+                self.resources.dispatch(self.run_id, request["build_id"], build=True)
                 self.builder.start(request)
                 return "running"
             if observed["state"] not in {"ready", "failed", "canceled", "unknown"}:
@@ -874,6 +877,7 @@ class NativeLifecycle:
         if observed["state"] == "not-started":
             if not self.checkpoint(force_source=True):
                 return "wait"
+            self.resources.dispatch(self.run_id, observed["operation"]["operation_id"])
             self.validator.start(session)
             self.status(
                 "validation", validation_status="running", detail=observed["check_id"]

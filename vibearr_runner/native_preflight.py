@@ -192,10 +192,14 @@ class NativePreflight:
                 entry["session"] = session.to_data()
                 self.journal.save(state)
             session = NativeSession.from_data(entry["session"])
+            self.resources.verify_dispatched(session.manifest["run_id"], self.executor)
             observed = adapter.reconcile(session)
             if observed["state"] == "not-started":
                 entry["start_intent"] = True
                 self.journal.save(state)
+                self.resources.dispatch(
+                    session.manifest["run_id"], session.manifest["operation_id"]
+                )
                 adapter.start(session)
                 return True
             if observed["state"] in {"running", "unknown"}:
@@ -236,6 +240,9 @@ class NativePreflight:
                         }
                     continue
                 session = NativeSession.from_data(entry["session"])
+                self.resources.verify_dispatched(
+                    session.manifest["run_id"], self.executor
+                )
                 adapter = self.registry.create(session.adapter, self.executor)
                 current = self.executor.capabilities()
                 selected = any(
@@ -313,6 +320,7 @@ class NativePreflight:
                 continue
             operation = request["operation_id"]
             self.resources.bind(request["run_id"], self.executor)
+            self.resources.verify_dispatched(request["run_id"], self.executor)
             observed = self.executor.stop(operation)
             observations.append(observed)
             entry["pending"] = not (

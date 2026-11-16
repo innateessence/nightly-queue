@@ -73,3 +73,36 @@ class NativeResourceTests(unittest.TestCase):
         replacement = Executor()
         replacement.instance_id = identity
         self.assertEqual(self.store.bind(self.run, replacement), identity)
+
+    def test_dispatched_record_loss_does_not_recreate_or_attest_termination(self):
+        from unittest.mock import Mock
+
+        executor = Executor()
+        executor.prepare = Mock()
+        executor.status = Mock(return_value={"state": "not-started"})
+        self.store.bind(self.run, executor)
+        self.store.operation(self.run, self.manifest, kind="agent")
+        self.store.dispatch(self.run, self.operation)
+        with self.assertRaisesRegex(ReconciliationRequired, "never recreate"):
+            self.store.reconcile(self.run, executor, stop=True)
+        executor.prepare.assert_not_called()
+
+    def test_cancel_before_prepare_can_resolve_absence_without_dispatch(self):
+        import importlib.util
+        from unittest.mock import Mock
+
+        if importlib.util.find_spec("vibearr_executor") is None:
+            self.skipTest("Install the native-runtime extra for executor absence tests")
+        from vibearr_executor.client import ExecutorRejected
+
+        executor = Executor()
+        executor.stop = Mock(
+            side_effect=ExecutorRejected("never prepared", http_status=404)
+        )
+        self.store.bind(self.run, executor)
+        self.store.reserve(self.run, self.operation)
+        self.assertEqual(
+            self.store.reconcile(self.run, executor, stop=True),
+            {"operations": [], "builds": []},
+        )
+        self.assertEqual(self.store.load(self.run)["pending"], {})

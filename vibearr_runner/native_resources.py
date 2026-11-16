@@ -97,15 +97,47 @@ class NativeResources:
             raise WorkspaceError("Native dependency build reference changed.")
         value["builds"][build_id] = request
         value.setdefault("pending_builds", {}).pop(build_id, None)
+        value.setdefault("pending", {}).pop(build_id, None)
         self.save(value)
+
+    def dispatch(self, run_id, identity, *, build=False):
+        value = self.load(run_id)
+        if identity not in value["builds" if build else "operations"]:
+            raise ReconciliationRequired(
+                "Register the immutable native resource before dispatch."
+            )
+        key = "dispatched_builds" if build else "dispatched"
+        value.setdefault(key, {})[identity] = True
+        self.save(value)
+
+    def verify_dispatched(self, run_id, executor):
+        from vibearr_executor.client import ExecutorRejected
+
+        value = self.load(run_id)
+        self.bind(run_id, executor)
+        for identity in value.get("dispatched", {}):
+            observed = executor.status(identity)
+            if observed.get("state") == "not-started":
+                raise ReconciliationRequired(
+                    "A dispatched native operation is missing or unconfirmed; never recreate its record."
+                )
+        for identity in value.get("dispatched_builds", {}):
+            try:
+                executor.dependencies(identity, "status")
+            except ExecutorRejected as exc:
+                if exc.http_status == 404:
+                    raise ReconciliationRequired(
+                        "A dispatched dependency build record is missing; retain ownership."
+                    ) from None
+                raise
 
     def reconcile(self, run_id, executor, *, stop=False):
         self.bind(run_id, executor)
+        self.verify_dispatched(run_id, executor)
         value = self.load(run_id)
         operations = []
         builds = []
         for operation_id, entry in value["operations"].items():
-            executor.prepare(entry["manifest"])
             action = executor.stop if stop else executor.status
             operations.append(action(operation_id))
         for build_id in value["builds"]:
@@ -154,7 +186,6 @@ class NativeResources:
         for operation_id, entry in value["operations"].items():
             if operation_id in value["builds"]:
                 continue
-            executor.prepare(entry["manifest"])
             observed = executor.status(operation_id)
             if observed.get("state") != "running":
                 continue
