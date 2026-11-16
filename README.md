@@ -1,5 +1,8 @@
 # vibearr
 
+For repeatable self-development setup and finite issue-to-PR acceptance, see
+[the bootstrap guide](docs/self-development-bootstrap.md).
+
 A self-hosted *arr app for vibe coding with Codex, Claude Code, and OpenCode.
 
 The idea is simple: put the work in GitHub issues and let a coding agent get on

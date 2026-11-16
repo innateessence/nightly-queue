@@ -9,6 +9,94 @@ from vibearr_runner import queue_acceptance
 
 
 class QueueAcceptanceTests(unittest.TestCase):
+    def test_resuming_after_completion_ack_never_cycles_to_claim_another_issue(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "controller"
+            with Journal(directory) as journal:
+                state = journal.load()
+                state["completion_receipts"] = [
+                    {"run_id": "original", "finish_digest": "a" * 64}
+                ]
+                journal.save(state)
+            (directory / "queue-acceptance.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "project_id": 1,
+                        "issue_number": 3,
+                        "run_id": "original",
+                        "observed": {},
+                        "generations": 2,
+                    }
+                )
+            )
+            queue = SimpleNamespace(
+                controller_secret=None,
+                reconcile=Mock(
+                    return_value={
+                        "run": {"state": "completed", "finish_digest": "a" * 64}
+                    }
+                ),
+            )
+            with (
+                patch.object(queue_acceptance, "client", return_value=queue),
+                patch.object(
+                    queue_acceptance,
+                    "evidence_document",
+                    return_value={"run_id": "original"},
+                ) as report,
+                patch.object(queue_acceptance, "cycle_once") as cycle,
+                patch.object(queue_acceptance.subprocess, "run") as process,
+            ):
+                result = queue_acceptance.run_acceptance(
+                    directory, 1, 3, directory / "receipt.json", 60
+                )
+            self.assertEqual(result["run_id"], "original")
+            report.assert_called_once()
+            cycle.assert_not_called()
+            process.assert_not_called()
+
+    def test_progress_file_cannot_replace_the_controller_journal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            journal = directory / "journal.json"
+            journal.write_text("original controller state")
+            with self.assertRaisesRegex(ValueError, "reserved"):
+                queue_acceptance.run_acceptance(
+                    directory,
+                    1,
+                    3,
+                    directory / "receipt.json",
+                    60,
+                    progress_name="journal.json",
+                )
+            self.assertEqual(journal.read_text(), "original controller state")
+
+    def test_interrupted_cycle_keeps_bounded_private_redacted_diagnostics(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            with patch.dict(
+                "os.environ",
+                {"VIBEARR_RUNNER_API_TOKEN": "sensitive-test-runner-token"},
+            ):
+                queue_acceptance.preserve_interruption(
+                    directory,
+                    "cycle output",
+                    "x" * 70000 + " sensitive-test-runner-token",
+                    1,
+                )
+            path = directory / "queue-acceptance-last-interruption.json"
+            record = json.loads(path.read_text())
+            self.assertNotIn("sensitive-test-runner-token", path.read_text())
+            self.assertLessEqual(len(record["stderr"]), 65536)
+            self.assertIn("[redacted]", record["stderr"])
+            self.assertEqual(path.stat().st_mode & 0o077, 0)
+            self.assertIn("original operations", record["resume"])
+
     def test_missing_explicit_execution_flag_never_constructs_a_queue_client(self):
         arguments = [
             "queue_acceptance",
