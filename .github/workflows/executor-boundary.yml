@@ -28,9 +28,20 @@ jobs:
         run: |
           task_image=$(docker image inspect vibearr-ci-executor --format '{{.Id}}')
           database_image=$(docker image inspect postgres:17@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f --format '{{.Id}}')
+          python3.12 -m vibearr_executor.network_probe \
+            --image "$task_image" --database-image "$database_image" \
+            --profiles-output "$RUNNER_TEMP/ordinary-profiles.json"
           python3.12 -m vibearr_runner.verify --boundary \
             --executor-image "$task_image" --database-image "$database_image" \
+            --profiles "$RUNNER_TEMP/ordinary-profiles.json" \
             --executor-state "$RUNNER_TEMP/executor-state" --evidence "$RUNNER_TEMP/executor-boundary.json"
+      - name: Verify ordinary registered operation preserves qualification
+        run: |
+          task_image=$(docker image inspect vibearr-ci-executor --format '{{.Id}}')
+          database_image=$(docker image inspect postgres:17@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f --format '{{.Id}}')
+          python3.12 -m vibearr_executor.network_probe \
+            --image "$task_image" --database-image "$database_image" \
+            --state "$RUNNER_TEMP/executor-state" --evidence "$RUNNER_TEMP/ordinary-operation.json"
       - name: Exercise installed executor service and client outside checkout
         run: |
           python3.12 -m venv "$RUNNER_TEMP/executor-build"
@@ -56,6 +67,14 @@ jobs:
           name: installed-executor-smoke
           path: ${{ runner.temp }}/installed-executor-smoke.json
           if-no-files-found: error
+          retention-days: 7
+      - name: Upload ordinary operation qualification observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ordinary-operation
+          path: ${{ runner.temp }}/ordinary-operation.json
+          if-no-files-found: ignore
           retention-days: 7
       - name: Show bounded executor diagnostics on failure
         if: failure()

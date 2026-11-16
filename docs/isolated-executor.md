@@ -288,6 +288,12 @@ recipes needed for automated qualification. They do not emulate a model session.
 The PR `Executor boundary / Qualify OCI executor` check runs actual Docker probes
 on Linux and uploads their report. The manually dispatched deployment workflow runs
 the same verifier directly on the executor host, never nested in the supervisor.
+CI also registers a credential-free ordinary validation recipe before qualification,
+then launches it with a disposable database. This recipe has no smoke exemption.
+`python -m vibearr_executor.network_probe` checks readiness and the exact binding
+while its network/database exist, after restarting the control service with the same
+task container, and after cancellation/export. Its separate evidence records host
+IPv4 snapshots to distinguish rootful bridge topology changes from task failures.
 The checks exercise hostile source/imports and forged receipts, selected-secret
 isolation, credential-free package installation, model HTTPS reachability without
 auth, offline validation, real ENOSPC/PID/OOM/CPU enforcement, restart-stable launch,
