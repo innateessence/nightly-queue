@@ -460,3 +460,34 @@ class NativeLifecycleTests(unittest.TestCase):
         self.engine().step(self.state)
         self.assertEqual(self.queue.finishes[0]["outcome"], "failed")
         self.assertIn("default branch changed", self.queue.finishes[0]["error_summary"])
+
+    def test_lost_prepare_response_reuses_the_frozen_prompt_after_supervisor_upgrade(
+        self,
+    ):
+        from vibearr_executor.client import ExecutorUnavailable
+
+        self.advance("agent")
+        original = self.executor.prepare
+        lost = False
+
+        def prepare(manifest):
+            nonlocal lost
+            result = original(manifest)
+            if not lost and manifest["profile_id"] == self.executor.agent.profile_id:
+                lost = True
+                raise ExecutorUnavailable("Fixture lost the prepared response")
+            return result
+
+        with patch.object(self.executor, "prepare", side_effect=prepare):
+            with self.assertRaises(ReconciliationRequired):
+                self.engine().step(self.state)
+            frozen = self.state["native"]["agent"]["request"]["prompt"]
+            with patch.object(
+                NativeLifecycle,
+                "agent_prompt",
+                return_value="Changed supervisor header",
+            ) as prompt:
+                self.assertEqual(self.engine().step(self.state), "running")
+                prompt.assert_not_called()
+        self.assertEqual(self.state["native"]["agent"]["request"]["prompt"], frozen)
+        self.assertEqual(len(self.executor.started), 1)
