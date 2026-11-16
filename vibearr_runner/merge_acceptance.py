@@ -441,7 +441,7 @@ def main():
         document = scenario_tasks()["merge"]
         document.update(
             available=True,
-            reason="Explicit real execution requires reviewed finite source issues, qualified no-bypass policy and trusted AI review producers.",
+            reason="Explicit real execution requires finite source issues, qualified no-bypass policy and all required CI producers.",
         )
         print(json.dumps(document, sort_keys=True, indent=2))
         return 0
@@ -455,7 +455,7 @@ def main():
         or not 60 <= args.max_seconds <= 7200
     ):
         parser.error(
-            "Explicitly select --execute, one project, two distinct reviewed issues, owned state/evidence and60..7200 seconds per case."
+            "Explicitly select --execute, one project, two distinct finite issues, owned state/evidence and60..7200 seconds per case."
         )
     from .bootstrap_files import private_json
 

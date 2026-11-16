@@ -355,6 +355,8 @@ class MergeGitHub(NativeGitHub):
 
     @observed
     def reviews(self, workspace, pull_number, profile, *, run_id, context_digest):
+        if not profile["reviews"]:
+            return []
         statuses = self.pages(
             f"/repos/{workspace['repository']}/commits/{workspace['commit_sha']}/statuses"
         )

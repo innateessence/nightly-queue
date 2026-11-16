@@ -13,6 +13,8 @@ from .native_contract import (
 
 @checked
 def merge_profile(value):
+    if isinstance(value, dict):
+        value = {"reviews": [], **value}
     fields(
         value,
         {
@@ -57,8 +59,10 @@ def merge_profile(value):
     if len(set(names)) != len(names):
         raise NativeContractError("Required check names must be unique.")
     reviews = value["reviews"]
-    if not isinstance(reviews, list) or len(reviews) != 2:
-        raise NativeContractError("Configure independent and root AI review producers.")
+    if not isinstance(reviews, list) or len(reviews) not in {0, 2}:
+        raise NativeContractError(
+            "Reviews are optional; configure both producers or leave the list empty."
+        )
     for entry in reviews:
         fields(
             entry,
@@ -79,9 +83,9 @@ def merge_profile(value):
             raise NativeContractError(
                 "Review report prefix must be repository relative."
             )
-    if {entry["role"] for entry in reviews} != {"independent", "root"}:
+    if reviews and {entry["role"] for entry in reviews} != {"independent", "root"}:
         raise NativeContractError("Both independent and root AI review are required.")
-    if len({entry["context"] for entry in reviews}) != 2:
+    if len({entry["context"] for entry in reviews}) != len(reviews):
         raise NativeContractError("Review contexts must be distinct.")
     return copied(value)
 
@@ -154,8 +158,10 @@ def merge_receipt(value, profile, workspace):
     if len(set(names)) != len(names):
         raise NativeContractError("Merge checks must have unique trusted identities.")
     reviews = value["reviews"]
-    if not isinstance(reviews, list) or len(reviews) != 2:
-        raise NativeContractError("Merge requires two trusted AI reviews.")
+    if not isinstance(reviews, list) or len(reviews) not in {0, 2}:
+        raise NativeContractError(
+            "Review evidence must match the optional configured review set."
+        )
     for entry in reviews:
         fields(
             entry,
@@ -174,7 +180,7 @@ def merge_receipt(value, profile, workspace):
         text(entry["context"], 200)
         text(entry["report_url"], 500)
         sha(entry["report_digest"])
-    if {entry["role"] for entry in reviews} != {"root", "independent"}:
+    if reviews and {entry["role"] for entry in reviews} != {"root", "independent"}:
         raise NativeContractError("Merge requires independent and root reviews.")
     if profile is not None:
         profile = merge_profile(profile)
@@ -194,6 +200,12 @@ def merge_receipt(value, profile, workspace):
         if actual != expected:
             raise NativeContractError(
                 "Merge receipt must cover the complete required check set."
+            )
+        if {entry["role"] for entry in reviews} != {
+            entry["role"] for entry in profile["reviews"]
+        }:
+            raise NativeContractError(
+                "Merge receipt must cover the configured optional review set exactly."
             )
         for entry in reviews:
             configured = next(

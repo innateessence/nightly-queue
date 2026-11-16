@@ -246,6 +246,35 @@ class Provider(MergeGitHub):
 
 
 class MergeProfileTests(unittest.TestCase):
+    def test_reviews_are_disabled_by_default_in_merge_profile(self):
+        value = profile()
+        value.pop("reviews")
+        self.assertEqual(merge_profile(value)["reviews"], [])
+
+    def test_ci_only_profile_requires_no_review_statuses(self):
+        value = profile()
+        value["reviews"] = []
+        provider = Provider()
+        provider.rules[0]["parameters"]["required_status_checks"] = [
+            {"context": "Tests", "integration_id": 15368}
+        ]
+        self.assertEqual(
+            provider.policy(workspace(), value)["profile_digest"], digest(value)
+        )
+        self.assertEqual(
+            provider.reviews(
+                workspace(), 9, value, run_id="run", context_digest="d" * 64
+            ),
+            [],
+        )
+
+    def test_ci_only_receipt_does_not_fabricate_reviews(self):
+        value, observed = profile(), receipt()
+        value["reviews"] = []
+        observed["reviews"] = []
+        observed["policy"]["profile_digest"] = digest(value)
+        self.assertEqual(merge_receipt(observed, value, workspace())["reviews"], [])
+
     def test_empty_check_profile_is_rejected(self):
         value = profile()
         value["checks"] = []

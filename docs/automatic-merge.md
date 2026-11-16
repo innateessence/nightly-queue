@@ -53,36 +53,14 @@ the accepted base's workflow files.
       "workflow_digest": "<SHA256 of accepted native-codex.yml>"
     }
   ],
-  "reviews": [
-    {
-      "role": "independent",
-      "context": "vibearr/ai-review-independent",
-      "creator_id": 17239750,
-      "report_repository": "innateessence/nightly-queue",
-      "report_repository_id": 1353963957,
-      "report_prefix": "docs/acceptance/reviews/"
-    },
-    {
-      "role": "root",
-      "context": "vibearr/ai-review-root",
-      "creator_id": 17239750,
-      "report_repository": "innateessence/nightly-queue",
-      "report_repository_id": 1353963957,
-      "report_prefix": "docs/acceptance/reviews/"
-    }
-  ]
+  "reviews": []
 }
 ```
 
-Both AI review roles may use the existing trusted coordinator's GitHub identity.
-They must reference distinct AI sessions and independently assessed reports.
-Candidate runtimes receive no GitHub publication credentials. A review file or a
-successful message written by the task agent cannot publish a trusted status.
-The supervisor only reads review statuses; the separate coordinator publishes
-them after independent and root AI review find no P2 or higher issues.
-For this repository, all four current CI workflows are configured requirements;
-the plan's Tests and validation workflows are the minimum contract. A failure in
-another required workflow cannot be ignored because two minimum checks passed.
+AI review gates are optional and disabled for the MVP (`reviews: []`). They are
+not needed to claim, validate, merge, or complete a task. For this repository, all
+four current CI workflows are configured requirements; passing only the plan's
+two minimum workflows cannot excuse a failure in another required workflow.
 
 The provider gate requires effective active branch rules with no bypass actors,
 strict up-to-date checks, and exactly the configured nonempty required contexts
@@ -113,7 +91,7 @@ python -m vibearr_runner.merge_setup --profile /private/merge-profile.json \
 Review that concrete preview against the current effective policy before using
 `--apply --checkpoint /private/merge-setup.json`. Apply updates only the selected
 existing repository ruleset, preserving its other rules, requiring the configured
-checks and two AI review contexts, and removing its bypass actors. It does not
+checks and removing its bypass actors. It does not
 enable execution, change saved credentials, toggle GitHub native auto-merge, or
 change other/inherited rulesets. The checkpoint preserves the original policy.
 Run the same command again to reconcile and verify the observed applied policy;
@@ -126,50 +104,14 @@ Changing a trusted workflow/profile requires reviewing and registering its new
 base definition. Candidate changes to required workflow definitions cannot
 silently weaken their own merge checks.
 
-## AI review machine interface
+## Optional review integration
 
-Publish reports on a separate control/report branch and PR. Never add review
-report commits to an active app-owned candidate head. A report URL must identify
-an immutable commit and the configured report path/repository. Each report is
-finite JSON with these fields:
-
-```json
-{
-  "schema_version": 1,
-  "role": "independent",
-  "run_id": "<owned run UUID>",
-  "context_digest": "<frozen context SHA256>",
-  "repository_id": 1353963957,
-  "pull_number": 123,
-  "head_sha": "<exact validated head>",
-  "base_sha": "<exact validated base>",
-  "tree_sha": "<exact validated tree>",
-  "session_id": "<actual independent AI review session>",
-  "reviewer": "<trusted coordinator/source identity>",
-  "findings": [],
-  "verdict": "no_p2_or_higher"
-}
-```
-
-The root report uses role `root` and another actual AI session. Unresolved
-findings can only be P3/P4. Preserve the independent review's actual evidence and
-root assessment in the report PR; do not fill session IDs or verdicts from a
-candidate assertion. The coordinator's binding JSON contains `run_id`,
-`context_digest`, `workspace` (the exact v2 workspace), and `pull_number`.
-
-```sh
-python -m vibearr_runner.merge_review --profile /private/merge-profile.json \
-  --binding /private/review-binding.json --role independent \
-  --report-url https://github.com/OWNER/REPO/blob/COMMIT/docs/acceptance/reviews/report.json \
-  --token-file /private/github-coordinator.json
-```
-
-The default verifies identity/report/PR and previews the status. After the trusted
-coordinator accepts its own evidence, `--publish --state-file /private/review.json`
-journals and publishes one exact-head status. Repeat the same invocation to
-reconcile a lost response; a missing result after dispatch retains the checkpoint
-and cannot create a duplicate. This publication path is separate from the
-candidate runtime and the runner's completion-only credential client.
+The MVP leaves `reviews` empty and publishes no review statuses. Optional external
+review producers can be configured explicitly for another policy; their exact
+head/report/producer checks apply only when selected. Background AI review and
+review-purpose image hardening are preserved separately on the future review
+branches and are not an execution, image or qualification prerequisite for this
+CI-only MVP.
 
 ## Exact candidate and recovery
 
@@ -177,8 +119,8 @@ Every required check must be the current completed successful job from the
 configured workflow ID/path and GitHub App. The runner verifies check ID, suite,
 workflow run/attempt, exact repository/PR/head and tested base. Missing, pending,
 skipped, canceled, stale, duplicate, superseded or unexpected-producer checks
-cannot merge. Both trusted AI review statuses/reports must bind the same exact
-run, context, base, head and tree. The server independently rechecks provider
+cannot merge. Optional configured review statuses must bind the same exact run,
+context, base, head and tree; an empty review set adds no review gate. The server independently rechecks provider
 authorization before saving merge intent and reads actual merged state before
 recording dependency evidence.
 
@@ -221,10 +163,10 @@ and malformed-input tests; B depends on A and preserves status in filter links
 and clear behavior with regression tests. Do not preimplement these tasks or use
 documentation-only changes as the merge-loop proof. Root reviews the finite issue
 bodies before publication and can exclusively delegate those two app merges to
-the controller after current policy and review-producer preflight.
+the controller after current no-bypass policy and required-check preflight.
 
 The report requires genuine native Codex sessions, all nine isolated checks,
-trusted exact-head remote checks and both AI review sources, one PR/merge per
+all four trusted exact-head remote checks, one PR/merge per
 issue, provider-verified completion, real rendered screenshots, and B's initial
 base containing A's actual merge commit. No manual merge or approval record may
 substitute. Interrupted launch/validation/push/PR/merge/completion, real validation
