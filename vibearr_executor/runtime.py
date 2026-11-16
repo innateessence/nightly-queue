@@ -267,6 +267,14 @@ class Runtime:
                 raise Conflict(
                     "Container identity is occupied by an unrelated resource."
                 )
+            if (
+                name == record["name"]
+                and record.get("container_id")
+                and inspected["Id"] != record["container_id"]
+            ):
+                raise Conflict(
+                    "Recorded task container ID changed; recovery is required."
+                )
         return inspected
 
     def network(self, record: dict, suffix: str, *, internal: bool) -> str:
@@ -544,7 +552,7 @@ class Runtime:
             )
             mounts = {
                 "/work": f"size={limits['workspace_mb']}m,uid=1000,gid=1000,mode=0700",
-                "/state": "size=48m,mode=0700,noexec",
+                "/state": "size=64m,mode=0700,noexec",
                 "/secrets": "size=64k,mode=0711,noexec",
                 "/tmp": "size=16m,mode=1777",
                 "/home/task": "size=32m,uid=1000,gid=1000,mode=0700",
@@ -631,9 +639,13 @@ class Runtime:
         content = self.docker.read(name, "result.json", MAX_RESULT)
         if content is None:
             return False
-        result = json.loads(content)
+        try:
+            result = json.loads(content)
+        except (ValueError, TypeError):
+            raise ResultInvalid("Protected runtime result is not valid JSON.") from None
         if (
-            result.get("operation_id") != record["operation_id"]
+            not isinstance(result, dict)
+            or result.get("operation_id") != record["operation_id"]
             or result.get("run_id") != record["manifest"]["run_id"]
             or result.get("terminated") is not True
         ):
@@ -642,15 +654,19 @@ class Runtime:
             )
         path = self.path(record["operation_id"])
         logs = self.docker.read(name, "logs.bin", MAX_LOG)
-        if logs is None or digest(logs) != result["log_digest"]:
+        if logs is None or digest(logs) != result.get("log_digest"):
             raise ResultInvalid("Runtime log digest does not match.")
         durable(path / "logs.bin", logs)
         if result.get("artifact"):
             exported = self.docker.read(name, "source.tar", MAX_ARCHIVE)
             source = (path / "input" / "source.tar").read_bytes()
-            if exported is None or canonical(
-                result_manifest(source, exported)
-            ) != canonical(result["artifact"]):
+            try:
+                valid = exported is not None and canonical(
+                    result_manifest(source, exported)
+                ) == canonical(result["artifact"])
+            except Rejected:
+                valid = False
+            if not valid or exported is None:
                 raise ResultInvalid("Runtime source export digest does not match.")
             durable(path / "source.tar", exported)
         durable(path / "result.json", content)
@@ -683,7 +699,15 @@ class Runtime:
                 or record["state"] == "exited"
             ):
                 return self.public(record)
-            inspected = self.owned(record, record["name"])
+            try:
+                inspected = self.owned(record, record["name"])
+            except Conflict:
+                record["state"] = "unknown"
+                record["wait_reason"] = (
+                    "Container identity changed; recovery is required."
+                )
+                self.save(record)
+                return self.public(record)
             if record.get("result"):
                 self.cleanup(record)
             elif inspected is not None and inspected["State"]["Running"]:
@@ -730,7 +754,10 @@ class Runtime:
                     time.sleep(0.1)
             if not record.get("result"):
                 record["result"] = {
+                    "schema_version": 1,
+                    "run_id": record["manifest"]["run_id"],
                     "operation_id": operation_id,
+                    "termination": "forced-stop",
                     "exit_code": None,
                     "terminated": True,
                     "export_error": "Forced termination; no verified workspace export.",

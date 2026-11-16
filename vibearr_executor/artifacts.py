@@ -59,7 +59,7 @@ def unpack(data: bytes) -> dict[str, tuple[int, bytes]]:
 
 def pack(files: dict[str, tuple[int, bytes]]) -> bytes:
     output = io.BytesIO()
-    with tarfile.open(fileobj=output, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+    with tarfile.open(fileobj=output, mode="w", format=tarfile.PAX_FORMAT) as archive:
         for name, (mode, content) in sorted(files.items()):
             safe_path(name)
             entry = tarfile.TarInfo(name)

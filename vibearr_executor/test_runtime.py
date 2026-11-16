@@ -162,6 +162,26 @@ class RuntimeContractTests(unittest.TestCase):
             self.assertEqual(self.runtime.start(record["operation_id"]), expected)
         engine.assert_not_called()
 
+    def test_replacement_container_id_cannot_be_adopted(self):
+        record = self.running_record()
+        record["container_id"] = "original-container-id"
+        self.runtime.save(record)
+        container = {
+            "Id": "replacement-container-id",
+            "Config": {
+                "Labels": {
+                    "vibearr.executor": self.runtime.instance,
+                    "vibearr.operation": record["operation_id"],
+                }
+            },
+        }
+        with patch.object(self.runtime.docker, "inspect", return_value=container):
+            self.assertEqual(
+                self.runtime.status(record["operation_id"])["state"], "unknown"
+            )
+            with self.assertRaises(Conflict):
+                self.runtime.start(record["operation_id"])
+
     def test_only_one_executor_can_own_a_journal(self):
         with self.assertRaises(BlockingIOError):
             Runtime(self.directory, self.profiles)

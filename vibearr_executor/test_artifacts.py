@@ -19,6 +19,11 @@ def archive_member(name="file", kind=tarfile.REGTYPE, mode=0o644, link=""):
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_long_unicode_paths_roundtrip_with_exact_bytes_and_modes(self):
+        name = "nested/" + "é" * 100 + "/" + "file" * 40
+        files = {name: (0o755, b"exact content\x00\xff")}
+        self.assertEqual(unpack(pack(files)), files)
+
     def test_traversal_and_noncanonical_paths_are_rejected(self):
         for name in (
             "../escape",
