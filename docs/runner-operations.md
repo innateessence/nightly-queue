@@ -74,6 +74,9 @@ readbacks are marked presentation-only; deployment and credential-version metada
 keep their original identity. The runner's executable configuration API is unchanged.
 A settings form containing selected secret material is withheld instead of saving
 redacted replacement instructions; remove the material through the trusted admin.
+Project override forms use the same object-first JSON and choice-label guard.
+Saved effective project values and project-list metadata are display copies; safe
+forms remain editable, and sanitized validation feedback remains visible.
 
 A run is eligible only when completed and the owner has separately acknowledged
 receiving the exact finish result. A lost finish response, active or paused run,

@@ -1080,3 +1080,121 @@ class OperatorPresentationTests(TestCase):
         response = self.client.get(reverse("api_settings"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Save coding runner settings")
+
+    def test_project_editor_redacts_inherited_effective_values_without_rewriting(self):
+        self.settings.research_instructions = "current-global-selection"
+        self.settings.save()
+        response = self.client.get(reverse("edit_project", args=[self.project.pk]))
+        self.assert_safe(response, global_values=True)
+        self.assertContains(response, "[redacted]")
+        self.assertContains(response, "Save changes")
+        self.settings.refresh_from_db()
+        self.assertEqual(
+            self.settings.research_instructions, "current-global-selection"
+        )
+
+    def test_project_create_hides_selected_material_in_runner_choice_labels(self):
+        self.current.name = "Runner label: current-global-selection"
+        self.current.save(update_fields=["name"])
+        response = self.client.get(reverse("project_list"))
+        self.assert_safe(response, global_values=True)
+        self.assertContains(response, "Selected credential content is withheld")
+        self.assertNotContains(response, ">Create project</button>", html=False)
+
+    def test_project_create_hides_selected_material_in_import_choice_labels(self):
+        from credentials.models import Credential
+
+        Credential.objects.create(
+            name="Import label: previous-global-selection",
+            provider="github",
+            kind="token",
+            encrypted_payload="unselected-invalid",
+        )
+        response = self.client.get(reverse("project_list"))
+        self.assert_safe(response, global_values=True)
+        self.assertNotContains(response, ">Create project</button>", html=False)
+
+    def test_project_editor_withholds_escaped_historical_json_overrides(self):
+        from .settings_models import ProjectRunnerSettings
+
+        token = self.escaped_selected_token()
+        self.current.set_secret("next-current-project-value")
+        self.current.save()
+        commands = ["echo " + token]
+        overrides = {"setup_commands": {"mode": "replace", "value": commands}}
+        saved = ProjectRunnerSettings.objects.create(
+            project=self.project, overrides=overrides
+        )
+        response = self.client.get(reverse("edit_project", args=[self.project.pk]))
+        self.assert_escaped_form_withheld(response, token)
+        self.assertNotContains(response, ">Save changes</button>", html=False)
+        self.assertContains(response, "[redacted]")
+        saved.refresh_from_db()
+        self.assertEqual(saved.overrides, overrides)
+        machine = self.client.get(reverse("runner_configuration"))
+        project = next(
+            row
+            for row in machine.json()["projects"]
+            if row["project_id"] == self.project.pk
+        )
+        self.assertEqual(project["effective"]["setup_commands"], commands)
+
+    def test_project_create_withholds_invalid_json_with_escaped_selected_material(self):
+        token = self.escaped_selected_token()
+        invalid = json.dumps(["echo " + token])[:-1]
+        response = self.client.post(
+            reverse("project_list"),
+            {
+                "name": "",
+                "runner-setup_commands_mode": "replace",
+                "runner-setup_commands": invalid,
+            },
+        )
+        self.assert_escaped_form_withheld(response, token)
+        self.assertNotContains(response, ">Create project</button>", html=False)
+        self.assertContains(response, "Invalid JSON content is withheld")
+        self.assertEqual(Project.objects.count(), 1)
+
+    def test_project_routes_hide_selected_labels_and_values_when_key_is_missing(self):
+        self.current.name = "Runner label: current-global-selection"
+        self.current.save(update_fields=["name"])
+        self.project.name = "Project: previous-global-selection"
+        self.project.save()
+        with override_settings(NQ_CREDENTIAL_KEY=""):
+            created = self.client.get(reverse("project_list"))
+            edited = self.client.get(reverse("edit_project", args=[self.project.pk]))
+        self.assert_safe(created, global_values=True)
+        self.assert_safe(edited, global_values=True)
+        self.assertContains(created, "unavailable")
+        self.assertContains(edited, "unavailable")
+        self.assertNotContains(created, ">Create project</button>", html=False)
+        self.assertNotContains(edited, ">Save changes</button>", html=False)
+
+    def test_safe_project_forms_remain_editable_without_decrypting_unselected_credentials(
+        self,
+    ):
+        from credentials.models import Credential
+
+        Credential.objects.create(
+            name="Unselected project label",
+            provider="github",
+            kind="token",
+            encrypted_payload="invalid",
+        )
+        created = self.client.get(reverse("project_list"))
+        edited = self.client.get(reverse("edit_project", args=[self.project.pk]))
+        self.assert_safe(created, global_values=True)
+        self.assert_safe(edited, global_values=True)
+        self.assertContains(created, "Unselected project label")
+        self.assertContains(created, ">Create project</button>", html=False)
+        self.assertContains(edited, ">Save changes</button>", html=False)
+
+    def test_project_list_redacts_metadata_copies_without_rewriting_project(self):
+        self.project.name = "Project: previous-global-selection"
+        self.project.save()
+        response = self.client.get(reverse("project_list"))
+        self.assert_safe(response, global_values=True)
+        self.assertContains(response, "Project: [redacted]")
+        self.assertContains(response, ">Create project</button>", html=False)
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, "Project: previous-global-selection")

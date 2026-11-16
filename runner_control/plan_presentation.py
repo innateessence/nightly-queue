@@ -1,5 +1,6 @@
 from copy import copy
 
+from django import forms
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
@@ -196,3 +197,27 @@ def present_release(entry, configuration):
     for index, field in enumerate(fields):
         setattr(safe, field, data[index] if data is not None else error)
     return safe
+
+
+def form_presentation_error(form, configuration):
+    values = []
+    for name, field in form.fields.items():
+        bound = form[name]
+        if isinstance(field, forms.JSONField):
+            raw = bound.data if form.is_bound and not field.disabled else bound.initial
+            try:
+                values.append(field.to_python(raw))
+            except ValidationError:
+                return "Invalid JSON content is withheld; reload saved settings to correct the input."
+        else:
+            values.append(bound.value())
+        if isinstance(field, forms.ModelChoiceField):
+            values.extend(str(label) for _, label in field.choices)
+    safe, error = present_configuration_payload(
+        configuration, values, preserve_secret_versions=True
+    )
+    if error:
+        return error
+    if safe != values:
+        return "Selected credential content is withheld; remove it through the trusted administrator before editing these settings."
+    return ""

@@ -36,6 +36,7 @@
               <a class="empty-link" href="{% url 'edit_project' project.pk %}" aria-label="Edit {{ project.name }}">Edit</a>
             </div>
             <h3>{{ project.name }}</h3>
+            {% if project.presentation_error %}<p role="status">{{ project.presentation_error }}</p>{% endif %}
             <p class="item-project"><a href="{{ project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ project.repository_url }}</a></p>
             <p class="item-project">Base branch: {{ project.base_branch|default:"Repository default" }}</p>
             <p class="item-project">Mode: {{ project.autonomous|yesno:"Autonomous,Manual" }}</p>
