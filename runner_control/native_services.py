@@ -104,6 +104,15 @@ def lock_scope(run, claim_token, *, reporting=False):
         run.item.project_id,
         run.configuration_snapshot.get("project_id", run.item.project_id),
     }
+    repository_ids = {
+        run.item.project.github_repository_id,
+        run.configuration_snapshot.get("source_policy", {}).get("repository_id"),
+    } - {None}
+    project_ids.update(
+        Project.objects.filter(github_repository_id__in=repository_ids).values_list(
+            "pk", flat=True
+        )
+    )
     projects = {
         entry.pk: entry
         for entry in Project.objects.select_for_update()
@@ -121,11 +130,13 @@ def lock_scope(run, claim_token, *, reporting=False):
     return current, document
 
 
-def authorize(run, document=None):
+def authorize(run, document=None, *, completion=False):
+    if completion and not run.evidence.filter(kind="native_merge").exists():
+        raise RunConflict("Completion authority requires a provider-verified merge.")
     policy = native_policy(run)
     document = document or configuration_document()
     controls = document["global"]
-    if not controls["enabled"] or controls["paused"]:
+    if not completion and (not controls["enabled"] or controls["paused"]):
         raise RunConflict("Native execution is disabled or paused.")
     project = next(
         (
@@ -146,6 +157,8 @@ def authorize(run, document=None):
         )
     effective = run.configuration_snapshot["effective"]
     current = project["effective"]
+    if current.get("merge_profile", {}) != effective.get("merge_profile", {}):
+        raise RunConflict("Trusted merge profile changed; stop and reconcile the run.")
     for key in (
         "implementation_backend",
         "implementation_model",
@@ -174,6 +187,8 @@ def authorize(run, document=None):
             raise RunConflict(
                 "Native selected credential changed or was revoked; retry explicitly."
             )
+    if completion:
+        return policy
     reason = source_wait_reason(run.item)
     if reason:
         raise RunConflict(reason)
@@ -298,10 +313,30 @@ def check_workspace(run, value, ctx, *, current_namespace=False):
         "repository_id": source["repository_id"],
         "branch": source["branch"],
         "base_branch": source["base_branch"],
-        "base_revision": source["base_revision"],
     }
     if any(value[key] != entry for key, entry in expected.items()):
         raise RunConflict("Native workspace differs from the claimed repository/base.")
+    if value["base_revision"] != source["base_revision"]:
+        from .merge_services import workspace_entry
+
+        lineage = run.evidence.filter(
+            kind="native_revision",
+            payload__context_id=str(ctx.pk),
+            payload__context_digest=ctx.digest,
+            payload__workspace__base_revision=value["base_revision"],
+        ).last()
+        if lineage is None:
+            raise RunConflict(
+                "Changed base requires an immutable publication revision."
+            )
+        parent = workspace_entry(run, lineage.payload["previous_workspace_id"])
+        if lineage.payload["parents"] != [
+            parent.payload["workspace"]["commit_sha"],
+            value["base_revision"],
+        ]:
+            raise RunConflict(
+                "Changed base differs from its saved publication ancestry."
+            )
     if current_namespace:
         current = run.item.project
         expected_name = current.repository_url.removeprefix(
@@ -419,6 +454,9 @@ def resolved(run):
 
 
 def require_prior_terminal(run, *, ready_build=None):
+    from .merge_services import require_merge_terminal
+
+    require_merge_terminal(run)
     operations, publications = resolved(run)
     if ready_build:
         operations.add(ready_build)
@@ -468,12 +506,29 @@ def deadline_and_limits(run, manifest, ceiling, *, stage):
 
 
 def workspace_fact(run, operation_id, ctx):
-    entry = saved(run, operation_id, "native_workspace")
+    from .merge_services import workspace_entry
+
+    entry = workspace_entry(run, operation_id)
     value = entry.payload
     if value["context_id"] != str(ctx.pk) or value["context_digest"] != ctx.digest:
         raise RunConflict("Native workspace belongs to a different context.")
     check_workspace(run, value["workspace"], ctx)
     return entry
+
+
+def failed_local_validation(run, workspace_id, attempt):
+    intent = run.evidence.filter(
+        kind="native_intent",
+        payload__kind="validation",
+        payload__attempt=attempt,
+        payload__data__workspace_id=workspace_id,
+    ).last()
+    if intent is None:
+        return False
+    result = run.evidence.filter(
+        kind="native_validation", payload__intent_id=str(intent.operation_id)
+    ).last()
+    return result is not None and result.payload["state"] == "failed"
 
 
 def validation_profile_binding(run, value, workspace, ctx):
@@ -518,7 +573,7 @@ def validation_profile_binding(run, value, workspace, ctx):
     return proof["build_id"]
 
 
-def validate_intent_binding(run, value):
+def validate_intent_binding(run, value, operation_id=None):
     ctx = context(run, value["context_id"], value["context_digest"])
     if str(ctx.pk) != run.context_reference:
         raise RunConflict("Native dispatch requires the current context.")
@@ -526,12 +581,25 @@ def validate_intent_binding(run, value):
     if plan is None:
         raise RunConflict("Save a native plan artifact before dispatch.")
     contract.validate_plan(plan.document)
-    policy = authorize(run)
+    from .merge_services import (
+        bind_merge_intent,
+        bind_revision_intent,
+        completion_authority,
+    )
+
+    reporting = value["kind"] == "merge" and value["data"]["stage"] != "merge"
+    policy = completion_authority(run) if reporting else authorize(run)
     if value["policy_digest"] != policy.digest or value["attempt"] > min(
         2, policy.repair_limit
     ):
         raise RunConflict("Native dispatch exceeds its frozen policy/repair limit.")
     kind, data = value["kind"], value["data"]
+    if kind == "revision":
+        bind_revision_intent(run, value)
+        return
+    if kind == "merge":
+        bind_merge_intent(run, value, operation_id)
+        return
     ready_build = None
     if kind == "agent":
         from vibearr_executor.contracts import Limits
@@ -563,20 +631,60 @@ def validate_intent_binding(run, value):
         prior = [
             entry.payload["attempt"]
             for entry in all_intents(run)
-            if entry.payload["kind"] == "agent"
+            if entry.payload["kind"] in {"agent", "revision"}
         ]
-        if value["attempt"] != max(prior, default=-1) + 1:
+        revisions = run.evidence.filter(
+            kind="native_intent",
+            payload__kind="revision",
+            payload__attempt=value["attempt"],
+            payload__data__reason="ci_repair",
+        )
+        repair_revision = revisions.last()
+        expected_attempt = (
+            max(prior, default=-1) if repair_revision else max(prior, default=-1) + 1
+        )
+        if value["attempt"] != expected_attempt or any(
+            entry.payload["kind"] == "agent"
+            and entry.payload["attempt"] == value["attempt"]
+            for entry in all_intents(run)
+        ):
             raise RunConflict(
                 "Native agent attempts cannot skip or repeat an invocation."
             )
         expected_source = ctx.document["source_digest"]
         if value["attempt"]:
-            previous = workspace_fact(run, data["workspace_id"], ctx).payload
+            from .merge_services import latest_workspace
+
+            previous_entry = workspace_fact(run, data["workspace_id"], ctx)
+            previous = previous_entry.payload
+            if previous_entry.pk != latest_workspace(run).pk:
+                raise RunConflict(
+                    "Native repair requires the latest inspected workspace."
+                )
             if previous["attempt"] != value["attempt"] - 1:
                 raise RunConflict(
                     "Native repair must use the preceding inspected workspace."
                 )
             expected_source = previous["source_digest"]
+            if run.evidence.filter(kind="native_delivery").exists():
+                published = run.evidence.filter(
+                    kind="native_delivery", payload__workspace_id=data["workspace_id"]
+                ).exists()
+                explicit_revision = (
+                    repair_revision is not None
+                    and repair_revision.payload["data"]["workspace_id"]
+                    == data["workspace_id"]
+                )
+                if published and not explicit_revision:
+                    raise RunConflict(
+                        "Published CI repair requires its explicit publication revision intent."
+                    )
+                if not published and not failed_local_validation(
+                    run, data["workspace_id"], previous["attempt"]
+                ):
+                    raise RunConflict(
+                        "Unpublished candidate repair requires its latest failed local validation."
+                    )
         elif data["workspace_id"] is not None:
             raise RunConflict("Initial native work starts from the inspected base.")
         if session.manifest["source_digest"] != expected_source:
@@ -643,9 +751,24 @@ def validate_intent_binding(run, value):
                 for entry in publications
             ):
                 raise RunConflict("A native run owns only one publication identity.")
-            if any(entry["stage"] == data["stage"] for entry in publications):
+            if any(
+                entry["stage"] == data["stage"]
+                and entry["workspace_id"] == data["workspace_id"]
+                for entry in publications
+            ):
                 raise RunConflict(
                     "Reconcile the existing publication stage instead of replacing its identity."
+                )
+            if (
+                data["stage"] == "create_pr"
+                and run.evidence.filter(
+                    kind="native_delivery", payload__pull_request__isnull=False
+                )
+                .exclude(payload__pull_request=None)
+                .exists()
+            ):
+                raise RunConflict(
+                    "A publication revision must preserve the original PR identity."
                 )
             if (
                 data["stage"] == "create_pr"
@@ -752,6 +875,15 @@ def validate_workspace_binding(run, value):
     if value["export_digest"] != result.payload["receipt"]["export_digest"]:
         raise RunConflict("Native workspace differs from the verified agent export.")
     check_workspace(run, value["workspace"], ctx)
+    if value["attempt"]:
+        previous = workspace_fact(run, intent["data"]["workspace_id"], ctx).payload
+        if (
+            value["workspace"]["base_revision"]
+            != previous["workspace"]["base_revision"]
+        ):
+            raise RunConflict(
+                "Agent repair must preserve its preceding inspected base revision."
+            )
 
 
 def validate_validation_binding(run, value):
@@ -780,7 +912,9 @@ def validate_validation_binding(run, value):
 
 
 def validate_delivery_binding(run, value):
-    workspace = saved(run, value["workspace_id"], "native_workspace").payload
+    from .merge_services import workspace_entry
+
+    workspace = workspace_entry(run, value["workspace_id"]).payload
     if contract.workspace_identity(
         workspace["workspace"]
     ) != contract.workspace_identity(value["workspace"]):
@@ -800,6 +934,9 @@ def validate_delivery_binding(run, value):
 
 
 def validate_termination_binding(run, value):
+    from .merge_services import require_merge_terminal
+
+    require_merge_terminal(run)
     intents = {str(entry.operation_id): entry.payload for entry in all_intents(run)}
     if set(value["intent_ids"]) != set(intents):
         raise RunConflict("Termination must cover every registered native intent.")
@@ -892,12 +1029,24 @@ def require_termination(run):
 
 
 @checked
-def bind_artifact(run, claim_token, kind, value):
+def bind_artifact(run, claim_token, kind, value, operation_id=None):
     contract.validate_native_artifact(kind, value)
-    run, document = lock_scope(run, claim_token, reporting=kind != "native_intent")
+    completion = (
+        kind == "native_intent"
+        and value["kind"] == "merge"
+        and value["data"]["stage"] != "merge"
+    )
+    run, document = lock_scope(
+        run, claim_token, reporting=kind != "native_intent" or completion
+    )
     if kind == "native_intent":
-        authorize(run, document)
-        validate_intent_binding(run, value)
+        from .merge_services import completion_authority
+
+        if completion:
+            completion_authority(run, document)
+        else:
+            authorize(run, document)
+        validate_intent_binding(run, value, operation_id)
     elif kind == "native_agent":
         validate_agent_binding(run, value)
     elif kind == "native_workspace":
@@ -908,6 +1057,22 @@ def bind_artifact(run, claim_token, kind, value):
         validate_delivery_binding(run, value)
     elif kind == "native_termination":
         validate_termination_binding(run, value)
+    elif kind == "native_revision":
+        from .merge_services import bind_revision
+
+        bind_revision(run, value)
+    elif kind == "native_merge":
+        from .merge_services import bind_merge
+
+        bind_merge(run, value)
+    elif kind == "native_completion":
+        from .merge_services import bind_completion
+
+        bind_completion(run, value)
+    elif kind == "native_merge_terminal":
+        from .merge_services import bind_merge_terminal
+
+        bind_merge_terminal(run, value)
     return run
 
 
@@ -925,11 +1090,8 @@ def validate_delivery(run, value):
     if value["policy_digest"] != run.configuration_snapshot["policy_digest"]:
         raise RunConflict("Native delivery changed its frozen policy.")
     policy = native_policy(run)
-    if (
-        policy.delivery_mode != "pull_request"
-        or value["delivery"]["mode"] != "pull_request"
-    ):
-        raise RunConflict("Automatic merge delivery is not installed.")
+    if policy.delivery_mode != value["delivery"]["mode"]:
+        raise RunConflict("Native delivery mode differs from the frozen policy.")
     ctx = context(run, value["context"]["id"], value["context"]["digest"])
     if str(ctx.pk) != run.context_reference:
         raise RunConflict("Native delivery must use its current context.")
@@ -943,7 +1105,9 @@ def validate_delivery(run, value):
     workspace = next(
         (
             entry
-            for entry in run.evidence.filter(kind="native_workspace").order_by("-pk")
+            for entry in run.evidence.filter(
+                kind__in=["native_workspace", "native_revision"]
+            ).order_by("-pk")
             if contract.workspace_identity(entry.payload["workspace"])
             == contract.workspace_identity(value["workspace"])
         ),
@@ -999,4 +1163,8 @@ def validate_delivery(run, value):
     )
     if publication is None:
         raise RunConflict("Native delivery lacks a verified owned publication.")
+    if policy.delivery_mode == "merge":
+        from .merge_services import validate_merged_delivery
+
+        validate_merged_delivery(run, value, workspace)
     return value
