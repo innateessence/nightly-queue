@@ -101,6 +101,8 @@ cycles keep cancellation, pause, ownership and original deadline checks active
 during that wait. Exhaustion fails ordinary work, while an unresolved publication
 keeps its claim and reports reconciliation required. Push and PR mutations retain
 their original identities and are never repeated as transport read retries.
+Native push dispatch is recorded immediately before the push command; remote-ref
+reads run separately before dispatch and after the command for reconciliation.
 Clone recovery records the exact owned destination before launch. A partial
 checkout is removed only after tracked process termination is confirmed; a
 durably completed clone resumes local setup without another clone. Unregistered
@@ -134,3 +136,6 @@ completion reporting, then reads the acknowledged server delivery back. It
 refuses another project/issue and never clears an unknown invocation to continue.
 The ordinary background service keeps one supervisor process; this driver adds
 frequent restarts to exercise its durable recovery path.
+
+The [issue #99 acceptance record](acceptance/feature04-issue99.md) contains actual
+PR-only delivery receipts, supervisor restart checkpoints and run screenshots.
