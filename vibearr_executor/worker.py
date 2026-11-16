@@ -205,7 +205,7 @@ def main() -> None:
             exported = snapshot(Path("/work"))
             if contains_secret(exported, protected_values):
                 raise ValueError(
-                    "Workspace contains protected task credentials; source export withheld."
+                    "Workspace contains the selected backend credential or disposable database credentials; source export withheld."
                 )
             save(state / "source.tar", exported)
             result["artifact"] = result_manifest(source, exported)
