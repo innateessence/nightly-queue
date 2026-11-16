@@ -23,4 +23,23 @@
     {% for error in field.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
   </div>
 {% endfor %}
+<details>
+  <summary>Coding runner stage overrides</summary>
+  <p class="field-hint">Inherit global uses the global value, including when the project input is blank. Use project value replaces it. Clear value explicitly removes it and may leave required configuration missing.</p>
+  {{ runner_form.non_field_errors }}
+  {% for field in runner_form %}
+    <div class="field">
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+      {% for error in field.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+    </div>
+  {% endfor %}
+</details>
+{% if effective_configuration %}
+  <details open>
+    <summary>Saved effective runner configuration</summary>
+    <p class="field-hint">Live execution remains release-gated. These saved values apply to future tasks.</p>
+    <dl>{% for name, value in effective_configuration.effective.items %}<dt>{{ name }}</dt><dd>{{ value|default_if_none:"None" }}</dd>{% endfor %}</dl>
+    {% for error in effective_configuration.errors %}<p class="field-error">{{ error.field }}: {{ error.message }}</p>{% endfor %}
+  </details>
+{% endif %}
 <button class="button-primary" type="submit">{{ submit_label }}</button>
