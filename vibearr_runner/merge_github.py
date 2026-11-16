@@ -2,6 +2,7 @@
 
 import base64
 from datetime import datetime
+from functools import wraps
 import hashlib
 import json
 import re
@@ -21,6 +22,20 @@ class MergeRepair(Exception):
     pass
 
 
+def observed(operation):
+    @wraps(operation)
+    def call(*args, **kwargs):
+        try:
+            return operation(*args, **kwargs)
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+            raise DeliveryError(
+                "Provider merge observation is malformed or incomplete."
+            ) from None
+
+    return call
+
+
+@observed
 def exact_pull(raw, workspace, number):
     normalized = dict(raw)
     normalized["state"] = "open"
@@ -37,6 +52,7 @@ def exact_pull(raw, workspace, number):
     return pull
 
 
+@observed
 def merged_observation(raw, workspace, number):
     exact_pull(raw, workspace, number)
     if raw.get("merged") is not True:
@@ -62,6 +78,7 @@ def merged_observation(raw, workspace, number):
 
 
 class MergeGitHub(NativeGitHub):
+    @observed
     def pages(self, path, key=None):
         values = []
         for page in range(1, 11):
@@ -77,6 +94,7 @@ class MergeGitHub(NativeGitHub):
                 return values
         raise DeliveryError("Provider list exceeds the bounded pagination limit.")
 
+    @observed
     def content(self, repository, path, revision):
         raw = self.request(
             "GET",
@@ -98,6 +116,7 @@ class MergeGitHub(NativeGitHub):
                 "Trusted provider file could not be read exactly."
             ) from None
 
+    @observed
     def base_sha(self, workspace):
         path = quote(workspace["base_branch"], safe="")
         raw = self.request(
@@ -115,6 +134,7 @@ class MergeGitHub(NativeGitHub):
             raise DeliveryError("Base branch revision is invalid.")
         return value
 
+    @observed
     def policy(self, workspace, profile):
         profile = merge_profile(profile)
         actor = self.request("GET", "/user")
@@ -221,6 +241,7 @@ class MergeGitHub(NativeGitHub):
             "rulesets": receipts,
         }
 
+    @observed
     def checks(self, workspace, pull_number, profile):
         repository = workspace["repository"]
         head = workspace["commit_sha"]
@@ -277,6 +298,16 @@ class MergeGitHub(NativeGitHub):
                     raise MergeRepair("Required remote validation did not succeed.")
             if not check.get("completed_at") or not check.get("started_at"):
                 raise DeliveryError("Required check lacks completed timing evidence.")
+            started = datetime.fromisoformat(check["started_at"].replace("Z", "+00:00"))
+            completed = datetime.fromisoformat(
+                check["completed_at"].replace("Z", "+00:00")
+            )
+            if (
+                started.utcoffset() is None
+                or completed.utcoffset() is None
+                or completed < started
+            ):
+                raise DeliveryError("Required check has invalid completion timing.")
             observed.append(
                 {
                     "name": configured["name"],
@@ -293,6 +324,7 @@ class MergeGitHub(NativeGitHub):
             )
         return observed
 
+    @observed
     def workflow_binding(self, raw, configured, workspace, number):
         if (
             raw.get("workflow_id") != configured["workflow_id"]
@@ -321,6 +353,7 @@ class MergeGitHub(NativeGitHub):
             ):
                 raise MergeRepair("Workflow tested a different base/head pair.")
 
+    @observed
     def reviews(self, workspace, pull_number, profile, *, run_id, context_digest):
         statuses = self.pages(
             f"/repos/{workspace['repository']}/commits/{workspace['commit_sha']}/statuses"
@@ -387,3 +420,33 @@ class MergeGitHub(NativeGitHub):
             f"/repos/{workspace['repository']}/pulls/{number}/merge",
             {"sha": workspace["commit_sha"], "merge_method": "squash"},
         )
+
+
+class CompletionGitHub(MergeGitHub):
+    def __init__(self, *args, repository, issue_number, branch, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.completion_repository = repository
+        self.completion_issue = issue_number
+        self.completion_branch = branch
+
+    def request(self, method, path, payload=None):
+        if method != "GET":
+            issue = (
+                f"/repos/{self.completion_repository}/issues/{self.completion_issue}"
+            )
+            branch = f"/repos/{self.completion_repository}/git/refs/heads/{quote(self.completion_branch, safe='')}"
+            permitted = (
+                method == "POST"
+                and path == issue + "/comments"
+                or method == "PATCH"
+                and path == issue
+                and payload == {"state": "closed", "state_reason": "completed"}
+                or method == "DELETE"
+                and path == branch
+                and payload is None
+            )
+            if not permitted:
+                raise DeliveryError(
+                    "Completion credential permits only this merged task's comment, closure and branch cleanup."
+                )
+        return super().request(method, path, payload)

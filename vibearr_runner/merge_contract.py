@@ -229,6 +229,8 @@ def review_report(value, *, role, run_id, context_digest, workspace, pull_number
             "verdict",
         },
     )
+    if type(value["schema_version"]) is not int:
+        raise NativeContractError("Review report schema version must be an integer.")
     expected = {
         "schema_version": 1,
         "role": role,

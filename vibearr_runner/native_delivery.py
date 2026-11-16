@@ -104,9 +104,10 @@ class NativeDelivery:
             pushed_sha=workspace["commit_sha"],
             pull_request=pull,
         )
-        self.host.artifact(
-            "native_delivery", payload, "publication-fact:" + ("pr" if pull else "push")
-        )
+        suffix = "pr" if pull else "push"
+        if self.native.get("publication_history"):
+            suffix = workspace["commit_sha"] + ":" + suffix
+        self.host.artifact("native_delivery", payload, "publication-fact:" + suffix)
 
     def step(self):
         if self.data.get(
@@ -125,7 +126,8 @@ class NativeDelivery:
         )
         self.register("push", workspace)
         remote = transport.observed_remote(checkout)
-        if remote and remote != commit:
+        previous_head = self.data.get("previous_head")
+        if remote and remote not in {commit, previous_head}:
             raise ReconciliationRequired(
                 "Owned task branch contains an unexpected remote commit."
             )
@@ -202,7 +204,9 @@ class NativeDelivery:
                 self.data["create_rejected"] = True
                 self.host.save()
                 raise
-        elif "create_pr" not in self.data["intents"]:
+        elif "create_pr" not in self.data["intents"] and pull[
+            "number"
+        ] != self.data.get("existing_pull_number"):
             raise ReconciliationRequired(
                 "An unowned pre-existing PR cannot be adopted by this run."
             )
@@ -214,6 +218,17 @@ class NativeDelivery:
             self.host.save()
             return "continue"
         self.verify()
+        if self.host.policy.delivery_mode == "merge":
+            from .native_merge import NativeMerge
+            from .merge_github import MergeRepair, MergeWait
+
+            try:
+                return NativeMerge(self.host).step()
+            except MergeWait as exc:
+                self.host.status("waiting", reason=str(exc), validation_status="passed")
+                return "wait"
+            except MergeRepair as exc:
+                return NativeMerge(self.host).repair("ci_repair", str(exc))
         evidence = self.evidence(workspace, pull)
         self.host.artifact("verified_delivery", evidence, "verified-delivery")
         self.host.terminate()
@@ -228,7 +243,12 @@ class NativeDelivery:
             if (
                 remote["result_status"] != "succeeded"
                 or remote["result_url"] != pull["url"]
-                or remote.get("native_outcome") != "delivered"
+                or remote.get("native_outcome")
+                != (
+                    "merged"
+                    if self.host.policy.delivery_mode == "merge"
+                    else "delivered"
+                )
             ):
                 raise ReconciliationRequired(
                     "Recorded completion conflicts with the original native delivery."
@@ -249,7 +269,11 @@ class NativeDelivery:
                 "status": "succeeded",
                 "result_url": pull["url"],
                 "error_summary": "",
-                "outcome": "delivered",
+                "outcome": (
+                    "merged"
+                    if self.host.policy.delivery_mode == "merge"
+                    else "delivered"
+                ),
             },
         )
         return "reporting_pending"
@@ -304,12 +328,35 @@ class NativeDelivery:
             "workspace": workspace,
             "validation": self.native["validation"]["evidence"],
             "delivery": {
-                "mode": "pull_request",
+                "mode": self.host.policy.delivery_mode,
                 "pull_request": pull,
                 "pushed_sha": workspace["commit_sha"],
-                "checks": [],
-                "merge": None,
-                "issue_completion": None,
+                "checks": [
+                    {
+                        key: entry[key]
+                        for key in (
+                            "name",
+                            "producer_id",
+                            "head_sha",
+                            "conclusion",
+                            "url",
+                        )
+                    }
+                    for entry in self.native.get("merge", {})
+                    .get("receipt", {})
+                    .get("checks", [])
+                ],
+                "merge": (
+                    {
+                        key: self.native["merge"]["merge"][key]
+                        for key in ("commit_sha", "head_sha")
+                    }
+                    if self.native.get("merge", {}).get("merge")
+                    else None
+                ),
+                "issue_completion": self.native.get("merge", {}).get(
+                    "issue_completion"
+                ),
             },
         }
 
@@ -327,6 +374,30 @@ class NativeDelivery:
             current_execution.reset(token)
 
     def _reconcile_publications(self):
+        facts = {}
+        for record in self.native.get("metadata", {}).values():
+            if record["kind"] != "native_delivery" or not record.get("acknowledged"):
+                continue
+            payload = record["payload"]
+            for identity in payload["intent_ids"]:
+                intent = self.native["intents"].get(identity, {})
+                if intent.get("kind") != "delivery":
+                    continue
+                facts[identity] = {
+                    "intent_id": identity,
+                    "publication_id": payload["publication_id"],
+                    "stage": intent["data"]["stage"],
+                    "state": "known_pr" if payload["pull_request"] else "known_push",
+                    "pushed_sha": payload["pushed_sha"],
+                    "pull_request": payload["pull_request"],
+                }
+        expected = {
+            identity
+            for identity, value in self.native.get("intents", {}).items()
+            if value["kind"] == "delivery"
+        }
+        if expected <= facts.keys():
+            return list(facts.values())
         if not self.data.get("intents"):
             return []
         if not self.data.get("push_dispatched") and not self.data.get(
@@ -395,4 +466,6 @@ class NativeDelivery:
                     "pull_request": observed,
                 }
             )
-        return results
+        return list(facts.values()) + [
+            entry for entry in results if entry["intent_id"] not in facts
+        ]
