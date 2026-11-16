@@ -304,7 +304,8 @@ class NativeDelivery:
     def reconcile_publications(self):
         if not self.data.get("intents"):
             return []
-        checkpoint = lambda: not self.host.host.stop.is_set()
+        def checkpoint():
+            return not self.host.host.stop.is_set()
         token = current_execution.set((time.monotonic() + 60, checkpoint, checkpoint))
         try:
             return self._reconcile_publications()
