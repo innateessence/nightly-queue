@@ -136,3 +136,6 @@ completion reporting, then reads the acknowledged server delivery back. It
 refuses another project/issue and never clears an unknown invocation to continue.
 The ordinary background service keeps one supervisor process; this driver adds
 frequent restarts to exercise its durable recovery path.
+
+The [issue #99 acceptance record](acceptance/feature04-issue99.md) contains actual
+PR-only delivery receipts, supervisor restart checkpoints and run screenshots.
