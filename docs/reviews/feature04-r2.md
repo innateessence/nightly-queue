@@ -12,7 +12,7 @@ A different fresh reviewer must assess the complete feature after correction.
 ## P2: transient checkout failure terminates the attempt without bounded retry
 
 Location: `vibearr_runner/delivery.py:276-281,357-371`, called from
-`WorkspaceManager.prepare` in `vibearr_runner/workspaces.py:244-258` through
+`WorkspaceManager.prepare` in `vibearr_runner/workspaces.py:219-240` through
 `NativeLifecycle.context` in `vibearr_runner/native_lifecycle.py:579-595`.
 
 The new durable read wrapper and transient Git classification apply only to
