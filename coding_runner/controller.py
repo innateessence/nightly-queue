@@ -12,6 +12,7 @@ from .client import (
 )
 from .journal import Journal, JournalError
 from .gates import GateEvaluator
+from .backend_registry import BackendRegistry, ScopedCredentials
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +28,13 @@ class Controller:
         journal: Journal,
         stop: threading.Event | None = None,
         gates: GateEvaluator | None = None,
+        backends: BackendRegistry | None = None,
     ):
         self.client = client
         self.journal = journal
         self.gates = gates if gates is not None else GateEvaluator(journal)
         self.stop = stop if stop is not None else threading.Event()
+        self.backends = backends if backends is not None else BackendRegistry()
 
     def probe(self, state: dict[str, Any]) -> dict[str, Any]:
         self.check_shutdown()
@@ -94,6 +97,12 @@ class Controller:
                     return
                 active_run_id = state.get("remote_active_run_id")
                 checkpoint = "stage" if active_run_id else "claim"
+                accounts = configuration.get("accounts", [])
+                self.gates.adapters.update(
+                    self.backends.usage_adapters(
+                        accounts, ScopedCredentials(self.client)
+                    )
+                )
                 decision = self.gates.evaluate(
                     configuration, state, checkpoint=checkpoint, run_id=active_run_id
                 )

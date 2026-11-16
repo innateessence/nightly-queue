@@ -3,12 +3,17 @@
 import os
 import socket
 import subprocess
+import sys
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
 from .approvals import ApprovalRequired
+from .backends import BackendInterrupted
+from .codex_backend import ProcessTransport
 from .sandbox import ApprovedExecutor, probe_sandbox
 from .test_workspaces import WorkspaceFixture
 
@@ -202,6 +207,50 @@ class BoundaryChecks(WorkspaceFixture, unittest.TestCase):
         result = executor.execute(self.workspace, action, str(uuid4()))
         self.assertNotEqual(result.exit_code, 0)
         self.assertFalse((self.workspace.checkout / "research-write").exists())
+
+    def test_agent_cannot_read_active_model_worker_credentials(self):
+        class Worker(ProcessTransport):
+            def command(self):
+                script = "import sys,time; sys.stdin.read(); time.sleep(10)"
+                return [sys.executable, "-I", "-c", script]
+
+        worker = Worker()
+        failures = []
+
+        def exchange():
+            try:
+                worker.exchange(
+                    {"token": "model-worker-private-token"},
+                    timeout=10,
+                    checkpoint=lambda: True,
+                    stop=threading.Event(),
+                )
+            except BackendInterrupted:
+                pass
+            except Exception as exc:
+                failures.append(exc)
+
+        thread = threading.Thread(target=exchange)
+        thread.start()
+        try:
+            deadline = time.monotonic() + 2
+            while worker.process is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertIsNotNone(worker.process)
+            process = worker.process
+            assert process is not None
+            script = (
+                "import os; assert not os.path.exists('/proc/"
+                + str(process.pid)
+                + "/fd/0')"
+            )
+            self.assertEqual(self.execute(script).exit_code, 0)
+        finally:
+            worker.interrupt()
+            thread.join(timeout=3)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(failures, [])
+        self.assertIsNone(worker.process)
 
 
 if __name__ == "__main__":
