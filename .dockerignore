@@ -22,5 +22,6 @@ Dockerfile
 docker-compose*.yml
 
 .venv/
+.runtime/
 **/build/
 **/*.egg-info/

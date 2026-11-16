@@ -252,3 +252,5 @@ database: losing the key makes saved credentials unreadable. Stop the runner
 before backing up its state, and keep database and runner backups consistent.
 See the [operations guide](docs/runner-operations.md) for recovery and retention,
 or the [SQLite migration procedure](docs/sqlite-migration.md) for older installs.
+The [MVP deployment guide](docs/mvp-deployment.md) covers persistent background
+services, qualification, backups and release updates.

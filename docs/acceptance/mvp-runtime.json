@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "qualified": true,
+  "qualification_version": 3,
+  "completed_at": "2026-11-16T18:58:46.115323+00:00",
+  "executor_source_digest": "bb447de81c9a7956daf800981033c0325949e316126c81ac8d975bf7c4c74b6f",
+  "images": {
+    "agent": "sha256:16d7d503e5949113bd555f92362309f9b00ec14e7a6dff8483c811fc301bb8b5",
+    "validation": "sha256:572b33d4abc764ead29c00f75d525f45f6d4e259e446b9f20f0cb74fec732db4",
+    "database": "sha256:81edcaa5ff2923f7be9c1f43d3e5076f29c6c9c216c86964b5fd038959404429"
+  },
+  "profile_count": 21,
+  "checks_per_image": 13,
+  "checks": [
+    "agent-boundary-egress-artifacts",
+    "archive-and-rebinding-rejection",
+    "credential-and-receipt-isolation",
+    "credential-free-setup",
+    "disposable-database-isolation",
+    "memory-exhaustion",
+    "offline-validation",
+    "pause-resume-deadline",
+    "pid-exhaustion-stop",
+    "resource-enforcement",
+    "restart-and-descendant-stop",
+    "retry-and-auth-contract",
+    "terminal-retention"
+  ],
+  "report_sha256": "ec1712c1a9dfaccc748f075deedc6ec872e65566bca549c428ac34489a903ca1",
+  "model_calls": 0,
+  "native_agent_ready": false,
+  "scope": "Persistent executor qualification; coding-account and queue-to-merge acceptance are separate."
+}

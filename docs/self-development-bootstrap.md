@@ -85,8 +85,10 @@ once, from a reviewed immutable Codex image and the reviewed pinned dependency
 lock, without any coding/GitHub/queue secret:
 
 ```sh
+docker image tag sha256:<reviewed-codex-image-id> vibearr-codex:reviewed
+docker image inspect vibearr-codex:reviewed --format '{{.Id}}'
 docker build -f vibearr_executor/CodexProject.Dockerfile \
-  --build-arg CODEX_IMAGE=sha256:<reviewed-codex-image-id> \
+  --build-arg CODEX_IMAGE=vibearr-codex:reviewed \
   -t vibearr-self-agent:reviewed .
 docker image inspect vibearr-self-agent:reviewed --format '{{.Id}}'
 python -m vibearr_runner.bootstrap_profiles \

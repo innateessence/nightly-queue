@@ -1,0 +1,16 @@
+[Unit]
+Description=Vibearr background queue supervisor
+After=network.target vibearr-executor.service
+
+[Service]
+Type=simple
+WorkingDirectory=@RELEASE@
+EnvironmentFile=@RUNTIME@/service.env
+ExecStart=@PYTHON@ -m vibearr_runner
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=120
+UMask=0077
+
+[Install]
+WantedBy=default.target
