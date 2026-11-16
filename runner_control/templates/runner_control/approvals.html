@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Action approvals · Nightly{% endblock %}
+{% block heading %}<div class="page-heading"><h1>Action approvals</h1><p>Review each exact command and its source before execution. A saved plan grants no permission.</p></div>{% endblock %}
+{% block content %}
+{% for approval in approvals %}
+<section class="card" style="padding:1.5rem; margin-bottom:1.5rem; overflow-wrap:anywhere">
+  <h2>{{ approval.item_title }}</h2>
+  <p><strong>{{ approval.decision_display }}</strong>{% if approval.consumed_at %} · Execution permit consumed {{ approval.consumed_at }}{% endif %}</p>
+  <p>Run {{ approval.run_id }} · Requested {{ approval.created_at }}</p>
+  <p>Source: <strong>{{ approval.action.source_kind }}</strong> · {{ approval.action.source_reference }}</p>
+  <p>Interpretation: <strong>{{ approval.action.mode }}</strong> · Working directory: <code>/workspace</code> · Network: disabled</p>
+  <p>Arguments (each line is one literal argument):</p>
+  <ol>{% for arg in approval.action.argv %}<li><pre style="white-space:pre-wrap">{{ arg }}</pre></li>{% endfor %}</ol>
+  <details><summary>Source and workspace binding</summary>
+    <p>Workspace: <code>{{ approval.action.workspace_id }}</code></p>
+    <p>Base revision: <code>{{ approval.action.base_revision }}</code></p>
+    <p>Source digest: <code>{{ approval.action.source_digest }}</code></p>
+    <p>Content digest: <code>{{ approval.action.content_digest }}</code></p>
+    <p>Action binding: <code>{{ approval.binding_digest }}</code></p>
+  </details>
+  {% if approval.content_withheld %}<p>Credential content was withheld. Request a new action without credentials.</p>
+  {% elif approval.decision == 'pending' and approval.run_state == 'active' %}
+  <form method="post" action="{% url 'runner_approval_decide' approval.id %}">
+    {% csrf_token %}
+    <input type="hidden" name="binding_digest" value="{{ approval.binding_digest }}">
+    <p><label>Decision note <input name="note" maxlength="2000"></label></p>
+    <button class="button-primary" name="decision" value="approved" type="submit">Approve this exact action once</button>
+    <button class="button-secondary" name="decision" value="denied" type="submit">Deny</button>
+  </form>
+  {% else %}<p>{{ approval.decision_note }}{% if approval.decided_at %} · Decided {{ approval.decided_at }}{% endif %}</p>{% endif %}
+</section>
+{% empty %}<p>No action approvals have been requested.</p>{% endfor %}
+{% endblock %}

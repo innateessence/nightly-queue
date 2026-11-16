@@ -97,5 +97,34 @@ class RunEvidence(models.Model):
         ]
 
 
+class ActionApproval(models.Model):
+    class Decision(models.TextChoices):
+        PENDING = "pending", "Awaiting human decision"
+        APPROVED = "approved", "Approved"
+        DENIED = "denied", "Denied"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    run = models.ForeignKey(Run, on_delete=models.PROTECT, related_name="approvals")
+    operation_id = models.UUIDField()
+    action = models.JSONField()
+    binding_digest = models.CharField(max_length=64, editable=False)
+    decision = models.CharField(
+        max_length=10, choices=Decision.choices, default=Decision.PENDING
+    )
+    decision_note = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    execution_id = models.UUIDField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["run", "operation_id"], name="runner_approval_operation"
+            )
+        ]
+
+
 from .settings_models import ProjectRunnerSettings, RunnerSettings  # noqa: F401, E402
 from .gate_models import RunnerGateEvidence  # noqa: F401, E402
