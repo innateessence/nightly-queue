@@ -194,6 +194,15 @@ class NativePreflight:
                 entry["session"] = session.to_data()
                 self.journal.save(state)
             session = NativeSession.from_data(entry["session"])
+            if not callable(getattr(self.executor, "termination_receipt", None)):
+                raise NativeSessionError(
+                    "Install the matching executor SDK with protected operation presence readback."
+                )
+            self.resources.verify_presence(
+                self.resources.load(session.manifest["run_id"]),
+                session.manifest["operation_id"],
+                self.executor,
+            )
             self.resources.verify_dispatched(session.manifest["run_id"], self.executor)
             observed = adapter.reconcile(session)
             if observed["state"] == "not-started":

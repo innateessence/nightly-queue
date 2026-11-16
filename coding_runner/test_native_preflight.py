@@ -1,6 +1,8 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import importlib.util
+import hashlib
+import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -19,6 +21,7 @@ class Executor:
     def __init__(self):
         self.instance = str(uuid4())
         self.stopped = []
+        self.manifests = {}
 
     def capabilities(self):
         return {"instance_id": self.instance, "binding_digest": "b" * 64}
@@ -28,7 +31,22 @@ class Executor:
         return {"state": "exited", "descendants_terminated": True}
 
     def prepare(self, manifest):
+        self.manifests[manifest["operation_id"]] = manifest
         return {}
+
+    def termination_receipt(self, operation):
+        manifest = self.manifests[operation]
+        return {
+            "schema_version": 1,
+            "instance_id": self.instance,
+            "run_id": manifest["run_id"],
+            "operation_id": operation,
+            "manifest_digest": hashlib.sha256(
+                json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+            "state": "not-started",
+            "resources_terminated": False,
+        }
 
     def status(self, operation):
         return {"state": "running"}
@@ -122,6 +140,14 @@ class NativePreflightTests(unittest.TestCase):
         self.state = self.journal.load()
         self.executor, self.queue = Executor(), Queue()
         self.adapter = Adapter(self.journal)
+        original_prepare = self.adapter.prepare_auth_probe
+
+        def prepare(**request):
+            session = original_prepare(**request)
+            self.executor.prepare(session.manifest)
+            return session
+
+        self.adapter.prepare_auth_probe = prepare
         registry = SimpleNamespace(create=lambda provider, executor: self.adapter)
         self.preflight = NativePreflight(
             self.queue,

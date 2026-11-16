@@ -106,3 +106,36 @@ class NativeResourceTests(unittest.TestCase):
             {"operations": [], "builds": []},
         )
         self.assertEqual(self.store.load(self.run)["pending"], {})
+
+    def test_existing_prepared_receipt_permits_same_operation_recovery(self):
+        import hashlib
+        import importlib.util
+        import json
+        from unittest.mock import Mock
+
+        if importlib.util.find_spec("vibearr_executor") is None:
+            self.skipTest(
+                "Install the native-runtime extra for protected presence tests"
+            )
+        executor = Executor()
+        self.store.bind(self.run, executor)
+        self.store.operation(self.run, self.manifest, kind="agent")
+        self.store.dispatch(self.run, self.operation)
+        receipt = {
+            "schema_version": 1,
+            "instance_id": executor.instance_id,
+            "run_id": self.run,
+            "operation_id": self.operation,
+            "manifest_digest": hashlib.sha256(
+                json.dumps(
+                    self.manifest, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest(),
+            "state": "not-started",
+            "resources_terminated": False,
+        }
+        executor.termination_receipt = Mock(return_value=receipt)
+        self.store.verify_dispatched(self.run, executor)
+        receipt["manifest_digest"] = "0" * 64
+        with self.assertRaisesRegex(ReconciliationRequired, "frozen executor"):
+            self.store.verify_dispatched(self.run, executor)
