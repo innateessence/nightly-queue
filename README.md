@@ -209,6 +209,10 @@ mypy . --config-file mypy.ini
 ```
 
 `bash test.sh` builds the Compose services and runs the Docker checks used by CI.
+Native Codex sessions use a pinned CLI image and scoped per-task authentication.
+See [native Codex setup and diagnostics](docs/native-codex.md) for the agent
+profiles, unattended execution contract, and real fixture acceptance command.
+
 The independent runner has its own verification entry point:
 
 ```sh
