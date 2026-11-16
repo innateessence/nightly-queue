@@ -2,11 +2,13 @@ import copy
 import uuid
 
 from django.core.exceptions import ValidationError
+from credentials.models import Credential
+from credentials.test_models import TEST_KEY
 from coding_runner.context import digest
 from coding_runner.approvals import ActionSpec
 
 from runner_control.models import ActionApproval, Run, RunEvidence
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from runner_control import test_plans
 
@@ -111,6 +113,35 @@ class DeliveryAPITests(TestCase):
             },
             content_type="application/json",
         )
+
+    def select_repository_credential(self):
+        credential = Credential(name="Repository", provider="github", kind="token")
+        credential.set_secret("repository-private-secret")
+        credential.save()
+        run = Run.objects.get(pk=self.run_id)
+        effective = run.configuration_snapshot.setdefault("effective", {})
+        effective["repository_credential_id"] = credential.pk
+        run.save()
+
+    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    def test_verified_delivery_preserves_scoped_credential_redaction(self):
+        self.select_repository_credential()
+        self.payload["implementation"]["amendments"] = [
+            {"note": "repository-private-secret"}
+        ]
+        self.assertEqual(self.upload().status_code, 200)
+        evidence = RunEvidence.objects.get(kind="verified_delivery")
+        self.assertEqual(
+            evidence.payload["implementation"]["amendments"], [{"note": "[redacted]"}]
+        )
+        self.assertEqual(self.finish_success().status_code, 200)
+
+    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    def test_scoped_redaction_cannot_bypass_delivery_validation(self):
+        self.select_repository_credential()
+        self.payload["implementation"]["plan_digest"] = "repository-private-secret"
+        self.assertEqual(self.upload().status_code, 400)
+        self.assertFalse(RunEvidence.objects.filter(kind="verified_delivery").exists())
 
     def test_verified_delivery_allows_idempotent_owned_success(self):
         self.assertEqual(self.upload().status_code, 200)

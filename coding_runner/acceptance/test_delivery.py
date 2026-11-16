@@ -232,6 +232,21 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(git(["rev-parse", "HEAD"], self.workspace.checkout), before)
 
+    def test_git_attribute_conversion_prevents_publication(self):
+        from coding_runner.implementation import workspace_evidence
+
+        (self.workspace.checkout / ".gitattributes").write_text("README.md text\n")
+        (self.workspace.checkout / "README.md").write_bytes(b"Validated CRLF\r\n")
+        current = workspace_evidence(self.workspace)
+        self.evidence["workspace"] = current
+        self.evidence["validation"][0].update(before=current, after=current)
+        result = self.step()
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("Committed tree", result["error"])
+        self.assertEqual(self.repo_git.observed_remote(self.workspace), "")
+        self.assertEqual(self.github.creates, 0)
+        self.client.request.assert_not_called()
+
     def test_gate_closure_prevents_delivery(self):
         self.stage.gate = lambda: False
         self.assertEqual(self.step()["status"], "wait")
