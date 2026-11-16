@@ -3,6 +3,7 @@ import json
 from .backends import BackendOutputError
 from .codex_backend import ProcessTransport, parse_response
 from .release import TRANSPORT
+from .release_evidence import valid_response_id
 
 
 class ModelTraceTransport(ProcessTransport):
@@ -20,11 +21,9 @@ class ModelTraceTransport(ProcessTransport):
         token = payload.get("token")
         if token and json.dumps(token)[1:-1] in json.dumps([event.data, response_id]):
             raise BackendOutputError("Model evidence contains credential material.")
-        if (
-            value.get("status") == "completed"
-            and isinstance(response_id, str)
-            and response_id
-        ):
+        if not valid_response_id(response_id):
+            raise BackendOutputError("Model response identity is invalid.")
+        if value.get("status") == "completed":
             evidence = self.state.setdefault("release_evidence", {})
             traces = evidence.setdefault("model_responses", [])
             traces.append(

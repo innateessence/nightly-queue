@@ -11,6 +11,16 @@ from .client import NoRedirects
 LIMIT = 4 * 1024 * 1024
 
 
+def valid_response_id(value):
+    if not isinstance(value, str) or not 0 < len(value) <= 200 or "\x00" in value:
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def verify_boundary_workflow(boundary, token):
     match = re.fullmatch(
         r"https://github.com/([^/]+/[^/]+)/actions/runs/([1-9][0-9]*)",

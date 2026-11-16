@@ -184,6 +184,28 @@ class ModelTraceTests(unittest.TestCase):
             self.exchange(value, stage="implementation")
         self.assert_no_trace()
 
+    def assert_invalid_identity(self, identity):
+        value = response()
+        value["response"]["id"] = identity
+        with self.assertRaises(BackendOutputError):
+            self.exchange(value)
+        self.assert_no_trace()
+
+    def test_null_response_id_is_rejected_before_journal_persistence(self):
+        self.assert_invalid_identity("response\x00id")
+
+    def test_surrogate_response_id_is_rejected_before_journal_persistence(self):
+        self.assert_invalid_identity("response\ud800id")
+
+    def test_oversized_response_id_is_rejected_before_journal_persistence(self):
+        self.assert_invalid_identity("r" * 201)
+
+    def test_non_string_response_id_is_rejected_before_journal_persistence(self):
+        self.assert_invalid_identity(123)
+
+    def test_empty_response_id_is_rejected_before_journal_persistence(self):
+        self.assert_invalid_identity("")
+
     def test_valid_implementation_response_persists_exact_trace(self):
         value = response("complete", {"summary": "Finished the fixture change"})
         value["response"]["id"] = "resp_fixture"
