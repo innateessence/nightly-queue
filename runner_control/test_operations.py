@@ -943,3 +943,58 @@ class OperatorPresentationTests(TestCase):
         self.assertEqual(
             legacy, {"password": "[redacted]", "secret_version": "[redacted]"}
         )
+
+    def test_selected_current_credential_name_cannot_leak_through_runner_choices(self):
+        self.current.name = "Current label: current-global-selection"
+        self.current.save(update_fields=["name"])
+        response = self.client.get(reverse("api_settings"))
+        self.assert_safe(response, global_values=True)
+        self.assertContains(response, "Selected credential content is withheld")
+        self.assertNotContains(response, "Save coding runner settings")
+
+    def test_selected_historical_credential_name_cannot_leak_through_api_choices(self):
+        from credentials.models import Credential
+
+        Credential.objects.create(
+            name="Import label: previous-global-selection",
+            provider="github",
+            kind="token",
+            encrypted_payload="unselected-invalid",
+        )
+        response = self.client.get(reverse("api_settings"))
+        self.assert_safe(response, global_values=True)
+        self.assertContains(response, "Selected credential content is withheld")
+        self.assertNotContains(response, ">Save settings</button>", html=False)
+
+    def test_missing_key_hides_labels_in_both_settings_forms(self):
+        from credentials.models import Credential
+
+        self.current.name = "Current label: current-global-selection"
+        self.current.save(update_fields=["name"])
+        Credential.objects.create(
+            name="Import label: previous-global-selection",
+            provider="github",
+            kind="token",
+            encrypted_payload="unselected-invalid",
+        )
+        with override_settings(NQ_CREDENTIAL_KEY=""):
+            response = self.client.get(reverse("api_settings"))
+        self.assert_safe(response, global_values=True)
+        self.assertContains(response, "unavailable")
+        self.assertNotContains(response, "Save coding runner settings")
+        self.assertNotContains(response, ">Save settings</button>", html=False)
+
+    def test_unselected_invalid_credential_does_not_hide_safe_choice_labels(self):
+        from credentials.models import Credential
+
+        Credential.objects.create(
+            name="Unselected safe label",
+            provider="github",
+            kind="token",
+            encrypted_payload="invalid",
+        )
+        response = self.client.get(reverse("api_settings"))
+        self.assert_safe(response, global_values=True)
+        self.assertContains(response, "Unselected safe label")
+        self.assertContains(response, "Save coding runner settings")
+        self.assertContains(response, ">Save settings</button>", html=False)

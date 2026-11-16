@@ -1,3 +1,4 @@
+from django import forms
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -17,6 +18,21 @@ from django.views.decorators.http import require_http_methods
 
 from .forms import APISettingsForm, CredentialForm
 from .models import APISettings, Credential
+
+
+def form_presentation_error(form, configuration):
+    values = [form[name].value() for name in form.fields]
+    for field in form.fields.values():
+        if isinstance(field, forms.ModelChoiceField):
+            values.extend(str(label) for _, label in field.choices)
+    safe, error = present_configuration_payload(
+        configuration, values, preserve_secret_versions=True
+    )
+    if error:
+        return error
+    if safe != values:
+        return "Selected credential content is withheld; remove it through the trusted administrator before editing these settings."
+    return ""
 
 
 @never_cache
@@ -56,13 +72,8 @@ def api_settings(request):
     )
     from runner_control.models import ReleaseQualification, RunnerIdentity
 
-    values = [runner_form[name].value() for name in runner_form.fields]
-    safe, error = present_configuration_payload(
-        configuration, values, preserve_secret_versions=True
-    )
-    form_error = error
-    if safe is not None and safe != values:
-        form_error = "Selected credential content is withheld; remove it through the trusted administrator before editing these settings."
+    form_error = form_presentation_error(form, configuration)
+    runner_form_error = form_presentation_error(runner_form, configuration)
     identities = []
     for runner in RunnerIdentity.objects.filter(enabled=True):
         name, error = present_configuration_payload(configuration, runner.name)
@@ -77,7 +88,8 @@ def api_settings(request):
         ],
         "form": form,
         "runner_form": runner_form,
-        "runner_form_unavailable": form_error,
+        "runner_form_unavailable": runner_form_error,
+        "form_unavailable": form_error,
         "runner_configuration": present_configuration(configuration),
         "runner_gate_evidence": gate_evidence,
     }
