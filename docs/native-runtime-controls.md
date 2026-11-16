@@ -98,9 +98,12 @@ qualification settled under pause. The ready image stayed unavailable until
 resume. Selective source/log purge removed that exact derived image, retained its
 terminal identity, and preserved the operator parent image. No coding-model call,
 production stack, production database or external repository delivery was used.
+An additional never-launched paused build expired on its original deadline,
+confirmed setup/resource termination and returned stable cancellation. Actual
+never-prepared stop requests returned 404 under the same persisted instance ID.
 
 Validation included 161 executor unit tests, 1,612 Django tests (four expected
-skips), repository-wide Black/Ruff/mypy, migration and system checks, and an
-installed executor wheel outside the checkout. Mocked cases additionally cover
+skips), four distribution artifact tests, repository-wide Black/Ruff/mypy,
+migration and system checks, and an installed executor wheel outside the checkout. Mocked cases additionally cover
 engine uncertainty, binding changes, independent phase gates, resume generation
 races, shared references and admission after full purge at both live-record caps.
