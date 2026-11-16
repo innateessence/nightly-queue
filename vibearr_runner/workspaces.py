@@ -161,9 +161,11 @@ class WorkspaceManager:
         *,
         trusted_local_root: Path | None = None,
         remote_git=None,
+        require_new_branch=False,
     ):
         self.directory = private_directory(directory)
         self.remote_git = remote_git
+        self.require_new_branch = require_new_branch
         self.trusted_local_root = (
             trusted_local_root.resolve() if trusted_local_root else None
         )
@@ -270,6 +272,10 @@ class WorkspaceManager:
                 ).returncode
                 == 0
             )
+            if existing and self.require_new_branch:
+                raise WorkspaceError(
+                    "An existing remote task branch requires publication reconciliation."
+                )
             start = "refs/remotes/origin/" + (branch if existing else resolved)
             current = git(["symbolic-ref", "--short", "HEAD"], checkout)
             if current == branch:

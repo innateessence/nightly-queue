@@ -117,6 +117,13 @@ class Maintenance:
                     raise InvalidResponse("Retention workspace identity is invalid.")
                 if run_id in protected:
                     continue
+                from .native_resources import NativeResources
+
+                resources = NativeResources(self.journal.directory)
+                if resources.path(run_id).exists():
+                    from vibearr_executor.client import Client as ExecutorClient
+
+                    resources.purge(run_id, ExecutorClient.from_environment(), resource)
                 root = (
                     self.workspaces
                     if resource == "workspace"

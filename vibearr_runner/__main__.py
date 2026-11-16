@@ -13,7 +13,7 @@ from .maintenance import Maintenance
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Recoverable runner supervisor; execution requires controlled release readiness."
+        description="Recoverable native queue supervisor with isolated execution and independent validation."
     )
     parser.add_argument(
         "--check",

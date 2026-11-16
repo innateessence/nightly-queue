@@ -75,7 +75,7 @@ def pull_identity(
 
 
 class GitHubDeliveryClient:
-    def __init__(self, token: str, *, timeout: float = 15):
+    def __init__(self, token: str, *, timeout: float = 15, read_only=False):
         if (
             not token
             or any(character.isspace() for character in token)
@@ -84,12 +84,24 @@ class GitHubDeliveryClient:
             raise DeliveryError("Invalid repository credential or request limits.")
         self.token = token
         self.timeout = timeout
+        self.read_only = read_only
         self.opener = build_opener(ProxyHandler({}), NoRedirects())
         self.request_lock = threading.Lock()
 
     def request(self, method: str, path: str, payload: dict | None = None):
-        if not path.startswith("/repos/") or "#" in path or "\n" in path:
+        numeric_repository = method == "GET" and re.fullmatch(
+            r"/repositories/[1-9][0-9]*", path
+        )
+        if (
+            (not path.startswith("/repos/") and not numeric_repository)
+            or "#" in path
+            or "\n" in path
+        ):
             raise DeliveryError("Invalid GitHub API path.")
+        if self.read_only and method != "GET":
+            raise DeliveryError(
+                "Reconciliation credentials permit read-only operations."
+            )
         body = (
             None if payload is None else json.dumps(payload, allow_nan=False).encode()
         )
@@ -180,14 +192,22 @@ class GitHubDeliveryClient:
         )
 
     def create(
-        self, repository: str, head: str, base: str, commit: str, title: str, body: str
+        self,
+        repository: str,
+        head: str,
+        base: str,
+        commit: str,
+        title: str,
+        body: str,
+        *,
+        draft=True,
     ) -> dict:
         payload = {
             "title": title[:200],
             "body": body,
             "head": head,
             "base": base,
-            "draft": True,
+            "draft": draft,
         }
         value = self.request("POST", f"/repos/{repository}/pulls", payload)
         try:
@@ -201,9 +221,12 @@ class GitHubDeliveryClient:
 
 
 class SupervisorGit:
-    def __init__(self, *, token: str = "", trusted_local: bool = False):
+    def __init__(
+        self, *, token: str = "", trusted_local: bool = False, read_only=False
+    ):
         self.token = token
         self.trusted_local = trusted_local
+        self.read_only = read_only
 
     def remote(self, workspace: Workspace, arguments: list[str]) -> str:
         return self.command(
@@ -213,6 +236,12 @@ class SupervisorGit:
     def command(
         self, arguments: list[str], repository_url: str, directory, cwd=None
     ) -> str:
+        if self.read_only and (
+            not arguments or arguments[0] not in {"ls-remote", "clone", "fetch"}
+        ):
+            raise DeliveryError(
+                "Reconciliation credentials permit read-only Git transport."
+            )
         if not self.trusted_local:
             repository_path(repository_url)
             if (
