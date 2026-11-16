@@ -282,7 +282,7 @@ class ClaudeSchemaTests(unittest.TestCase):
 
 
 class ClaudeWorkerTests(unittest.TestCase):
-    def exchange(self, status=200, body=b"{}", failure=None):
+    def exchange(self, status=200, body=b"{}", failure=None, probe_model=None):
         connection = Mock()
         connection.getresponse.return_value.status = status
         connection.getresponse.return_value.read.return_value = body
@@ -296,6 +296,8 @@ class ClaudeWorkerTests(unittest.TestCase):
                 "tool_choice": {"type": "none"},
             },
         }
+        if probe_model is not None:
+            payload["probe_model"] = probe_model
         output = io.StringIO()
         incoming = SimpleNamespace(buffer=io.BytesIO(json.dumps(payload).encode()))
         with (
@@ -317,6 +319,23 @@ class ClaudeWorkerTests(unittest.TestCase):
         self.assertEqual(headers["anthropic-version"], "2026-10-21")
         self.assertEqual(headers["Authorization"], "Bearer " + TOKEN)
         self.assertEqual(json.loads(body)["tools"], [])
+
+    def test_authentication_probe_uses_only_models_get_without_inference(self):
+        result, connection, _ = self.exchange(
+            body=b'{"type":"model","id":"claude-sonnet-5-5"}',
+            probe_model="claude-sonnet-5-5",
+        )
+        self.assertEqual(result, {"authenticated_model": "claude-sonnet-5-5"})
+        self.assertEqual(
+            connection.request.call_args.args, ("GET", "/v1/models/claude-sonnet-5-5")
+        )
+        self.assertNotIn("request", connection.request.call_args.kwargs)
+        self.assertEqual(connection.request.call_count, 1)
+
+    def test_arbitrary_endpoint_cannot_be_used_for_authentication_probe(self):
+        result, connection, _ = self.exchange(probe_model="https://untrusted/model")
+        self.assertEqual(result, {"error": "transport"})
+        connection.request.assert_not_called()
 
     def test_authentication_response_body_is_withheld(self):
         result, connection, _ = self.exchange(401, TOKEN.encode())

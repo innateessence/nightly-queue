@@ -8,6 +8,7 @@ import platform
 import subprocess
 import sys
 import tempfile
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any

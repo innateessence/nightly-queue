@@ -31,9 +31,16 @@ The worker is supervisor code: it cannot execute model output or repository code
 The command sandbox remains a separate process with no access to this worker's
 credentials, descriptors, filesystem or process namespace.
 
-The only endpoint is `https://api.anthropic.com/v1/messages`; HTTP redirects and
+Inference uses only `https://api.anthropic.com/v1/messages`; HTTP redirects and
 endpoint overrides are unavailable. `anthropic-version` is pinned to
-`2026-10-21`. No provider SDK is installed. The bounded request uses `tools: []`
+`2026-10-21`. No provider SDK is installed. Controlled authorization can additionally perform
+a fixed-host `GET /v1/models/{model_id}` authentication probe with the same bearer
+API token and version header; this issues no inference request. The official
+[Get a Model reference](https://platform.claude.com/docs/en/api/models/retrieve)
+was reviewed on 2026-11-15. A successful probe is valid only inside the authorized
+active scenario; it does not qualify normal execution.
+
+The bounded inference request uses `tools: []`
 and `tool_choice: {"type": "none"}` and never enables server tools, MCP,
 containers, skills or code execution. The only allowed model IDs match
 `claude-[a-z0-9]+(?:-[a-z0-9]+)*` with a 200-character bound. This is syntax
@@ -84,7 +91,14 @@ projects, including projects using another backend. Each provider/credential
 pair is evaluated independently; readings are never averaged or borrowed from
 another account. Explicitly disabling reserve removes only that gate.
 
-A structurally valid saved token is not authenticated readiness. The candidate
+A structurally valid saved token is not authenticated readiness. Proof protocol
+`structured-proposals-v1` includes an account entry with exact provider, credential
+ID, secret version, model and transport `claude-messages-structured-proposals-v1`.
+Codex evidence, native-CLI evidence, another account/model, rotated credentials
+or a changed deployment cannot qualify Claude. Readiness also recomputes the
+real sandbox/code/environment binding and checks proof expiry.
+
+The candidate
 must be qualified against the deployed sandbox, exact transport/model/credential
 version and an authorized test repository before release. The production Docker
 namespace probe remains blocked by the current deployment policy. No sandbox
@@ -123,6 +137,13 @@ account reserve suite and stage approval/recovery suite without paid requests:
 python -m unittest coding_runner.test_claude_backend coding_runner.test_backends
 python manage.py test runner_control.test_claude_settings
 ```
+
+The explicit Git-dependent `coding_runner.acceptance.test_claude_recovery` suite
+replays the actual lifecycle with real Claude parsing and local Git, fixture
+provider responses/credentials and a test approval executor. It reaches individual
+approval, implementation, validation, delivery, lost finish response and restart
+reporting without a second PR or model retry. These are deterministic fixtures,
+never live release evidence. Portable image verification includes this suite.
 
 These tests cover both providers through the same contract, real local worker
 processes, credential transport, no tool execution, stage restrictions, malformed
