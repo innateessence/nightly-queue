@@ -8,7 +8,7 @@ Reviewed parent: [PR 100](https://github.com/innateessence/nightly-queue/pull/10
 This review used a new full clone at `/tmp/vibearr-review04-r1`; it did not use
 the author's checkout for execution or inherit a prior review decision. The
 scope includes the entire feature diff, including the previously merged server
-and runtime topics. There is **one P2 finding**. This report does not approve a
+and runtime topics. There are **two P2 findings**. This report does not approve a
 later source revision or clear the finding after a fix.
 
 ## P2: Retry transient GitHub reads before failing the owned task
@@ -71,6 +71,47 @@ handling. Keep permanent authorization/identity errors distinguishable. Unknown
 paid execution, push and PR mutations must continue through their existing
 read-only reconciliation fences rather than unconditional mutation replay.
 
+## P2: Keep Git-dependent tests out of Git-free application discovery
+
+Location: `coding_runner/test_native_lifecycle.py:230-245`,
+`coding_runner/test_native_workspace.py:22-31`, and
+`runner_control/test_native_supervision.py:49-56`.
+
+The new lifecycle/workspace test classes guard only executor SDK availability;
+the supervision class unconditionally invokes the lifecycle Git fixture. All
+three classes run real `/usr/bin/git` during setup. The ordinary application
+test discovery includes them, but the application image intentionally contains
+no Git. This fails the repository's required Docker checks before the independent
+runner checks can execute. Installing Git in the application image would violate
+the established application/runner boundary.
+
+Root surfaced the failing CI run; I independently inspected its provider source
+binding and the complete relevant traces:
+[Tests run 43898444065](https://github.com/innateessence/nightly-queue/actions/runs/43898444065)
+is a failed run for exact reviewed `da734e52`. Its `Run test.sh` job discovers
+1,727 tests, then reports **21 errors, 14 skips**: five
+`runner_control.test_native_supervision` cases, ten
+`coding_runner.test_native_lifecycle` cases, and six
+`coding_runner.test_native_workspace` cases. Every error is
+`FileNotFoundError: [Errno 2] No such file or directory: '/usr/bin/git'`, from
+the new test fixtures. The inspected local CI log is
+`/tmp/vibearr-control/feature04-da734-test-failure.log`.
+
+`test.sh` runs `python manage.py test` inside the normal Django service before
+`run_runner_checks`; `Dockerfile:23` installs curl without Git. The independent
+host PostgreSQL suite passed because that host has Git, so it does not establish
+this deployment boundary. Reproduction is the existing `bash test.sh` in its
+ordinary application image, as performed by the linked CI job; no special
+failure injection is needed.
+
+Qualify these Git-dependent classes for their required environment, preserving
+Git-free Django application discovery and actual execution of the portable Git
+cases in the independent runner checks. Retain explicit coverage of the
+Django/native-supervisor integration cases in a Git-equipped test environment;
+silently skipping them everywhere would lose the API/lifecycle integration
+coverage. This report records the reviewed-source failure and does not assess a
+later correction.
+
 ## Independent checks and reviewed behavior
 
 - Full Django/PostgreSQL suite: **1,727 tests passed**, four distribution tests
@@ -97,7 +138,7 @@ read-only reconciliation fences rather than unconditional mutation replay.
   reporting, original push/PR reconciliation, explicit retry and late-retry
   fencing, ownership-loss suspension, termination before slot release, and
   acknowledgement-gated source/log retention. The ordinary regression suite
-  covers these paths; I found no additional P0/P1/P2 in them.
+  covers these paths; the two findings above remain open in the reviewed source.
 - Inspected native status/context/plan rendering, validation outcome and repair
   count, heartbeat/wait details, delivered PR links, cancel and explicit retry.
   Existing source/credential redaction and historical legacy delivery readback
