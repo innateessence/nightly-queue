@@ -220,6 +220,25 @@ class RecoveryTests(RecoveryFixture, unittest.TestCase):
         self.recovery.reconcile(self.state)
         self.assertEqual(self.state["run"]["item"]["claim_token"], "claim")
 
+    def test_completed_callback_receives_private_claim_after_lost_finish(self):
+        self.owned()
+        self.state["controller_secret"] = "a" * 64
+        self.client.remote["run"].update(state="completed", finish_digest="f" * 64)
+        self.client.remote["item"] = {"id": 1}
+        callbacks = []
+
+        def completed(state, run_id, token, finish_digest):
+            callbacks.append((run_id, token, finish_digest))
+
+        controller = Controller(
+            self.client, self.journal, gates=self.gates, completed=completed
+        )
+        self.assertEqual(
+            controller.cycle(self.state, copy.deepcopy(CONFIG)), "completed"
+        )
+        self.assertEqual(callbacks, [(self.run_id, "claim", "f" * 64)])
+        self.assertNotIn("run", self.state)
+
     def test_same_volume_rejects_second_controller(self):
         with self.assertRaises(ControllerLocked):
             with Journal(self.path):
