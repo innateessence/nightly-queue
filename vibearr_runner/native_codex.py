@@ -4,6 +4,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import math
 from uuid import UUID
 
 from .native_sessions import NativeSession, NativeSessionError
@@ -382,7 +383,21 @@ class NativeCodexAdapter:
             raise NativeSessionError(
                 "Runtime changed during native authentication probe; repeat diagnostics."
             )
-        verified_at = datetime.now(timezone.utc)
+        completed_at = outcome["result"].get("ended_at")
+        now = datetime.now(timezone.utc)
+        if (
+            type(completed_at) not in (int, float)
+            or not math.isfinite(completed_at)
+            or not 0 < completed_at <= now.timestamp()
+        ):
+            raise NativeSessionError(
+                "Native authentication completion timestamp is missing, invalid or in the future."
+            )
+        verified_at = datetime.fromtimestamp(completed_at, timezone.utc)
+        if now >= verified_at + timedelta(minutes=15):
+            raise NativeSessionError(
+                "Native authentication probe expired; run a new bounded probe."
+            )
         return {
             "schema_version": 1,
             "adapter": "codex",

@@ -96,6 +96,7 @@ class ExecutorFixture:
             "canceled": False,
             "log_truncated": truncated,
             "log_digest": hashlib.sha256(self.content).hexdigest(),
+            "ended_at": datetime.now(timezone.utc).timestamp(),
         }
 
     def export(self, operation, source):
@@ -307,6 +308,53 @@ class NativeCodexTests(unittest.TestCase):
         changed["account"]["credential_id"] += 1
         with self.assertRaises(NativeSessionError):
             self.adapter.authentication_result(NativeSession.from_data(changed))
+
+    def test_replaying_probe_preserves_original_authentication_expiry(self):
+        request = {
+            key: value
+            for key, value in self.request.items()
+            if key not in {"source", "prompt"}
+        }
+        session = self.adapter.prepare_auth_probe(**request)
+        self.client.content = self.completed_events()
+        self.client.export_unchanged = True
+        self.client.complete(session.manifest["operation_id"])
+        first = self.adapter.authentication_result(session)
+        second = self.adapter.authentication_result(session)
+        self.assertEqual(first["verified_at"], second["verified_at"])
+        self.assertEqual(first["expires_at"], second["expires_at"])
+
+    def test_old_completed_probe_cannot_mint_new_authentication_proof(self):
+        request = {
+            key: value
+            for key, value in self.request.items()
+            if key not in {"source", "prompt"}
+        }
+        session = self.adapter.prepare_auth_probe(**request)
+        self.client.content = self.completed_events()
+        self.client.export_unchanged = True
+        self.client.complete(session.manifest["operation_id"])
+        self.client.receipt["ended_at"] = (
+            datetime.now(timezone.utc) - timedelta(minutes=16)
+        ).timestamp()
+        with self.assertRaises(NativeSessionError):
+            self.adapter.authentication_result(session)
+
+    def test_future_completed_probe_cannot_mint_authentication_proof(self):
+        request = {
+            key: value
+            for key, value in self.request.items()
+            if key not in {"source", "prompt"}
+        }
+        session = self.adapter.prepare_auth_probe(**request)
+        self.client.content = self.completed_events()
+        self.client.export_unchanged = True
+        self.client.complete(session.manifest["operation_id"])
+        self.client.receipt["ended_at"] = (
+            datetime.now(timezone.utc) + timedelta(minutes=1)
+        ).timestamp()
+        with self.assertRaises(NativeSessionError):
+            self.adapter.authentication_result(session)
 
     def test_credential_rotation_invalidates_authentication_proof(self):
         request = {

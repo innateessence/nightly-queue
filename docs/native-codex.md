@@ -145,6 +145,8 @@ bindings and a maximum 15-minute lifetime. A changed account, model, image,
 profile, runtime, expired proof, or locally expired session requires another
 automated probe. Issue content and agent output cannot supply this proof. Runtime
 diagnostics remain runtime-only and do not infer native account readiness.
+The lifetime starts at the protected receipt's actual completion timestamp;
+rereading a retained operation cannot renew it.
 
 ## Real acceptance
 
