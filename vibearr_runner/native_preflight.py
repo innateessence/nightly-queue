@@ -78,15 +78,33 @@ class NativePreflight:
             data["projects"][str(project_id)] = report
             try:
                 policy = ExecutionPolicy.from_data(project["execution_policy"])
-                if policy.delivery_mode != "pull_request":
-                    raise NativeSessionError(
-                        "Automatic merge is not installed; select PR delivery."
-                    )
                 validation = validation_diagnostics(policy, self.executor, self.profile)
                 if validation.get("ready") is not True:
                     raise NativeSessionError(validation["reason"])
                 repository_grant = self.selected_grant(project, "repository")
                 report["repository"] = self.github_check(repository_grant, project)
+                if policy.delivery_mode == "merge":
+                    from .merge_contract import merge_profile
+                    from .merge_github import MergeGitHub
+
+                    profile = merge_profile(
+                        project["effective"].get("merge_profile", {})
+                    )
+                    github = MergeGitHub(
+                        repository_grant["material"]["secret"], read_only=True
+                    )
+                    identity, _ = github.repository(
+                        repository_id=profile["repository_id"]
+                    )
+                    workspace = {
+                        "repository_id": identity["repository_id"],
+                        "repository": identity["repository"],
+                        "base_branch": project["base_branch"]
+                        or identity["default_branch"],
+                    }
+                    workspace["base_revision"] = github.base_sha(workspace)
+                    workspace["commit_sha"] = workspace["base_revision"]
+                    report["merge_policy"] = github.policy(workspace, profile)
                 self.selected_grant(project, "issue")
                 grant = self.selected_grant(project, "implementation")
                 provider = project["effective"]["implementation_backend"]

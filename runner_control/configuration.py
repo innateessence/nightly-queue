@@ -9,6 +9,8 @@ from credentials.models import Credential
 from projects.models import Project
 from vibearr_runner.policy import ExecutionPolicy
 from vibearr_runner.native_evidence import native_evidence_contract
+from vibearr_runner.merge_contract import merge_profile
+from vibearr_runner.native_contract import NativeContractError
 from vibearr_executor import QUALIFICATION_VERSION, PROTOCOL_VERSION
 
 from .settings_models import ProjectRunnerSettings, RunnerSettings
@@ -147,6 +149,21 @@ def project_configuration(project, defaults, overrides, credentials):
                 }
             )
     policy = ExecutionPolicy.from_data(effective["execution_policy"])
+    if policy.delivery_mode == "merge":
+        try:
+            profile = merge_profile(effective["merge_profile"])
+            if profile["repository_id"] != project.github_repository_id:
+                raise NativeContractError(
+                    "Merge profile must identify this project's verified repository."
+                )
+        except NativeContractError as exc:
+            errors.append(
+                {
+                    "field": "merge_profile",
+                    "code": "invalid_merge_profile",
+                    "message": str(exc),
+                }
+            )
     return {
         "execution_kind": "native",
         "execution_policy": policy.to_data(),

@@ -40,12 +40,12 @@ MERGE_TASKS = (
     (
         "status-filter",
         "Add a queue status filter",
-        "Add a queue status filter with tests for each valid status and malformed input. Preserve existing title/priority/project filters. Include a real rendered browser screenshot. Do not implement the follow-up link/clear behavior in this task.",
+        "Add a queue status filter with tests for each valid status and malformed input. Preserve existing title/priority/project filters. The trusted operator captures a real Chrome screenshot from the exact candidate in an owned app during CI. Do not download a browser or fabricate a screenshot. Do not implement the follow-up link/clear behavior in this task.",
     ),
     (
         "status-links",
         "Preserve the queue status in filter links and clear behavior",
-        "Depends on: #<actual-status-filter-issue>\n\nPreserve the queue status filter in filter links and clear behavior. Add regression tests and a real rendered screenshot. The task must start from a default-branch base containing the prerequisite's actual merge commit.",
+        "Depends on: #<actual-status-filter-issue>\n\nPreserve the queue status filter in filter links and clear behavior. Add regression tests. The trusted operator captures a real Chrome screenshot from the exact candidate in an owned app during CI; do not download a browser or fabricate a screenshot. The task must start from a default-branch base containing the prerequisite's actual merge commit.",
     ),
 )
 
@@ -71,8 +71,8 @@ def scenario_tasks():
             ],
         },
         "merge": {
-            "available": False,
-            "reason": "Feature07 extends this driver with active-claim CI/merge and exact-head review/base evidence.",
+            "available": True,
+            "reason": "Explicit merge execution requires qualified no-bypass policy, all configured CI producers and real UI screenshot receipts.",
             "tasks": [document(value) for value in MERGE_TASKS],
         },
     }
@@ -822,14 +822,31 @@ def main():
     parser.add_argument("--second-issue", type=int)
     parser.add_argument("--evidence", type=Path)
     parser.add_argument("--max-seconds", type=int, default=3600)
+    parser.add_argument("--screenshots", type=Path)
     args = parser.parse_args()
     if args.export_scenarios:
         print(json.dumps(scenario_tasks(), indent=2, sort_keys=True))
         return 0
-    if not args.execute or args.scenario != "delivery":
-        parser.error(
-            "Explicitly choose --execute; merge execution is extended in feature07."
-        )
+    if not args.execute:
+        parser.error("Explicitly choose --execute.")
+    if args.scenario == "merge":
+        from .merge_acceptance import main as merge_main
+
+        if args.failure_issue is not None:
+            parser.error("Merge acceptance selects only its two useful UI issues.")
+        forwarded = ["--execute", "--max-seconds", str(args.max_seconds)]
+        for field in (
+            "state",
+            "project_id",
+            "first_issue",
+            "second_issue",
+            "evidence",
+            "screenshots",
+        ):
+            value = getattr(args, field)
+            if value is not None:
+                forwarded.extend(["--" + field.replace("_", "-"), str(value)])
+        return merge_main(forwarded)
     identities = (
         args.project_id,
         args.failure_issue,

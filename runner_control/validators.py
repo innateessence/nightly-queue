@@ -18,6 +18,7 @@ OVERRIDE_FIELDS += (
     "issue_credential_id",
     "repository_credential_id",
     "execution_policy",
+    "merge_profile",
 )
 
 
@@ -91,6 +92,16 @@ def validate_execution_policy(value):
         raise ValidationError(str(exc)) from None
 
 
+def validate_merge_profile(value):
+    from vibearr_runner.merge_contract import configured_profile
+    from vibearr_runner.native_contract import NativeContractError
+
+    try:
+        configured_profile(value)
+    except NativeContractError as exc:
+        raise ValidationError(str(exc)) from None
+
+
 def validate_overrides(value):
     if not isinstance(value, dict) or set(value) - set(OVERRIDE_FIELDS):
         raise ValidationError("Enter supported project override fields.")
@@ -105,7 +116,7 @@ def validate_overrides(value):
             )
         if set(entry) - {"mode", "value"}:
             raise ValidationError("Unknown override property.")
-        if key == "execution_policy" and entry["mode"] == "clear":
+        if key in {"execution_policy", "merge_profile"} and entry["mode"] == "clear":
             raise ValidationError(
                 "Execution policy cannot be cleared; inherit or replace it."
             )
@@ -114,6 +125,8 @@ def validate_overrides(value):
         replacement = entry.get("value")
         if key == "execution_policy":
             validate_execution_policy(replacement)
+        elif key == "merge_profile":
+            validate_merge_profile(replacement)
         elif key.endswith("commands"):
             validate_commands(replacement)
         elif key.endswith("credential_id"):

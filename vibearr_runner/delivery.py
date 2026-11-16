@@ -28,6 +28,12 @@ class DeliveryError(Exception):
     pass
 
 
+class DeliveryRejected(DeliveryError):
+    def __init__(self, status):
+        self.status = status
+        super().__init__(f"GitHub delivery returned HTTP {status}.")
+
+
 class DeliveryUnknown(DeliveryError):
     pass
 
@@ -118,7 +124,11 @@ class GitHubDeliveryClient:
             r"/repositories/[1-9][0-9]*", path
         )
         if (
-            (not path.startswith("/repos/") and not numeric_repository)
+            (
+                not path.startswith("/repos/")
+                and not numeric_repository
+                and not (method == "GET" and path == "/user")
+            )
             or "#" in path
             or "\n" in path
         ):
@@ -175,6 +185,8 @@ class GitHubDeliveryClient:
     def send(self, request: Request, method: str, deadline: float):
         try:
             with self.opener.open(request, timeout=self.timeout) as response:
+                if method == "DELETE" and response.status == 204:
+                    return None
                 if (
                     response.status not in {200, 201}
                     or response.headers.get_content_type() != "application/json"
@@ -209,7 +221,7 @@ class GitHubDeliveryClient:
                 raise DeliveryUnknown(
                     "GitHub mutation outcome requires reconciliation."
                 ) from None
-            raise DeliveryError(f"GitHub delivery returned HTTP {status}.") from None
+            raise DeliveryRejected(status) from None
         except (URLError, OSError, HTTPException, ValueError, RecursionError):
             self.unavailable(method)
 

@@ -235,6 +235,10 @@ trees in fresh containers and disposable databases. It keeps required commands
 outside candidate control and builds dependency changes without touching the live
 installation.
 
+The [automatic merge guide](docs/automatic-merge.md) describes exact-head CI,
+explicit no-bypass repository setup, and recovery through issue
+completion. PR-only delivery remains the default until those gates qualify.
+
 ## Keeping your data
 
 PostgreSQL data lives in the `postgres-data` volume. `docker compose down` keeps

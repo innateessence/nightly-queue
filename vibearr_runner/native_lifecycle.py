@@ -37,6 +37,10 @@ class NativeFailure(Exception):
     pass
 
 
+class NativeMetadataRejected(NativeFailure):
+    pass
+
+
 class NativeLifecycle:
     def __init__(self, host, *, executor=None, registry=None, validation_profile=None):
         from vibearr_executor.client import Client
@@ -113,13 +117,17 @@ class NativeLifecycle:
     def policy(self):
         return ExecutionPolicy.from_data(self.snapshot["execution_policy"])
 
-    def secret(self, purpose, *, reconciliation=False):
+    def secret(self, purpose, *, reconciliation=False, completion=False):
         try:
             return self.client.request(
                 "POST",
                 "/api/v1/runner/secrets/",
                 {
-                    "scope": "reconciliation" if reconciliation else "run",
+                    "scope": (
+                        "completion"
+                        if completion
+                        else "reconciliation" if reconciliation else "run"
+                    ),
                     "run_id": self.run_id,
                     "claim_token": self.token,
                     "purpose": purpose,
@@ -129,7 +137,7 @@ class NativeLifecycle:
             if type(exc) is not APIError and not isinstance(exc, ConflictError):
                 raise
             reason = "Current scoped credential authority is unavailable; stop and reconcile configuration."
-            if reconciliation:
+            if reconciliation or completion:
                 raise ReconciliationRequired(reason) from None
             raise NativeFailure(reason) from None
 
@@ -276,7 +284,7 @@ class NativeLifecycle:
                 reason = "Native metadata was rejected and confirmed absent; terminate this attempt without replacing its execution."
                 if payload.get("kind") == "native_termination":
                     raise ReconciliationRequired(reason) from None
-                raise NativeFailure(reason) from None
+                raise NativeMetadataRejected(reason) from None
             self.state["request"].update(status="received", response=response)
             self.save()
             return response
@@ -465,6 +473,14 @@ class NativeLifecycle:
             if (state.get("request") or {}).get("status") == "pending":
                 pending = state["request"]
                 self.metadata_request(pending["path"], pending["payload"])
+            if self.native.get("merge", {}).get("dispatched"):
+                from .native_merge import NativeMerge
+
+                if self.native["merge"].get("completed"):
+                    if self.native["delivery"].get("checkpoint") == "reporting_pending":
+                        return self.delivery()
+                    return NativeMerge(self).finalize()
+                return NativeMerge(self).reconcile()
             if self.native.get("failure"):
                 return self.finish_failure()
             if self.run["run"].get("cancellation_requested_at"):
@@ -949,7 +965,9 @@ class NativeLifecycle:
             .removesuffix(".git"),
             "branch": workspace.branch_name,
             "base_branch": workspace.resolved_base_branch,
-            "base_revision": workspace.base_revision,
+            "base_revision": self.native.get(
+                "publication_base", workspace.base_revision
+            ),
             "tree_sha": source.tree_sha,
             "commit_sha": commit,
         }
@@ -970,6 +988,10 @@ class NativeLifecycle:
         )
         self.native["candidate"] = payload
         self.native["phase"] = "validation"
+        if self.native.get("publication_revision"):
+            from .native_revision import NativeRevision
+
+            NativeRevision(self).activate_candidate()
         self.save()
         return "continue"
 
@@ -1165,6 +1187,11 @@ class NativeLifecycle:
 
         return NativeDelivery(self).step()
 
+    def publication_revision(self):
+        from .native_revision import NativeRevision
+
+        return NativeRevision(self).step()
+
     def finish_failure(self):
         self.terminate()
         validation = (
@@ -1208,6 +1235,10 @@ class NativeLifecycle:
 
     def terminate(self):
         from .native_contract import termination_record, intent_operations
+        from .native_merge import NativeMerge
+
+        if self.native.get("merge"):
+            NativeMerge(self).terminal()
 
         prepared = self.native.get("metadata", {}).get("termination")
         if prepared:
