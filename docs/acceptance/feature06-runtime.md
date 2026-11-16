@@ -20,9 +20,10 @@ using the three immutable image IDs in the record and a new private state path.
 Preserve the exact generated registry when starting its read/control service.
 
 This is a historical runtime-preparation observation from before accepted04
-main9dd2e8e. It proves runtime preparation only. Real selected-account authentication,
-the deliberate failing queue validation, two useful source PRs, restart receipts
-and timing measurements remain separate acceptance work; that gate has since
-opened and these preparation records are not task results. A selected session
-copy is not a dedicated API-key live test. The
-original live stack and root's pre-existing control project/cutoff remain untouched.
+main9dd2e8e. It proves runtime preparation only. Later real selected-account
+authentication, the deliberate failing validation and the subsequent source-refresh
+failure are recorded in the [queue observations](feature06-queue.md), including
+restart and timing facts. Successful useful deliveries remain part of feature07's
+combined MVP proof; these preparation records are not task results. A selected
+session copy is not a dedicated API-key live test. The original live stack and
+root's pre-existing control project/cutoff were untouched by this preparation.

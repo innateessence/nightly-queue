@@ -194,7 +194,18 @@ proof remains visibly unverified until ordinary eligible-work preflight runs its
 bounded probe. Idle polling makes no paid probes. Enable processing once this
 one-time setup and the finite acceptance are ready; pause still permits discovery.
 
-## Repeat the finite acceptance
+## Acceptance evidence and optional rehearsal
+
+The [actual queue observations](acceptance/feature06-queue.md) record successful
+selected-session authentication, the deliberate validation failure and a later
+source-refresh rejection. They do not claim completed CLI deliveries. Further CLI
+iterations were stopped; feature07's reserved status-filter and dependent
+link/clear tasks own the final combined discovery-to-merge MVP proof. Preserve the
+failed runs, cutoff, private journal and task-window counts when continuing setup.
+
+The following exported CLI scenario remains an optional repeatable rehearsal for
+a separately selected disposable environment. It is not an instruction to resume
+the held historical issue #119 or publish the uncreated version task.
 
 Export exact bounded issue bodies without publishing or making paid calls:
 
@@ -227,8 +238,7 @@ under the stale failure-only repair policy; reconciliation of an existing attemp
 remains possible. These are explicit negative-case setup steps, not task-controlled
 permissions or confirmation gates.
 
-After fresh
-independent/root review and CI, the authorized operator merges the first real PR
+After the configured delivery checks and CI, the authorized operator merges the first real PR
 and publishes the separate `--version` improvement. Repeat the same command with
 `--second-issue <version-id>` to resume; completed tasks are reconciled, not run
 again. This publication sequencing does not add a confirmation inside a task.
@@ -239,7 +249,7 @@ that snapshot. If a review report changes A's head before its merge, the report
 keeps the original nine-check tested/pushed SHA and separately records the current
 provider head and actual merge metadata, requiring the original commit's ancestry.
 It never calls later changes reviewed or native-validated merely because a PR
-merged. Root's independent review/CI ledger can supply that separate provenance.
+merged. The operator's review/CI ledger can supply that separate provenance.
 The second task's inspected base must contain A's provider-confirmed merge.
 
 Each ordinary controller cycle runs in a separate OS process with the same private
@@ -253,5 +263,7 @@ publication. Public reports contain identities/digests/receipts, not credentials
 
 The separate exported merge scenario reserves the MVP's queue status filter and
 dependent link/clear behavior for feature07, including real rendered screenshots.
-Feature06 proves PR-only delivery; it does not claim automatic merging, deployed
-updates, a live API-key proof when only a session was used, or the complete MVP.
+The feature06 driver supports PR-only delivery; the historical runs above do not
+prove successful delivery. Automatic merging, deployed updates, a live API-key
+proof when only a session was used and the complete MVP require their actual
+separate evidence.
