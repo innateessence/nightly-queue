@@ -202,7 +202,7 @@ class NativeMerge:
             return "wait"
         self.host.status(
             "delivery",
-            detail="Squash merging the exact validated and AI-reviewed head.",
+            detail="Squash merging the exact validated head after required checks.",
             validation_status="passed",
             force=True,
         )
@@ -318,7 +318,7 @@ class NativeMerge:
                 )
             self.data["comment_dispatched"] = True
             self.host.save()
-            body = f"{marker}\nMerged {self.pull['url']} as `{self.data['merge']['commit_sha']}` after exact-head validation and AI review."
+            body = f"{marker}\nMerged {self.pull['url']} as `{self.data['merge']['commit_sha']}` after exact-head validation and required checks."
             try:
                 github.request(
                     "POST",

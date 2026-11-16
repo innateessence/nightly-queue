@@ -53,9 +53,6 @@ ARTIFACT_KINDS = {
     "native_merge",
     "native_completion",
     "native_merge_terminal",
-    "native_review",
-    "native_review_publication",
-    "native_review_publication_terminal",
 }
 FACT_KINDS = ARTIFACT_KINDS - {"native_intent"}
 WORKSPACE_FIELDS = {
@@ -638,10 +635,6 @@ def validate_intent(value):
             raise NativeContractError("Unknown automatic merge mutation stage.")
         merge_profile(data["profile"])
         merge_receipt(data["receipt"], data["profile"], data["workspace"])
-    elif kind in {"review", "review_publication"}:
-        from .review_contract import validate_review_intent
-
-        validate_review_intent(value)
     else:
         raise NativeContractError("Unknown native intent kind.")
     return copied(value)
@@ -727,7 +720,7 @@ def validate_dependency_request(data):
 def intent_operations(value):
     validate_intent(value)
     data = value["data"]
-    if value["kind"] in {"agent", "review"}:
+    if value["kind"] == "agent":
         return [data["session"]["manifest"]["operation_id"]]
     if value["kind"] == "validation":
         return [entry["manifest"]["operation_id"] for entry in data["operations"]]
@@ -1337,14 +1330,6 @@ def validate_native_artifact(kind, value):
             raise NativeContractError(
                 "Only a definitely unstarted merge mutation is terminal without its provider fact."
             )
-    elif kind in {
-        "native_review",
-        "native_review_publication",
-        "native_review_publication_terminal",
-    }:
-        from .review_contract import validate_review_artifact
-
-        validate_review_artifact(kind, value)
     else:
         raise NativeContractError("Unknown native artifact kind.")
     return copied(value)

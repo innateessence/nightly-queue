@@ -31,8 +31,6 @@ def profile():
         "repository_id": 17,
         "actor_id": 25,
         "ci_timeout_seconds": 1800,
-        "review_timeout_seconds": 1200,
-        "control_base": "vibearr/reviews",
         "delete_branch": False,
         "checks": [
             {
@@ -48,8 +46,8 @@ def profile():
                 "role": role,
                 "context": "ai-review/" + role,
                 "creator_id": 25,
-                "report_repository": "owner/repo",
-                "report_repository_id": 17,
+                "report_repository": "owner/reports",
+                "report_repository_id": 18,
                 "report_prefix": "reports/",
             }
             for role in ("independent", "root")
@@ -138,7 +136,7 @@ def receipt(run_id="run"):
                 "status_id": index + 40,
                 "creator_id": 25,
                 "context": "ai-review/" + role,
-                "report_url": "https://github.com/owner/repo/blob/"
+                "report_url": "https://github.com/owner/reports/blob/"
                 + "e" * 40
                 + "/reports/"
                 + role
@@ -228,11 +226,6 @@ class Provider(MergeGitHub):
             return {"id": 25}
         if path == "/repos/owner/repo":
             return {"allow_squash_merge": True}
-        if "/git/ref/heads/vibearr%2Freviews" in path:
-            return {
-                "ref": "refs/heads/vibearr/reviews",
-                "object": {"type": "commit", "sha": "a" * 40},
-            }
         if "/rules/branches/" in path:
             return self.rules
         if "/rulesets/" in path:
@@ -253,6 +246,35 @@ class Provider(MergeGitHub):
 
 
 class MergeProfileTests(unittest.TestCase):
+    def test_reviews_are_disabled_by_default_in_merge_profile(self):
+        value = profile()
+        value.pop("reviews")
+        self.assertEqual(merge_profile(value)["reviews"], [])
+
+    def test_ci_only_profile_requires_no_review_statuses(self):
+        value = profile()
+        value["reviews"] = []
+        provider = Provider()
+        provider.rules[0]["parameters"]["required_status_checks"] = [
+            {"context": "Tests", "integration_id": 15368}
+        ]
+        self.assertEqual(
+            provider.policy(workspace(), value)["profile_digest"], digest(value)
+        )
+        self.assertEqual(
+            provider.reviews(
+                workspace(), 9, value, run_id="run", context_digest="d" * 64
+            ),
+            [],
+        )
+
+    def test_ci_only_receipt_does_not_fabricate_reviews(self):
+        value, observed = profile(), receipt()
+        value["reviews"] = []
+        observed["reviews"] = []
+        observed["policy"]["profile_digest"] = digest(value)
+        self.assertEqual(merge_receipt(observed, value, workspace())["reviews"], [])
+
     def test_empty_check_profile_is_rejected(self):
         value = profile()
         value["checks"] = []
