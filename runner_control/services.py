@@ -226,7 +226,9 @@ def record_evidence(
     if created and progress is not None:
         for field, value in progress.items():
             setattr(run, field, value)
-        if progress.get("stage") in {
+        if run.configuration_snapshot.get(
+            "execution_kind"
+        ) != "native" and progress.get("stage") in {
             Run.Stage.IMPLEMENTATION,
             Run.Stage.VALIDATION,
             Run.Stage.DELIVERY,

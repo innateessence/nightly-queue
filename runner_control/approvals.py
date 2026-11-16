@@ -17,6 +17,13 @@ from .services import (
 )
 
 
+def reject_native_approval(run):
+    if run.configuration_snapshot.get("execution_kind") == "native":
+        raise RunConflict(
+            "Native execution uses project policy; human approval actions are disabled."
+        )
+
+
 def parse_action(data):
     try:
         return ActionSpec.from_data(data)
@@ -37,6 +44,10 @@ def approval_data(approval):
         "id": str(approval.pk),
         "run_id": str(approval.run_id),
         "run_state": approval.run.state,
+        "execution_kind": approval.run.configuration_snapshot.get(
+            "execution_kind", "legacy"
+        ),
+        "cancellation_requested": bool(approval.run.cancellation_requested_at),
         "item_title": approval.run.item.title if approval.run.item else "",
         "operation_id": str(approval.operation_id),
         "action": approval.action,
@@ -70,6 +81,7 @@ def request_approval(*, runner, run_id, claim_token, operation_id, action):
     lock_controller(runner)
     run = owned_run(runner, run_id)
     verify_active(run, claim_token)
+    reject_native_approval(run)
     parsed = parse_action(action)
     verify_workspace(parsed, run)
     reject_selected_secrets(run, parsed.to_data())
@@ -110,6 +122,7 @@ def consume_approval(
     lock_controller(runner)
     run = owned_run(runner, run_id)
     verify_active(run, claim_token)
+    reject_native_approval(run)
     approval = owned_approval(runner, run_id, approval_id)
     if approval.binding_digest != binding_digest:
         raise RunConflict("Approval binding changed; request a new human decision.")
@@ -140,6 +153,7 @@ def decide_approval(approval_id, decision, binding_digest, note=""):
         raise RunNotFound("Approval not found.") from None
     run = approval.run
     verify_active(run, run.item.claim_token if run.item else None)
+    reject_native_approval(run)
     if decision not in {
         ActionApproval.Decision.APPROVED,
         ActionApproval.Decision.DENIED,

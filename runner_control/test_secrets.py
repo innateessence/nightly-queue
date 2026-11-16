@@ -95,7 +95,7 @@ class SelectedSecretTests(TestCase):
         )
         return self.run
 
-    def run_secret(self, purpose="research", claim_token=None):
+    def run_secret(self, purpose="implementation", claim_token=None):
         return self.post(
             {
                 "scope": "run",
@@ -140,7 +140,6 @@ class SelectedSecretTests(TestCase):
     def test_owned_active_run_resolves_all_purposes(self):
         self.claim()
         expected = {
-            "research": "backend-private-secret",
             "implementation": "backend-private-secret",
             "issue": "issue-private-secret",
             "repository": "repository-private-secret",
@@ -150,6 +149,10 @@ class SelectedSecretTests(TestCase):
                 response = self.run_secret(purpose)
                 self.assertEqual(response.status_code, 200, response.content)
                 self.assertEqual(response.json()["material"]["secret"], secret)
+
+    def test_native_run_cannot_retrieve_inactive_research_credentials(self):
+        self.claim()
+        self.assertEqual(self.run_secret("research").status_code, 400)
 
     def test_foreign_run_returns_404(self):
         self.claim()
@@ -182,7 +185,7 @@ class SelectedSecretTests(TestCase):
 
     def test_active_run_deselection_is_rejected(self):
         self.claim()
-        self.settings.research_credential = self.unselected
+        self.settings.implementation_credential = self.unselected
         self.settings.save()
         self.assertEqual(self.run_secret().status_code, 400)
 
@@ -209,7 +212,7 @@ class SelectedSecretTests(TestCase):
         self.assertNotIn("import-private-secret", response.content.decode())
 
     def test_wrong_provider_is_rejected(self):
-        self.settings.research_credential = self.issue
+        self.settings.implementation_credential = self.issue
         self.settings.save()
         RunnerPreflightGrant.objects.create(runner=self.runner, credential=self.issue)
         response = self.preflight(self.issue)
@@ -234,7 +237,7 @@ class SelectedSecretTests(TestCase):
         ProjectRunnerSettings.objects.create(
             project=self.project,
             overrides={
-                "research_credential_id": {
+                "implementation_credential_id": {
                     "mode": "replace",
                     "value": self.unselected.pk,
                 }
@@ -287,8 +290,8 @@ class SelectedSecretTests(TestCase):
         connection = self.credential(
             "Connection", "opencode", json.dumps(material), "connection"
         )
-        self.settings.research_backend = "opencode"
-        self.settings.research_credential = connection
+        self.settings.implementation_backend = "opencode"
+        self.settings.implementation_credential = connection
         self.settings.save()
         self.claim()
         response = self.client.post(
@@ -401,6 +404,8 @@ class SelectedSecretTests(TestCase):
         self.settings.research_credential = session
         self.settings.save()
         self.claim()
+        self.run.configuration_snapshot["execution_kind"] = "legacy"
+        self.run.save(update_fields=["configuration_snapshot"])
         response = self.client.post(
             reverse("runner_artifact", args=[self.run.pk]),
             json.dumps(
@@ -621,7 +626,7 @@ class SelectedSecretTests(TestCase):
 
     def test_backend_change_blocks_active_run_delivery(self):
         self.claim()
-        self.settings.research_backend = "claude"
-        self.settings.research_model = "claude-sonnet-5-5"
+        self.settings.implementation_backend = "claude"
+        self.settings.implementation_model = "claude-sonnet-5-5"
         self.settings.save()
         self.assertEqual(self.run_secret().status_code, 400)

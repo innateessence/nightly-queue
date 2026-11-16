@@ -24,8 +24,8 @@ class SelectedSecretConcurrencyTests(TransactionTestCase):
         self.credential.set_secret("original-private-secret")
         self.credential.save()
         saved = RunnerSettings.objects.get(pk=1)
-        saved.research_backend = "codex"
-        saved.research_credential = self.credential
+        saved.implementation_backend = "codex"
+        saved.implementation_credential = self.credential
         saved.save()
         RunnerPreflightGrant.objects.create(
             runner=self.runner, credential=self.credential
