@@ -165,3 +165,10 @@ Primary references reviewed:
 - [Ollama chat schema](https://docs.ollama.com/api/chat), [model list](https://docs.ollama.com/api/tags) and [API introduction](https://docs.ollama.com/api/introduction).
 - [Ollama local-only configuration](https://github.com/ollama/ollama/blob/v0.40.16/docs/faq.mdx).
 - [Pinned Ollama release](https://github.com/ollama/ollama/releases/tag/v0.40.16).
+
+Final validation: PostgreSQL suite 970 passed; the later gate/recovery regression
+suites passed 99 checks. The exact final hardened runner image passed 467 portable
+checks with networking disabled, read-only root and dropped capabilities; the host
+boundary suite passed 111. Black, Ruff, mypy (199 files), migration drift, Django
+system checks and 33 standalone CLI tests passed. The image namespace probe reports
+unsupported and leaves boundary qualification blocked; no live acceptance is claimed.
