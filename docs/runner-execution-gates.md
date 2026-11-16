@@ -70,7 +70,9 @@ pause, task limits, reserve, model, or window ordering does not reset its count.
 Reports contain the current interval, count, next opening/closing boundary, and
 next recheck deadline. The deadline is the earliest poll, schedule boundary,
 usage freshness expiry, or reported provider reset. The controller honors that
-deadline even with a long configured poll interval.
+deadline even with a long configured poll interval. Provider reads that take
+longer than the checkpoint deadline block with `checkpoint_expired`; a slow
+response cannot return permission after a closing or freshness boundary.
 
 ## Allowance adapter contract
 

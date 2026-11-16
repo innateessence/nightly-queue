@@ -340,6 +340,18 @@ class GateTests(TestCase):
             decision.next_check_at, (self.now + timedelta(seconds=1)).isoformat()
         )
 
+    def test_slow_provider_cannot_return_an_expired_permission(self):
+        test = self
+
+        class SlowUsage:
+            def read_usage(self, account, now):
+                test.now += timedelta(minutes=5)
+                return UsageReading(True, (test.window(observed=now),))
+
+        self.config["global"]["reserve_enabled"] = True
+        self.gates.adapters[("fake", 1)] = SlowUsage()
+        self.assertIn("checkpoint_expired", self.evaluate().reasons)
+
     def test_usage_reset_shortens_next_check(self):
         self.usage(self.window(reset=self.now + timedelta(seconds=2)))
         self.assertEqual(

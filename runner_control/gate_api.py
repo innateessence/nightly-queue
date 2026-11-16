@@ -39,6 +39,7 @@ REASONS = {
     "resume_owned_run_first",
     "ownership_unknown",
     "claim_accounting_unknown",
+    "checkpoint_expired",
     "reconciliation_required",
     "capacity",
     "window_limit",
@@ -96,8 +97,8 @@ def percent(value, nullable=False):
         return
     if (
         type(value) not in (int, float)
-        or not math.isfinite(value)
         or not 0 <= value <= 100
+        or not math.isfinite(value)
     ):
         invalid()
 

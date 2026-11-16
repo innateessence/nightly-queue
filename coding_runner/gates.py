@@ -167,7 +167,7 @@ class GateEvaluator:
             raise ValueError("Usage freshness must be positive.")
         self.journal = journal
         self.clock = clock
-        self.adapters = adapters or {}
+        self.adapters = {} if adapters is None else adapters
         self.max_usage_age_seconds = max_usage_age_seconds
 
     def evaluate(
@@ -243,6 +243,8 @@ class GateEvaluator:
                     next_check = min(
                         next_check, datetime.fromisoformat(window["reset_at"])
                     )
+        if utc(self.clock()) >= next_check:
+            reasons.append("checkpoint_expired")
         decision = GateDecision(
             not reasons,
             tuple(dict.fromkeys(reasons)),
