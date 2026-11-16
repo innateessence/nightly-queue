@@ -1,11 +1,12 @@
 import copy
+import io
 import json
 import os
 import sys
 import tempfile
 import threading
 import unittest
-from contextlib import nullcontext
+from contextlib import nullcontext, redirect_stdout
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,6 +37,7 @@ from .context import digest, manual_context
 from .gates import GateEvaluator
 from .journal import Journal
 from .research import ResearchStage, read_checkout
+from .model_worker import main as worker_main
 from .test_gates import CONFIG, NOW
 from .workspaces import SourceStore, content_digest
 
@@ -121,6 +123,38 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn(
             TOKEN, json.dumps(self.transport.exchange.call_args.args[0]["request"])
         )
+
+    def test_json_escaped_secret_is_removed_before_sending_source(self):
+        token = 'private-"quoted\\unicode-é-token'
+        material = grant(ACCOUNT)
+        material["material"]["secret"] = token
+        self.backend.credentials = lambda account: material
+        self.request = BackendRequest(ACCOUNT, "model", token, {token: token})
+        self.research()
+        payload = self.transport.exchange.call_args.args[0]["request"]
+        self.assertNotIn(token, payload["instructions"])
+        self.assertEqual(json.loads(payload["input"]), {"[redacted]": "[redacted]"})
+
+    def test_secret_in_model_selection_is_not_sent(self):
+        self.request = BackendRequest(ACCOUNT, TOKEN, "", {})
+        with self.assertRaises(BackendError):
+            self.research()
+        self.transport.exchange.assert_not_called()
+
+    def test_provider_cannot_return_selected_secret_as_proposal_data(self):
+        self.transport.exchange.return_value = response("read", {"path": TOKEN})
+        with self.assertRaises(BackendOutputError) as failure:
+            self.research()
+        self.assertNotIn(TOKEN, str(failure.exception))
+
+    def test_provider_cannot_return_json_escaped_secret_as_proposal_data(self):
+        token = 'private-"quoted\\unicode-é-token'
+        material = grant(ACCOUNT)
+        material["material"]["secret"] = token
+        self.backend.credentials = lambda account: material
+        self.transport.exchange.return_value = response("read", {"path": token})
+        with self.assertRaises(BackendOutputError):
+            self.research()
 
     def test_authentication_failure_is_redacted(self):
         self.transport.exchange.return_value = {"error": "authentication"}
@@ -213,6 +247,7 @@ class BackendTests(unittest.TestCase):
             {"response": {}},
             {"response": {"status": "incomplete"}},
             response("read", {"path": "../escape"}),
+            response([], {}),
         ]
         for value in values:
             with self.subTest(value=value), self.assertRaises(BackendOutputError):
@@ -271,6 +306,32 @@ class TransportTests(unittest.TestCase):
             "import json,sys; value=json.load(sys.stdin); print(json.dumps({'received':bool(value['token'])}))"
         )
         self.assertEqual(value, {"received": True})
+
+    def test_closed_gate_prevents_process_start(self):
+        with patch("coding_runner.codex_backend.subprocess.Popen") as start:
+            with self.assertRaises(BackendInterrupted):
+                self.exchange("raise SystemExit(0)", checkpoint=lambda: False)
+        start.assert_not_called()
+
+    def test_shutdown_during_credential_lookup_prevents_process_start(self):
+        stop = threading.Event()
+
+        def credentials(account):
+            stop.set()
+            return grant(account)
+
+        backend = CodexBackend(
+            credentials, transport=FakeProcess("raise SystemExit(0)")
+        )
+        with patch("coding_runner.codex_backend.subprocess.Popen") as start:
+            with self.assertRaises(BackendInterrupted):
+                backend.research(
+                    BackendRequest(ACCOUNT, "model", "", {}),
+                    progress=Mock(),
+                    checkpoint=lambda: True,
+                    stop=stop,
+                )
+        start.assert_not_called()
 
     def test_full_backend_with_real_fake_process_validates_proposal(self):
         script = (
@@ -357,6 +418,62 @@ class TransportTests(unittest.TestCase):
         finally:
             timer.join()
         self.assertIsNone(transport.process)
+
+
+class WorkerTests(unittest.TestCase):
+    def exchange(self, *, status=200, body=None):
+        payload = {
+            "token": TOKEN,
+            "timeout": 3,
+            "request": {"model": "model", "tools": [], "tool_choice": "none"},
+        }
+        incoming = SimpleNamespace(buffer=io.BytesIO(json.dumps(payload).encode()))
+        outgoing = io.StringIO()
+        connection = Mock()
+        remote = connection.getresponse.return_value
+        remote.status = status
+        remote.read.return_value = (
+            body if body is not None else b'{"status":"completed"}'
+        )
+        with (
+            patch("coding_runner.model_worker.sys.stdin", incoming),
+            patch(
+                "coding_runner.model_worker.http.client.HTTPSConnection",
+                return_value=connection,
+            ) as factory,
+            redirect_stdout(outgoing),
+        ):
+            worker_main()
+        self.assertEqual(factory.call_args.args, ("api.openai.com",))
+        self.assertEqual(factory.call_args.kwargs, {"timeout": 3})
+        self.assertEqual(connection.request.call_count, 1)
+        return json.loads(outgoing.getvalue()), connection
+
+    def test_worker_uses_fixed_endpoint_and_authorization_header(self):
+        value, connection = self.exchange()
+        method, path, body, headers = connection.request.call_args.args
+        self.assertEqual((method, path), ("POST", "/v1/responses"))
+        self.assertEqual(headers["Authorization"], "Bearer " + TOKEN)
+        self.assertNotIn(TOKEN, body)
+        self.assertEqual(value, {"response": {"status": "completed"}})
+
+    def test_worker_withholds_authentication_body(self):
+        value, connection = self.exchange(status=401, body=TOKEN.encode())
+        self.assertEqual(value, {"error": "authentication"})
+        connection.getresponse.return_value.read.assert_not_called()
+
+    def test_worker_does_not_follow_redirects_or_retry(self):
+        value, connection = self.exchange(status=307, body=TOKEN.encode())
+        self.assertEqual(value, {"error": "model"})
+        connection.getresponse.return_value.read.assert_not_called()
+
+    def test_worker_withholds_malformed_json_body(self):
+        value, connection = self.exchange(body=TOKEN.encode())
+        self.assertEqual(value, {"error": "transport"})
+
+    def test_worker_rejects_oversized_response(self):
+        value, connection = self.exchange(body=b"x" * (4 * 1024 * 1024 + 1))
+        self.assertEqual(value, {"error": "transport"})
 
 
 class RegistryTests(unittest.TestCase):
@@ -607,6 +724,24 @@ class ResearchTests(unittest.TestCase):
         del plan["acceptance_criteria"]
         self.backend.research.return_value = BackendEvent("plan", {"document": plan})
         with self.assertRaises(ValueError):
+            self.step()
+        self.store.save_plan.assert_not_called()
+
+    def test_plan_cannot_bind_validation_to_another_workspace(self):
+        plan = self.plan()
+        plan["validation_actions"][0]["workspace_id"] = str(uuid4())
+        self.backend.research.return_value = BackendEvent("plan", {"document": plan})
+        with self.assertRaisesRegex(BackendOutputError, "current inspected workspace"):
+            self.step()
+        self.store.save_plan.assert_not_called()
+
+    def test_plan_cannot_bind_setup_to_old_workspace_content(self):
+        plan = self.plan()
+        action = copy.deepcopy(plan["validation_actions"][0])
+        action["content_digest"] = "0" * 64
+        plan["setup_actions"] = [action]
+        self.backend.research.return_value = BackendEvent("plan", {"document": plan})
+        with self.assertRaisesRegex(BackendOutputError, "current inspected workspace"):
             self.step()
         self.store.save_plan.assert_not_called()
 

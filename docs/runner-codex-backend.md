@@ -95,6 +95,10 @@ sends SIGTERM and kills the process group after a bounded grace period. Remote
 work or billing can remain uncertain after interruption or timeout. No network
 request is automatically retried. Provider errors, refusal text, stderr, and
 authentication bodies are withheld from progress and exceptions.
+The transport rechecks controls before spawning its worker. Selected token
+occurrences are removed from serialized source data as well as instructions;
+model selections and returned proposals containing that token are rejected
+before they can reach backend progress or the research journal.
 
 ## Research supervisor
 
@@ -125,6 +129,8 @@ changes or publish from research. Output becomes a supervisor-registered source
 for the next turn. No backend-supplied source bytes are accepted as evidence.
 
 Plans require actual inspected repository citations and fresh source hashes.
+Every setup and validation action must bind the current workspace identity and
+inspected content digest.
 The strict branch 07 validator runs before `ContextPlanStore.save_plan`; a
 free-form success message cannot substitute for a plan. Saving a plan performs
 no implementation or publication. Later implementation must obtain the fresh
@@ -150,8 +156,11 @@ Tests cover real fake-process transport, bounded output, structured plan saves,
 malformed output, refusal/native tool rejection, authentication failure,
 separate account inventory, unsupported quota, model errors, timeout, periodic
 pause, shutdown, explicit interruption, immutable provenance, restart safety,
-approval waits, and research stage restrictions. Branch 06 separately exercises
-the actual read-only bubblewrap write denial on the host.
+approval waits, and research stage restrictions. Fake HTTP checks exercise the
+worker's fixed endpoint, authorization header, response limits and refusal to
+follow redirects or retry. The host boundary suite separately exercises actual
+read-only bubblewrap write denial and isolation of an active model worker's
+credential stdin from an approved agent command.
 
 External acceptance remains pending. No paid model request, live authentication
 check, designated test-repository run, implementation, or PR delivery was

@@ -405,6 +405,15 @@ class ResearchStage:
                 raise BackendOutputError(
                     "Plan resolved base branch does not match the checkout."
                 )
+            actions = document["setup_actions"] + document["validation_actions"]
+            for plan_action in actions:
+                if (
+                    plan_action["workspace_id"] != workspace.workspace_id
+                    or plan_action["content_digest"] != session["workspace_digest"]
+                ):
+                    raise BackendOutputError(
+                        "Plan actions must bind the current inspected workspace."
+                    )
             inspected = {
                 (entry["reference"], entry["digest"])
                 for entry in session["observations"]
