@@ -1,6 +1,7 @@
 from pathlib import Path
 import importlib.util
 import tempfile
+import shutil
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -20,7 +21,8 @@ if SDK_AVAILABLE:
 
 
 @unittest.skipUnless(
-    SDK_AVAILABLE, "Install the native-runtime extra for native workspace tests"
+    SDK_AVAILABLE and shutil.which("git"),
+    "Native workspace tests require the runtime extra and Git",
 )
 class NativeWorkspaceTests(unittest.TestCase):
     def setUp(self):

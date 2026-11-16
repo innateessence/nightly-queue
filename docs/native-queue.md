@@ -94,6 +94,14 @@ if the queue API cannot accept another write. A graceful supervisor restart
 preserves its durable invocation. A transient queue outage pauses work and
 prevents new actions until current authorization can be checked again.
 
+Transient GitHub GET and Git remote-ref reads use at most three attempts with
+backoff. Their attempt counts and next retry times survive supervisor restarts;
+GitHub Retry-After and rate-reset headers extend the wait. Normal controller
+cycles keep cancellation, pause, ownership and original deadline checks active
+during that wait. Exhaustion fails ordinary work, while an unresolved publication
+keeps its claim and reports reconciliation required. Push and PR mutations retain
+their original identities and are never repeated as transport read retries.
+
 Completion acknowledgement permits existing server-directed retention. Native
 source and logs expire independently, including executor artifacts, dependency
 builds and run-owned derived images. Terminal identity/digest tombstones prevent

@@ -5,23 +5,27 @@ from datetime import datetime, timezone
 import hashlib
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from urllib.error import URLError
 from uuid import uuid4
 
 from vibearr_runner.context import manual_context
 from vibearr_runner.journal import Journal
 from vibearr_runner.native_codex import codex_profile
 from vibearr_runner.native_lifecycle import NativeLifecycle
+from vibearr_runner.native_github import NativeGitHub
 from vibearr_runner.policy import ExecutionPolicy
 from vibearr_runner.recovery import ReconciliationRequired
 from vibearr_runner.workspaces import Workspace, git
 
 SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+REPOSITORY_READ = NativeGitHub.repository
 if SDK_AVAILABLE:
     from vibearr_executor import PROTOCOL_VERSION, QUALIFICATION_VERSION
     from vibearr_executor.artifacts import pack, unpack, result_manifest
@@ -228,7 +232,8 @@ class Queue:
 
 
 @unittest.skipUnless(
-    SDK_AVAILABLE, "Install the native-runtime extra for native lifecycle tests"
+    SDK_AVAILABLE and shutil.which("git"),
+    "Native lifecycle tests require the runtime extra and Git",
 )
 class NativeLifecycleTests(unittest.TestCase):
     def setUp(self):
@@ -343,6 +348,79 @@ class NativeLifecycleTests(unittest.TestCase):
         return NativeLifecycle(
             self.host, executor=self.executor, validation_profile=self.profile
         )
+
+    def transient_repository_read(self):
+        with patch.object(NativeGitHub, "repository", REPOSITORY_READ):
+            with patch(
+                "urllib.request.OpenerDirector.open",
+                side_effect=URLError("Temporary DNS failure"),
+            ):
+                return self.engine().step(self.state)
+
+    def test_transient_repository_read_preserves_run_before_dispatch(self):
+        self.assertEqual(self.transient_repository_read(), "wait")
+        self.assertEqual(self.queue.finishes, [])
+        self.assertEqual(self.executor.started, [])
+        self.state = self.journal.load()
+        self.assertEqual(self.transient_repository_read(), "wait")
+        record = next(iter(self.state["native"]["transport_reads"].values()))
+        self.assertEqual(record["attempts"], 1)
+
+    def test_transient_repository_read_preserves_completed_agent_and_validation(self):
+        self.advance("delivery")
+        started = list(self.executor.started)
+        self.assertEqual(self.transient_repository_read(), "wait")
+        self.assertEqual(self.queue.finishes, [])
+        self.assertEqual(self.executor.started, started)
+        self.assertEqual(len(started), 10)
+
+    def test_cancel_during_read_backoff_finishes_without_agent_dispatch(self):
+        self.transient_repository_read()
+        self.state["run"]["run"]["cancellation_requested_at"] = datetime.now(
+            timezone.utc
+        ).isoformat()
+        self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.assertEqual(self.queue.finishes[0]["outcome"], "canceled")
+        self.assertEqual(self.executor.started, [])
+
+    def test_exhausted_repository_read_finishes_without_replacement_work(self):
+        for _ in range(2):
+            self.assertEqual(self.transient_repository_read(), "wait")
+            for record in self.state["native"]["transport_reads"].values():
+                record["retry_at"] = 0
+        self.assertEqual(self.transient_repository_read(), "reporting_pending")
+        self.assertEqual(len(self.queue.finishes), 1)
+        self.assertIn("three bounded attempts", self.queue.finishes[0]["error_summary"])
+        self.assertEqual(self.executor.started, [])
+
+    def test_exhausted_failure_reconciliation_preserves_claim_fence(self):
+        from vibearr_runner.native_reads import NativeReadExhausted
+
+        self.transient_repository_read()
+        self.state["native"]["failure"] = "Canceled by operator."
+        self.state["native"]["outcome"] = "canceled"
+        with patch(
+            "vibearr_runner.native_delivery.NativeDelivery.reconcile_publications",
+            side_effect=NativeReadExhausted("Read exhausted"),
+        ):
+            with self.assertRaises(ReconciliationRequired):
+                self.engine().step(self.state)
+        self.assertEqual(self.queue.finishes, [])
+
+    def test_deadline_during_read_backoff_finishes_without_agent_dispatch(self):
+        self.transient_repository_read()
+        self.state["native"]["deadline"] = "2000-01-01T00:00:00+00:00"
+        self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.assertEqual(self.queue.finishes[0]["outcome"], "failed")
+        self.assertEqual(self.executor.started, [])
+
+    def test_pause_during_read_backoff_prevents_another_attempt(self):
+        self.transient_repository_read()
+        self.host.checkpoint = lambda: False
+        self.assertEqual(self.engine().step(self.state), "wait")
+        self.assertTrue(self.state["native"]["paused"])
+        record = next(iter(self.state["native"]["transport_reads"].values()))
+        self.assertEqual(record["attempts"], 1)
 
     def advance(self, phase):
         for _ in range(50):
