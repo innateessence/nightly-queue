@@ -2,6 +2,7 @@ import re
 
 from .backend_transports import TRANSPORTS
 from .backends import BackendError, BackendOutputError
+from .opencode_connection import valid_receipt_text
 from .proposal_backend import ProcessTransport, require_secret_free, validate_model_data
 from .release_evidence import valid_response_id
 
@@ -75,6 +76,9 @@ class ModelTraceTransport(ProcessTransport):
                 receipt.pop("response_id")
                 if "ollama_version" in observed:
                     receipt["ollama_version"] = observed["ollama_version"]
+        version = receipt.get("ollama_version")
+        if version is not None and not valid_receipt_text(version, 100):
+            raise BackendOutputError("Model evidence version is invalid.")
         validate_model_data(receipt)
         if token:
             require_secret_free([event.data, receipt], token)

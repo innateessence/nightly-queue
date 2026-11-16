@@ -209,6 +209,33 @@ class OpenCodeReleaseReceiptTests(TestCase):
         with self.assertRaises(RunConflict):
             self.verify({**self.receipt, "response_id": "fabricated-provider-id"})
 
+    def test_local_version_rejects_non_database_text(self):
+        from runner_control.services import RunConflict
+
+        for version in ("0.1\x00", "invalid-\ud800"):
+            with self.subTest(version=repr(version)), self.assertRaises(RunConflict):
+                self.verify({**self.receipt, "ollama_version": version})
+
+    def test_hosted_identity_rejects_non_database_text(self):
+        from runner_control.services import RunConflict
+
+        self.credential.set_secret('{"provider":"openai","api_key":"hosted-secret"}')
+        self.credential.save()
+        self.account["secret_version"] = self.credential.secret_version
+        for response_id in ("chatcmpl_\x00", "invalid-\ud800"):
+            receipt = {
+                **self.account,
+                "inference_provider": "openai",
+                "endpoint": "https://api.openai.com/v1",
+                "receipt_kind": "provider_response_id",
+                "response_id": response_id,
+            }
+            with (
+                self.subTest(response_id=repr(response_id)),
+                self.assertRaises(RunConflict),
+            ):
+                self.verify(receipt)
+
     def test_hosted_connection_requires_actual_provider_identity(self):
         from runner_control.services import RunConflict
 

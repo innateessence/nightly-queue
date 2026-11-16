@@ -103,7 +103,7 @@ class OpenCodeContractTests(AdapterContract, unittest.TestCase):
         self.backend.credentials = lambda account: selected
         return token
 
-    def test_json_escaped_secret_is_redacted_from_document(self):
+    def test_json_escaped_secret_is_redacted_from_prompt_values_and_keys(self):
         token = self.use_secret('secret-with-"quote\\and-unicode-☃')
         self.request = replace(
             self.request,
@@ -118,14 +118,14 @@ class OpenCodeContractTests(AdapterContract, unittest.TestCase):
             document, {"source": "[redacted]", "[redacted]": ["prefix-[redacted]"]}
         )
 
-    def test_model_containing_secret_blocks_transport(self):
+    def test_secret_in_model_is_never_sent(self):
         token = self.use_secret("private-model-key")
         self.request = replace(self.request, model="model-" + token)
         with self.assertRaisesRegex(BackendError, "credential material"):
             self.run_stage()
         self.transport.exchange.assert_not_called()
 
-    def test_echoed_secret_is_rejected_before_proposal_progress(self):
+    def test_secret_in_proposal_is_never_returned(self):
         token = self.use_secret('secret-with-"quote\\and-unicode-☃')
         self.transport.exchange.return_value = response(
             "plan", {"document": {"note": token}}
@@ -424,6 +424,36 @@ class WorkerHTTPTests(unittest.TestCase):
         with self.assertRaisesRegex(BackendOutputError, "credential material"):
             self.run_model()
         self.assertIsNone(self.backend.transport.process)
+
+    def test_real_worker_invalid_version_cannot_enter_release_evidence(self):
+        from .qualification_trace import ModelTraceTransport
+
+        self.server.value["ollama_version"] = "0.1\x00"
+        connection = validate_connection(
+            json.loads(grant(ACCOUNT, endpoint=self.endpoint)["material"]["secret"])
+        )
+        state = {}
+        journal = Mock()
+        transport = ModelTraceTransport(journal, state, ACCOUNT, 1)
+        with self.assertRaises(BackendOutputError):
+            transport.exchange(
+                {
+                    "connection": connection,
+                    "timeout": 3,
+                    "request": {
+                        "model": self.request.model,
+                        "messages": [],
+                        "tools": [],
+                    },
+                },
+                timeout=3,
+                checkpoint=lambda: True,
+                stop=threading.Event(),
+            )
+        self.assertEqual(len(self.server.calls), 1)
+        self.assertNotIn("release_evidence", state)
+        journal.save.assert_not_called()
+        self.assertIsNone(transport.process)
 
     def test_redirect_does_not_forward_credentials(self):
         self.server.status = 307
@@ -936,6 +966,58 @@ class OpenCodeTraceTests(unittest.TestCase):
                 {"connection": selected, "request": {"model": "qwen3-coder:30b"}}
             )
         self.assertNotIn("release_evidence", state)
+
+    def test_invalid_ollama_version_cannot_enter_evidence(self):
+        from .qualification_trace import ModelTraceTransport
+
+        selected = validate_connection(json.loads(grant(ACCOUNT)["material"]["secret"]))
+        for version in ("", "0.1\x00", 3, "x" * 101):
+            value = {
+                **response(),
+                "receipt": {"response_digest": "a" * 64, "ollama_version": version},
+            }
+            state = {}
+            journal = Mock()
+            transport = ModelTraceTransport(journal, state, ACCOUNT, 1)
+            with (
+                self.subTest(version=version),
+                patch.object(ProcessTransport, "exchange", return_value=value),
+                self.assertRaises(BackendOutputError),
+            ):
+                transport.exchange(
+                    {"connection": selected, "request": {"model": "qwen3-coder:30b"}}
+                )
+            self.assertNotIn("release_evidence", state)
+            journal.save.assert_not_called()
+
+    def test_non_utf8_receipt_cannot_enter_evidence(self):
+        from .qualification_trace import ModelTraceTransport
+
+        for provider, field in (("openai", "id"), ("ollama", "ollama_version")):
+            selected = validate_connection(
+                json.loads(grant(ACCOUNT, provider)["material"]["secret"])
+            )
+            value = response(provider=provider)
+            if field == "id":
+                value["response"][field] = "invalid-\ud800"
+            else:
+                value["receipt"] = {
+                    "response_digest": "a" * 64,
+                    field: "invalid-\ud800",
+                }
+            state = {}
+            journal = Mock()
+            transport = ModelTraceTransport(journal, state, ACCOUNT, 1)
+            with (
+                self.subTest(provider=provider),
+                patch.object(ProcessTransport, "exchange", return_value=value),
+                self.assertRaises(BackendOutputError),
+            ):
+                transport.exchange(
+                    {"connection": selected, "request": {"model": "qwen3-coder:30b"}}
+                )
+            self.assertNotIn("release_evidence", state)
+            journal.save.assert_not_called()
 
     def test_wrong_reported_model_cannot_supply_local_receipt(self):
         from .qualification_trace import ModelTraceTransport

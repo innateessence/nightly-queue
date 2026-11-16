@@ -23,6 +23,16 @@ def valid_model(value: Any) -> bool:
     )
 
 
+def valid_receipt_text(value: Any, limit: int) -> bool:
+    if not isinstance(value, str) or not 0 < len(value) <= limit or "\x00" in value:
+        return False
+    try:
+        value.encode()
+    except UnicodeError:
+        return False
+    return True
+
+
 def validate_connection(value: Any) -> dict[str, str]:
     if not isinstance(value, dict) or set(value) - {"provider", "api_key", "base_url"}:
         raise ValueError("Unsupported connection fields.")

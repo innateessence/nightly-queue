@@ -443,7 +443,10 @@ def verify_model_responses(responses, required_accounts):
 
 def verify_opencode_receipt(row, required_accounts):
     from credentials.models import Credential
-    from coding_runner.opencode_connection import validate_connection
+    from coding_runner.opencode_connection import (
+        validate_connection,
+        valid_receipt_text,
+    )
 
     keys = ("backend", "credential_id", "model", "secret_version", "transport")
     if not any(
@@ -486,9 +489,7 @@ def verify_opencode_receipt(row, required_accounts):
                 "Local Ollama requires an explicitly typed raw HTTP response digest."
             )
         version = row.get("ollama_version")
-        if version is not None and (
-            not isinstance(version, str) or not version or len(version) > 100
-        ):
+        if version is not None and not valid_receipt_text(version, 100):
             raise RunConflict("Invalid reported Ollama version.")
         return
     response_id = row.get("response_id")
