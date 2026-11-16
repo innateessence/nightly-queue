@@ -1,11 +1,11 @@
-# Autonomous AI queue pivot
+# vibearr development plan
 
 Date: 2026-11-15. Baseline: `5905c0f` on `main`.
 Planning branch: `plan/autonomous-ai-queue-pivot`.
 
 ## Outcome and priority
 
-Make nightly-queue an *arr style appliance for software work: configure repositories
+Build **vibearr**, an *arr style app for vibe coding: configure repositories
 and coding agents once, add work, and let background processing deliver tested
 changes. Its first customer is `innateessence/nightly-queue`. This repository's
 GitHub issues become its development backlog, with one feature per issue, branch,
@@ -83,6 +83,7 @@ The numbered IDs are planning identifiers, not existing GitHub issue numbers.
 
 | ID | Priority | Feature branch | Depends on | Result |
 | --- | --- | --- | --- | --- |
+| 00 | P0 | `feat/vibearr-rename` | — | Consistent product, CLI, package, and deployment naming with upgrade compatibility |
 | 01 | P0 | `feat/autonomous-execution-policy` | — | Remove human approval requirements from configured autonomous execution |
 | 02 | P0 | `feat/isolated-agent-runtime` | 01 | A usable, tested execution boundary for native agent processes |
 | 03 | P0 | `feat/native-codex-runner` | 02 | Real Codex CLI sessions with noninteractive operation |
@@ -98,9 +99,40 @@ The numbered IDs are planning identifiers, not existing GitHub issue numbers.
 | 13 | P2 | `feat/parallel-project-workers` | 07 | Bounded concurrency across repositories |
 | 14 | P2 | `refactor/retire-legacy-approval-stack` | 07, 08, 09 | Remove obsolete runtime and approval plumbing after migration |
 
+The rename in 00 can land independently and does not delay execution work.
 Branches 05 and 02–04 can be developed independently after 01. Features 08–11
 need not delay the first operational Codex loop or automatic merging. Dependencies
 describe merge order, not a request to use multiple development agents now.
+
+### 00 — Rename the application to vibearr
+
+- Use **vibearr** throughout the web UI, page titles, navigation, app metadata,
+  documentation, screenshots, examples, and release artifacts. The name reflects
+  an *arr style application for vibe coding. README branding starts on this
+  planning branch; functional names change in this feature.
+- Rename the CLI command and distribution, Django project/configuration modules,
+  runner package/distribution where applicable, container services and images,
+  default database names, environment variables, and application data paths.
+  Define a single naming map in the PR so install, development, CI, and deployment
+  instructions agree. Keep migration import paths working and persisted labels
+  stable where changing them would strand existing data.
+- Provide a documented transition from `nq`, `NQ_*`, and existing deployment names:
+  retain CLI/configuration aliases for a defined migration period, give new names
+  precedence, and report conflicting configuration. Keep existing tokens and the
+  encryption key valid; renaming must not reset authentication or credentials.
+- Preserve PostgreSQL and runner volumes explicitly during the Compose rename.
+  Changing a service, Compose project, or default database name must not create
+  an apparently empty installation. Migrate protected runner paths with ownership
+  and active-run reconciliation intact; never start a second controller against
+  copied state. Update backup, restore, and rollback instructions.
+- Track a GitHub repository rename separately from local naming. Update canonical
+  URLs, badges, issue templates, package links, and bootstrap defaults when that
+  rename is authorized. Existing issue, PR, repository, and delivery identities
+  must reconcile across redirects without importing duplicate work.
+- Acceptance: a fresh vibearr installation and an upgrade with existing queue
+  items, encrypted credentials, run history, and runner state both work. New and
+  compatibility CLI/configuration names are tested. CI, package installation,
+  Compose wiring, backup/restore, and all internal documentation links pass.
 
 ### 01 — Autonomous execution policy
 
@@ -347,6 +379,8 @@ portable test success or a model-generated success summary.
 
 ## Milestones
 
+- **Identity, branch 00:** the application ships as vibearr with a tested migration
+  from the previous command, configuration, package, and deployment names.
 - **M1, branches 01–04:** one real Codex task becomes a tested PR without any human
   command or plan approval. This is the first execution milestone.
 - **M2, branches 05–06:** new owner issues in this repository are picked up in the
