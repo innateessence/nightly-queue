@@ -516,6 +516,43 @@ class NativeLifecycleTests(unittest.TestCase):
         self.assertEqual(self.state["native"]["phase"], "agent")
         self.assertEqual(self.executor.started, [])
 
+    def test_cancel_after_pause_inside_push_preflight_finishes_without_publication(
+        self,
+    ):
+        from .test_native_delivery import GitHub
+        from vibearr_runner import processes
+        from vibearr_runner.delivery import SupervisorGit
+        from vibearr_runner.native_delivery import NativeDelivery
+
+        self.advance("delivery")
+        transport = SupervisorGit(token="fixture-token")
+        paused = []
+        original = processes.run
+
+        def run(arguments, **kwargs):
+            if "push" in arguments:
+                paused.append(True)
+            return original(arguments, **kwargs)
+
+        self.host.checkpoint = lambda: not paused
+        with patch.object(
+            NativeDelivery, "clients", return_value=(GitHub(), transport)
+        ):
+            with patch.object(transport, "observed_remote", return_value=""):
+                with patch.object(processes, "run", side_effect=run):
+                    self.assertEqual(self.engine().step(self.state), "wait")
+                self.state = self.journal.load()
+                self.assertFalse(
+                    self.state["native"]["delivery"].get("push_dispatched")
+                )
+                self.state["run"]["run"]["cancellation_requested_at"] = datetime.now(
+                    timezone.utc
+                ).isoformat()
+                self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.assertEqual(len(paused), 1)
+        self.assertEqual(len(self.queue.finishes), 1)
+        self.assertEqual(self.queue.finishes[0]["outcome"], "canceled")
+
     def advance(self, phase):
         for _ in range(50):
             if (

@@ -103,6 +103,9 @@ keeps its claim and reports reconciliation required. Push and PR mutations retai
 their original identities and are never repeated as transport read retries.
 Native push dispatch is recorded immediately before the push command; remote-ref
 reads run separately before dispatch and after the command for reconciliation.
+The tracked child waits behind its launch gate while the supervisor rechecks
+controls and saves dispatch. A rejected prelaunch check reaps that blocked child
+without recording a push; uncertainty after release keeps the publication fence.
 Clone recovery records the exact owned destination before launch. A partial
 checkout is removed only after tracked process termination is confirmed; a
 durably completed clone resumes local setup without another clone. Unregistered

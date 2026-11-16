@@ -272,22 +272,36 @@ class SupervisorGit:
         self.read_only = read_only
         self.read = read
 
-    def remote(self, workspace: Workspace, arguments: list[str]) -> str:
+    def remote(
+        self, workspace: Workspace, arguments: list[str], *, on_launch=None
+    ) -> str:
+        launch = {} if on_launch is None else {"on_launch": on_launch}
         return self.command(
-            arguments, workspace.repository_url, workspace.directory, workspace.checkout
+            arguments,
+            workspace.repository_url,
+            workspace.directory,
+            workspace.checkout,
+            **launch,
         )
 
     def command(
-        self, arguments: list[str], repository_url: str, directory, cwd=None
+        self,
+        arguments: list[str],
+        repository_url: str,
+        directory,
+        cwd=None,
+        *,
+        on_launch=None,
     ) -> str:
         if self.read and arguments and arguments[0] in {"ls-remote", "clone", "fetch"}:
             key = "git:" + json.dumps([repository_url, arguments])
             return self.read(
                 key, lambda: self._command(arguments, repository_url, directory, cwd)
             )
-        return self._command(arguments, repository_url, directory, cwd)
+        launch = {} if on_launch is None else {"on_launch": on_launch}
+        return self._command(arguments, repository_url, directory, cwd, **launch)
 
-    def _command(self, arguments, repository_url, directory, cwd):
+    def _command(self, arguments, repository_url, directory, cwd, *, on_launch=None):
         if self.read_only and (
             not arguments or arguments[0] not in {"ls-remote", "clone", "fetch"}
         ):
@@ -334,12 +348,14 @@ class SupervisorGit:
                 "-c",
                 "core.sshCommand=/usr/bin/false",
             ]
+            launch = {} if on_launch is None else {"on_launch": on_launch}
             result = processes.run(
                 command + arguments,
                 cwd=cwd,
                 env=clean_environment(),
                 capture_output=True,
                 timeout=120,
+                **launch,
             )
             if result.returncode or len(result.stdout) > 1048576:
                 diagnostics = result.stderr.lower()
@@ -412,8 +428,9 @@ class SupervisorGit:
         if self.observed_remote(workspace) != commit:
             raise DeliveryUnknown("Pushed branch could not be verified.")
 
-    def push_once(self, workspace: Workspace, commit: str):
+    def push_once(self, workspace: Workspace, commit: str, *, on_launch=None):
         # Push itself remains a non-forced fast-forward check, including races.
+        launch = {} if on_launch is None else {"on_launch": on_launch}
         self.remote(
             workspace,
             [
@@ -423,6 +440,7 @@ class SupervisorGit:
                 workspace.repository_url,
                 commit + ":refs/heads/" + workspace.branch_name,
             ],
+            **launch,
         )
 
 

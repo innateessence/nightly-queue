@@ -61,7 +61,9 @@ class Transport:
     def observed_remote(self, workspace):
         return self.remote
 
-    def push_once(self, workspace, commit):
+    def push_once(self, workspace, commit, *, on_launch=None):
+        if on_launch is not None:
+            on_launch()
         self.pushes += 1
         self.remote = commit
         if self.lose_push:
@@ -224,6 +226,7 @@ class NativePublicationTests(unittest.TestCase):
         def execute(arguments, **kwargs):
             nonlocal remote, reads
             if "push" in arguments:
+                kwargs["on_launch"]()
                 calls.append("push")
                 remote = commit
                 return subprocess.CompletedProcess(arguments, 0, b"", b"")

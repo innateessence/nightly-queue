@@ -44,7 +44,7 @@ class ProcessTracker:
         self.journal, self.state = journal, state
         self.boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
 
-    def spawn(self, arguments, **kwargs):
+    def spawn(self, arguments, *, before_release=None, **kwargs):
         if kwargs.get("shell") or isinstance(arguments, (str, bytes)):
             raise JournalError(
                 "Tracked processes require trusted argv without shell interpretation."
@@ -55,6 +55,8 @@ class ProcessTracker:
         records[operation] = record
         self.journal.save(self.state)
         reader, writer = os.pipe2(os.O_CLOEXEC)
+        process = None
+        released = False
         try:
             passed = tuple(kwargs.pop("pass_fds", ())) + (reader,)
             kwargs["start_new_session"] = True
@@ -76,9 +78,21 @@ class ProcessTracker:
                 {"pid": process.pid, "start": details[2], "status": "running"}
             )
             self.journal.save(self.state)
-            os.write(writer, b"1")
             process.runner_operation = operation
+            if before_release is not None:
+                before_release()
+            os.write(writer, b"1")
+            released = True
             return process
+        except BaseException:
+            if process is not None and not released:
+                process.kill()
+                process.wait()
+                self.reaped(process)
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
+            raise
         finally:
             os.close(reader)
             os.close(writer)
@@ -130,10 +144,12 @@ class ProcessTracker:
         self.journal.save(self.state)
 
 
-def popen(arguments, **kwargs):
+def popen(arguments, *, before_release=None, **kwargs):
     tracker = current_tracker.get()
+    if before_release is not None and tracker is None:
+        raise JournalError("Mutation dispatch requires a tracked process launch gate.")
     return (
-        tracker.spawn(arguments, **kwargs)
+        tracker.spawn(arguments, before_release=before_release, **kwargs)
         if tracker
         else subprocess.Popen(arguments, **kwargs)
     )
@@ -146,9 +162,18 @@ def reaped(process):
 
 
 def run(
-    arguments, *, input=None, capture_output=False, timeout=None, check=False, **kwargs
+    arguments,
+    *,
+    input=None,
+    capture_output=False,
+    timeout=None,
+    check=False,
+    on_launch=None,
+    **kwargs,
 ):
     execution = current_execution.get()
+    if on_launch is not None and current_tracker.get() is None:
+        raise JournalError("Mutation dispatch requires a tracked process launch gate.")
     if not current_tracker.get() and execution is None:
         return subprocess.run(
             arguments,
@@ -173,12 +198,26 @@ def run(
         if remaining <= 0:
             raise BudgetExceeded("Git preparation exhausted its active budget.")
         timeout = remaining if timeout is None else min(timeout, remaining)
+
+    def release():
+        if execution:
+            deadline, local_checkpoint, checkpoint = execution
+            if not local_checkpoint() or checkpoint() is not True:
+                raise BackendInterrupted(
+                    "Mutation launch interrupted by execution controls."
+                )
+            if time.monotonic() >= deadline:
+                raise BudgetExceeded("Mutation launch exhausted its active budget.")
+        on_launch()
+
+    if on_launch is not None:
+        kwargs["before_release"] = release
     with popen(arguments, **kwargs) as process:
         try:
             if execution is None:
                 stdout, stderr = process.communicate(input, timeout=timeout)
             else:
-                expires = time.monotonic() + timeout
+                expires = min(time.monotonic() + timeout, deadline)
                 pending_input = input
                 while True:
                     if not local_checkpoint():

@@ -138,11 +138,18 @@ class NativeDelivery:
                 return "wait"
             self.verify()
             self.identity(github)
-            self.data["push_dispatched"] = True
-            self.host.save()
+
+            def dispatched():
+                self.data["push_dispatched"] = True
+                self.host.save()
+
             try:
-                transport.push_once(checkout, commit)
+                transport.push_once(checkout, commit, on_launch=dispatched)
             except DeliveryError:
+                if not self.data.get("push_dispatched"):
+                    raise DeliveryError(
+                        "Git push could not start; inspect the selected repository transport."
+                    ) from None
                 # Even a nonzero Git exit can follow a completed remote receive.
                 raise ReconciliationRequired(
                     "Push outcome requires read-only reconciliation of the same ref."
