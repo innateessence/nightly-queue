@@ -63,7 +63,7 @@ def binding(runtime: Runtime) -> dict:
         "profiles": {
             key: profile.digest for key, profile in sorted(runtime.profiles.items())
         },
-        "denied_ips": runtime.current_denied_ips(),
+        "denied_ips": runtime.authorization_denied_ips(),
         "images": images,
         "max_active_runs": runtime.max_active_runs,
     }
