@@ -1,4 +1,5 @@
 import json
+import math
 from functools import wraps
 
 from django.conf import settings
@@ -61,8 +62,9 @@ def read_body(request, allowed_fields):
         raise ValidationError({"body": "Send an application/json object."})
     try:
         data = json.loads(request.body)
-    except (ValueError, UnicodeDecodeError):
-        raise ValidationError({"body": "Send valid JSON."})
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        raise ValidationError({"body": "Send valid JSON."}) from None
+    validate_json_value(data)
     if not isinstance(data, dict):
         raise ValidationError({"body": "Send a JSON object."})
     unknown = set(data) - set(allowed_fields)
@@ -70,6 +72,29 @@ def read_body(request, allowed_fields):
         fields = ", ".join(sorted(unknown))
         raise ValidationError({"body": f"Unknown fields: {fields}."})
     return data
+
+
+def validate_json_value(value, depth=0):
+    if depth > 20:
+        raise ValidationError({"body": "Reduce JSON nesting to at most 20 levels."})
+    if isinstance(value, str):
+        if "\x00" in value:
+            raise ValidationError(
+                {"body": "JSON strings cannot contain null characters."}
+            )
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ValidationError({"body": "Send valid Unicode strings."}) from None
+    elif isinstance(value, float) and not math.isfinite(value):
+        raise ValidationError({"body": "Send finite JSON values."})
+    elif isinstance(value, list):
+        for item in value:
+            validate_json_value(item, depth + 1)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            validate_json_value(key, depth + 1)
+            validate_json_value(item, depth + 1)
 
 
 def string_field(data, field, default="", max_length=None):

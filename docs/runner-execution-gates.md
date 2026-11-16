@@ -107,7 +107,10 @@ the provisioned runner bearer token. Unlike per-run progress it also works befor
 a claim exists. Run-specific reports require an owned active run. The report is
 strictly allowlisted, limited to 64 KiB, 128 account readings and 32 windows per
 account, with finite bounded numbers and aware timestamps. It contains no claim
-or credential secret fields. A timestamp-identical retry is idempotent; changed
+or credential secret fields. Shared JSON request validation rejects null characters,
+unpaired Unicode surrogates, nonfinite floats and nesting beyond 20 levels before
+database writes, preserving valid Unicode and literal JSON escape text.
+A timestamp-identical retry is idempotent; changed
 content at the same timestamp conflicts. Older retries cannot replace newer
 evidence. This latest-report write is informational and does not authorize any
 queue transition or external operation.

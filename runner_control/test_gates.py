@@ -144,6 +144,29 @@ class GateEvidenceTests(TestCase):
         self.report["readings"][0]["windows"][0]["remaining_percent"] = 101
         self.assertEqual(self.post().status_code, 400)
 
+    def test_null_characters_in_window_ids_are_rejected(self):
+        self.report["readings"][0]["windows"][0]["window_id"] = "private\x00window"
+        response = self.post()
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("private", response.content.decode())
+        self.assertFalse(RunnerGateEvidence.objects.exists())
+
+    def test_unpaired_surrogates_in_window_ids_are_rejected(self):
+        self.report["readings"][0]["windows"][0]["window_id"] = "private\ud800window"
+        response = self.post()
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("private", response.content.decode())
+        self.assertFalse(RunnerGateEvidence.objects.exists())
+
+    def test_window_ids_preserve_valid_unicode_and_literal_json_escapes(self):
+        identity = "Weekly \U0001f600 \u00e9 " + r"\u0000"
+        self.report["readings"][0]["windows"][0]["window_id"] = identity
+        self.assertEqual(self.post().status_code, 200)
+        evidence = RunnerGateEvidence.objects.get()
+        self.assertEqual(
+            evidence.report["readings"][0]["windows"][0]["window_id"], identity
+        )
+
     def test_settings_show_reason_remaining_freshness_reset_and_boundary(self):
         self.post()
         response = self.client.get(reverse("api_settings"))
