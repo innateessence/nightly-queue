@@ -134,6 +134,23 @@ must establish that the complete task container and descendants are gone. Add
 this path to `coding_runner.verify --boundary` with a versioned runtime/profile
 report. Qualification is an automated deployment check, not an approval screen.
 
+Before start, a retry-stable prepare operation registers a versioned job manifest:
+run/operation identity, base/source artifact digest, immutable image/profile IDs,
+context/prompt artifact digest, phase, resource limits, and deadline. A bounded
+upload stores source bytes under an executor-generated handle. Reject archive
+traversal, external links, device files, and agent Git metadata. Supervisor policy
+selects the phase's fixed launch recipe; the request cannot replace its executable
+or mounts. Reusing an operation ID with a different manifest is a conflict.
+
+Deliver only the selected backend secret through the authenticated control channel
+to a private per-run secret file, never a logged manifest or shared environment.
+Delete it when the agent container stops. Validation/build manifests cannot select
+backend credentials. Result readback includes exit/termination evidence, bounded
+event/log artifacts, and an export of changed source files with a digest manifest.
+The supervisor verifies that export before importing it; it never extracts an
+unvalidated archive into its checkout. This supplies code, prompts, credentials,
+and results without requiring an agent-visible shared control directory.
+
 ## Work selection and context
 
 Feature 05 extends the importer with repository ID, author ID, labels, update
