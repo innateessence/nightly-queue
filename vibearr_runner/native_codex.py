@@ -155,6 +155,10 @@ class CodexEvents:
                 item.get("text"), str
             ):
                 event["text"] = item["text"][:4000]
+            if item.get("type") == "command_execution" and isinstance(
+                item.get("command"), str
+            ):
+                event["command"] = item["command"][:4000]
             self.events.append(event)
         else:
             self.events.append(

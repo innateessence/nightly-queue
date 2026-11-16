@@ -5,6 +5,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import re
 from pathlib import Path
 import time
 from uuid import uuid4
@@ -184,7 +185,15 @@ def acceptance(
         while time.monotonic() < expires:
             parser, _ = adapter.read_events(canceled)
             observed_session = parser.session_id
-            if observed_session:
+            tool_started = any(
+                event.get("kind") == "item.started"
+                and event.get("item_type") == "command_execution"
+                and re.search(
+                    r"time\.sleep\(\s*90\s*\)|\bsleep\s+90\b", event.get("command", "")
+                )
+                for event in parser.events
+            )
+            if observed_session and tool_started:
                 break
             require(
                 adapter.inspect(canceled)["state"] == "running",
@@ -192,9 +201,10 @@ def acceptance(
             )
             time.sleep(0.25)
         require(
-            bool(observed_session),
-            "Cancellation fixture did not produce a native session identity",
+            bool(observed_session) and tool_started,
+            "Cancellation fixture did not start its foreground sleep tool",
         )
+        time.sleep(0.5)
         stopped = adapter.cancel(canceled)
         require(
             stopped["state"] == "exited" and stopped.get("descendants_terminated"),
@@ -257,6 +267,7 @@ def acceptance(
                 "session_id": observed_session,
                 "exit_code": stopped.get("result", {}).get("exit_code"),
                 "descendants_terminated": True,
+                "foreground_command_started": True,
             },
             "credential_source_written": False,
             "refresh_token_supplied_to_task": False,
