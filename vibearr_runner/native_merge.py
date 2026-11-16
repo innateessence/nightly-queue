@@ -232,6 +232,12 @@ class NativeMerge:
         return number, issue_id, raw
 
     def complete(self):
+        source = self.native["context"]["document"]["source"]
+        if (
+            self.host.run.get("item", {}).get("source") == "manual"
+            and source.get("issue_number") is None
+        ):
+            return self.finalize()
         github = self.client(completion=True)
         number, issue_id, issue = self.issue(github)
         marker = f"<!-- vibearr-run:{self.host.run_id}:complete -->"
@@ -315,6 +321,9 @@ class NativeMerge:
             "branch_deleted": deleted,
         }
         self.host.artifact("native_completion", payload, "issue-completed")
+        return self.finalize()
+
+    def finalize(self):
         self.data["completed"] = True
         self.host.save()
         from .native_delivery import NativeDelivery

@@ -7,7 +7,7 @@ from .merge_github import MergeGitHub
 from .native_contract import intent_document
 from .native_validation import CandidateSource
 from .recovery import ReconciliationRequired
-from .workspaces import git
+from .workspaces import WorkspaceError, git
 
 
 class NativeRevision:
@@ -57,6 +57,9 @@ class NativeRevision:
         return "continue"
 
     def step(self):
+        from .processes import ProcessTracker
+
+        ProcessTracker(self.host.journal, self.host.state).recover()
         record = self.native["publication_revision"]
         intent = record["intent"]
         if intent["data"]["reason"] == "ci_repair":
@@ -110,7 +113,7 @@ class NativeRevision:
                     ],
                     workspace.checkout,
                 )
-            except Exception:
+            except WorkspaceError:
                 if (workspace.checkout / ".git" / "MERGE_HEAD").exists():
                     git(["merge", "--abort"], workspace.checkout)
                 raise DeliveryError(

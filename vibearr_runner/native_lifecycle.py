@@ -461,7 +461,9 @@ class NativeLifecycle:
                 from .native_merge import NativeMerge
 
                 if self.native["merge"].get("completed"):
-                    return self.delivery()
+                    if self.native["delivery"].get("checkpoint") == "reporting_pending":
+                        return self.delivery()
+                    return NativeMerge(self).finalize()
                 return NativeMerge(self).reconcile()
             if self.native.get("failure"):
                 return self.finish_failure()
