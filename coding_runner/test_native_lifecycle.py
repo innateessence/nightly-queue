@@ -223,7 +223,7 @@ class NativeLifecycleTests(unittest.TestCase):
         self.journal = Journal(self.root / "journal")
         self.journal.__enter__()
         self.addCleanup(self.journal.__exit__)
-        self.run_id = str(uuid4())
+        self.run_id = getattr(self, "supervision_run_id", str(uuid4()))
         directory = self.root / "workspaces" / self.run_id
         checkout = directory / "checkout"
         checkout.mkdir(parents=True)
