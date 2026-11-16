@@ -26,6 +26,13 @@ from .backends import (
 MAX_BYTES = 4 * 1024 * 1024
 
 
+def _signal_group(pid: int, signum: int) -> None:
+    try:
+        os.killpg(pid, signum)
+    except ProcessLookupError:
+        pass
+
+
 class ProcessTransport:
     def __init__(self):
         self.process: subprocess.Popen | None = None
@@ -43,10 +50,7 @@ class ProcessTransport:
         with self.lock:
             if self.process is not None and self.process.poll() is None:
                 self.interrupted.set()
-                try:
-                    os.killpg(self.process.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
+                _signal_group(self.process.pid, signal.SIGTERM)
 
     def exchange(
         self,
@@ -126,21 +130,26 @@ class ProcessTransport:
                 return value
             finally:
                 if process.poll() is None:
-                    try:
-                        os.killpg(process.pid, signal.SIGTERM)
-                    except ProcessLookupError:
-                        pass
+                    _signal_group(process.pid, signal.SIGTERM)
                     try:
                         process.wait(timeout=0.2)
                     except subprocess.TimeoutExpired:
-                        try:
-                            os.killpg(process.pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
+                        _signal_group(process.pid, signal.SIGKILL)
                 process.wait()
                 processes.reaped(process)
                 with self.lock:
                     self.process = None
+
+
+def redact_json(value: Any, secret: str) -> str:
+    return json.dumps(value, allow_nan=False).replace(
+        json.dumps(secret)[1:-1], "[redacted]"
+    )
+
+
+def require_secret_free(value: Any, secret: str) -> None:
+    if json.dumps(secret)[1:-1] in json.dumps(value):
+        raise BackendOutputError("Model output contains credential material.")
 
 
 def parse_proposal(text: str, stage: str) -> BackendEvent:

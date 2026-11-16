@@ -1,5 +1,4 @@
 from . import processes
-import json
 import subprocess
 import threading
 from datetime import datetime
@@ -20,7 +19,12 @@ from .backends import (
 from .gates import UsageReading
 from .client import APIError
 from .backend_transports import qualification_matches
-from .proposal_backend import ProcessTransport, parse_proposal
+from .proposal_backend import (
+    ProcessTransport,
+    parse_proposal,
+    redact_json,
+    require_secret_free,
+)
 from .proposal_backend import validate_proposal as validate_proposal
 
 PINNED_CODEX_VERSION = "0.169.0"
@@ -213,9 +217,7 @@ class CodexBackend:
                 "instructions": (rules + request.instructions).replace(
                     token, "[redacted]"
                 ),
-                "input": json.dumps(request.document, allow_nan=False).replace(
-                    json.dumps(token)[1:-1], "[redacted]"
-                ),
+                "input": redact_json(request.document, token),
                 "tools": [],
                 "tool_choice": "none",
                 "store": False,
@@ -228,8 +230,7 @@ class CodexBackend:
             payload, timeout=request.timeout_seconds, checkpoint=checkpoint, stop=stop
         )
         event = parse_response(value, stage)
-        if json.dumps(token)[1:-1] in json.dumps(event.data):
-            raise BackendOutputError("Model proposal contains credential material.")
+        require_secret_free(event.data, token)
         progress(
             BackendEvent("model_finished", {"stage": stage, "proposal": event.kind})
         )

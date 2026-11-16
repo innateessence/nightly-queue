@@ -1,8 +1,6 @@
-import json
-
 from .backend_transports import TRANSPORTS
 from .backends import BackendError, BackendOutputError
-from .proposal_backend import ProcessTransport
+from .proposal_backend import ProcessTransport, require_secret_free
 from .release_evidence import valid_response_id
 
 
@@ -34,8 +32,8 @@ class ModelTraceTransport(ProcessTransport):
         value = response.get("response", {})
         response_id = value.get("id")
         token = payload.get("token")
-        if token and json.dumps(token)[1:-1] in json.dumps([event.data, response_id]):
-            raise BackendOutputError("Model evidence contains credential material.")
+        if token:
+            require_secret_free([event.data, response_id], token)
         if not valid_response_id(response_id):
             raise BackendOutputError("Model response identity is invalid.")
         evidence = self.state.setdefault("release_evidence", {})

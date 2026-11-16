@@ -1,6 +1,7 @@
 import copy
 import io
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -115,6 +116,48 @@ class AdapterContract:
         )
         self.assertNotIn(TOKEN, str(self.progress.call_args_list))
 
+    def test_json_escaped_secret_is_redacted_from_prompt_values_and_keys(self):
+        token = 'private-"quoted\\unicode-é-token'
+        selected = grant(self.account)
+        selected["material"]["secret"] = token
+        self.backend.credentials = lambda account: selected
+        self.request = replace(
+            self.request, instructions=token, document={token: token}
+        )
+        self.run_stage()
+        payload = self.transport.exchange.call_args.args[0]["request"]
+        instructions = (
+            payload["system"] if self.provider == "claude" else payload["instructions"]
+        )
+        document = (
+            payload["messages"][0]["content"]
+            if self.provider == "claude"
+            else payload["input"]
+        )
+        self.assertNotIn(token, instructions)
+        self.assertEqual(json.loads(document), {"[redacted]": "[redacted]"})
+
+    def test_secret_in_model_is_never_sent(self):
+        selected = grant(self.account)
+        selected["material"]["secret"] = "sonnet"
+        self.backend.credentials = lambda account: selected
+        with self.assertRaises(BackendError):
+            self.run_stage()
+        self.transport.exchange.assert_not_called()
+
+    def test_secret_in_proposal_is_never_returned(self):
+        for token in (TOKEN, 'private-"quoted\\unicode-é-token'):
+            with self.subTest(token=token):
+                selected = grant(self.account)
+                selected["material"]["secret"] = token
+                self.backend.credentials = lambda account: selected
+                self.transport.exchange.return_value = self.envelope(
+                    "read", {"path": token}
+                )
+                with self.assertRaises(BackendOutputError) as failure:
+                    self.run_stage()
+                self.assertNotIn(token, str(failure.exception))
+
     def test_explicit_account_is_required(self):
         self.request = replace(
             self.request, account={"backend": self.provider, "credential_id": None}
@@ -223,6 +266,10 @@ class ClaudeSchemaTests(unittest.TestCase):
         for kind in ([], {}, None, "push", "shell", "publish"):
             with self.subTest(kind=kind), self.assertRaises(BackendOutputError):
                 parse_response(response(kind), "research")
+
+    def test_unknown_stage_cannot_accept_implementation_proposal(self):
+        with self.assertRaises(BackendOutputError):
+            parse_response(response("complete", {"summary": "Done"}), "unknown")
 
     def test_models_require_explicit_claude_identifier(self):
         for model in (
@@ -393,6 +440,66 @@ class ClaudeProcessTests(unittest.TestCase):
         polls = iter([True, True, False])
         with self.assertRaises(BackendInterrupted):
             self.call(backend, checkpoint=lambda: next(polls, False))
+        self.assertIsNone(backend.transport.process)
+
+    def test_closed_gate_does_not_launch_worker(self):
+        transport = codex_tests.FakeProcess("raise SystemExit(0)")
+        with patch("coding_runner.proposal_backend.processes.popen") as start:
+            with self.assertRaises(BackendInterrupted):
+                transport.exchange(
+                    {}, timeout=1, checkpoint=lambda: False, stop=threading.Event()
+                )
+        start.assert_not_called()
+
+    def test_stop_during_credential_lookup_does_not_launch_worker(self):
+        stop = threading.Event()
+
+        def credentials(account):
+            stop.set()
+            return grant(account)
+
+        backend = ClaudeBackend(
+            credentials, transport=codex_tests.FakeProcess("raise SystemExit(0)")
+        )
+        with patch("coding_runner.proposal_backend.processes.popen") as start:
+            with self.assertRaises(BackendInterrupted):
+                backend.research(
+                    BackendRequest(ACCOUNT, "claude-sonnet-5-5", "", {}),
+                    progress=Mock(),
+                    checkpoint=lambda: True,
+                    stop=stop,
+                )
+        start.assert_not_called()
+
+    def test_stop_during_progress_does_not_launch_worker(self):
+        stop = threading.Event()
+        backend = self.backend("raise SystemExit(0)")
+        with patch("coding_runner.proposal_backend.processes.popen") as start:
+            with self.assertRaises(BackendInterrupted):
+                backend.research(
+                    BackendRequest(ACCOUNT, "claude-sonnet-5-5", "", {}),
+                    progress=lambda event: stop.set(),
+                    checkpoint=lambda: True,
+                    stop=stop,
+                )
+        start.assert_not_called()
+
+    def test_worker_exit_racing_interruption_still_reaps_and_resets_transport(self):
+        backend = self.backend("import time; time.sleep(0.02)")
+        signal_group = os.killpg
+
+        def exited_before_signal(pid, signum):
+            backend.transport.process.wait(timeout=1)
+            signal_group(pid, signum)
+
+        polls = iter([True, True, False])
+        with patch(
+            "coding_runner.proposal_backend.os.killpg", side_effect=exited_before_signal
+        ):
+            with patch("coding_runner.proposal_backend.processes.reaped") as reaped:
+                with self.assertRaises(BackendInterrupted):
+                    self.call(backend, checkpoint=lambda: next(polls, False))
+        reaped.assert_called_once()
         self.assertIsNone(backend.transport.process)
 
     def test_worker_command_is_trusted_and_isolated(self):
@@ -703,6 +810,56 @@ class ClaudeTraceTests(unittest.TestCase):
         ):
             transport.exchange({"request": {"model": "claude-sonnet-5-5"}})
         self.assertNotIn("release_evidence", state)
+
+    def test_secret_response_id_cannot_enter_durable_trace(self):
+        from .qualification_trace import ModelTraceTransport
+
+        state = {}
+        transport = ModelTraceTransport(Mock(), state, ACCOUNT, 1)
+        value = response()
+        value["response"]["id"] = TOKEN
+        with patch.object(ProcessTransport, "exchange", return_value=value):
+            with self.assertRaises(BackendOutputError):
+                transport.exchange(
+                    {"token": TOKEN, "request": {"model": "claude-sonnet-5-5"}}
+                )
+        self.assertNotIn("release_evidence", state)
+
+    def test_secret_proposal_cannot_enter_durable_trace(self):
+        from .qualification_trace import ModelTraceTransport
+
+        state = {}
+        transport = ModelTraceTransport(Mock(), state, ACCOUNT, 1)
+        value = response("read", {"path": TOKEN})
+        value["response"]["id"] = "msg_test_only"
+        with patch.object(ProcessTransport, "exchange", return_value=value):
+            with self.assertRaises(BackendOutputError):
+                transport.exchange(
+                    {"token": TOKEN, "request": {"model": "claude-sonnet-5-5"}}
+                )
+        self.assertNotIn("release_evidence", state)
+
+    def assert_trace_rejects_identity(self, response_id):
+        from .qualification_trace import ModelTraceTransport
+
+        state = {}
+        journal = Mock()
+        transport = ModelTraceTransport(journal, state, ACCOUNT, 1)
+        value = response()
+        value["response"]["id"] = response_id
+        with patch.object(ProcessTransport, "exchange", return_value=value):
+            with self.assertRaises(BackendOutputError):
+                transport.exchange(
+                    {"token": TOKEN, "request": {"model": "claude-sonnet-5-5"}}
+                )
+        self.assertNotIn("release_evidence", state)
+        journal.save.assert_not_called()
+
+    def test_surrogate_response_identity_is_rejected_before_trace_mutation(self):
+        self.assert_trace_rejects_identity("msg_\ud800")
+
+    def test_null_response_identity_is_rejected_before_trace_mutation(self):
+        self.assert_trace_rejects_identity("msg_\x00")
 
     def test_claude_trace_uses_claude_worker(self):
         from .qualification_trace import ModelTraceTransport
