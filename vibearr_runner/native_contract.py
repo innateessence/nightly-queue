@@ -49,6 +49,10 @@ ARTIFACT_KINDS = {
     "native_workspace",
     "native_delivery",
     "native_termination",
+    "native_revision",
+    "native_merge",
+    "native_completion",
+    "native_merge_terminal",
 }
 FACT_KINDS = ARTIFACT_KINDS - {"native_intent"}
 WORKSPACE_FIELDS = {
@@ -589,6 +593,48 @@ def validate_intent(value):
         if data["stage"] not in {"push", "create_pr"}:
             raise NativeContractError("Unknown native publication stage.")
         validate_workspace(data["workspace"])
+    elif kind == "revision":
+        fields(
+            data,
+            {
+                "publication_id",
+                "workspace_id",
+                "workspace",
+                "pull_request",
+                "base_revision",
+                "reason",
+            },
+        )
+        identifier(data["publication_id"])
+        identifier(data["workspace_id"])
+        validate_workspace(data["workspace"])
+        pull(data["pull_request"], data["workspace"])
+        sha(data["base_revision"], git=True)
+        if data["reason"] not in {"base_update", "ci_repair"}:
+            raise NativeContractError("Unknown publication revision reason.")
+    elif kind == "merge":
+        from .merge_contract import merge_profile, merge_receipt
+
+        fields(
+            data,
+            {
+                "publication_id",
+                "workspace_id",
+                "workspace",
+                "pull_request",
+                "stage",
+                "profile",
+                "receipt",
+            },
+        )
+        identifier(data["publication_id"])
+        identifier(data["workspace_id"])
+        validate_workspace(data["workspace"])
+        pull(data["pull_request"], data["workspace"])
+        if data["stage"] not in {"merge", "comment", "close", "delete"}:
+            raise NativeContractError("Unknown automatic merge mutation stage.")
+        merge_profile(data["profile"])
+        merge_receipt(data["receipt"], data["profile"], data["workspace"])
     else:
         raise NativeContractError("Unknown native intent kind.")
     return copied(value)
@@ -1176,6 +1222,114 @@ def validate_native_artifact(kind, value):
             pull(value["pull_request"], value["workspace"])
     elif kind == "native_termination":
         validate_termination(value)
+    elif kind == "native_revision":
+        fields(
+            value,
+            {
+                "schema_version",
+                "intent_id",
+                "context_id",
+                "context_digest",
+                "attempt",
+                "previous_workspace_id",
+                "agent_intent_id",
+                "workspace",
+                "source_digest",
+                "export_digest",
+                "requirements_digest",
+                "parents",
+            },
+        )
+        for key in (
+            "intent_id",
+            "context_id",
+            "previous_workspace_id",
+            "agent_intent_id",
+        ):
+            identifier(value[key])
+        for key in (
+            "context_digest",
+            "source_digest",
+            "export_digest",
+            "requirements_digest",
+        ):
+            sha(value[key])
+        if type(value["attempt"]) is not int or not 1 <= value["attempt"] <= 2:
+            raise NativeContractError(
+                "Publication revisions consume the shared repair allowance."
+            )
+        validate_workspace(value["workspace"])
+        if not isinstance(value["parents"], list) or len(value["parents"]) != 2:
+            raise NativeContractError(
+                "Base update requires both immutable merge parents."
+            )
+        for parent in value["parents"]:
+            sha(parent, git=True)
+        if value["parents"][1] != value["workspace"]["base_revision"]:
+            raise NativeContractError("Base revision differs from the merge parent.")
+    elif kind == "native_merge":
+        from .merge_contract import merge_receipt
+
+        fields(
+            value,
+            {
+                "schema_version",
+                "intent_id",
+                "workspace_id",
+                "publication_id",
+                "workspace",
+                "pull_request",
+                "receipt",
+                "merge",
+            },
+        )
+        for key in ("intent_id", "workspace_id", "publication_id"):
+            identifier(value[key])
+        validate_workspace(value["workspace"])
+        pull(value["pull_request"], value["workspace"])
+        fields(value["merge"], {"commit_sha", "head_sha", "merged_at"})
+        sha(value["merge"]["commit_sha"], git=True)
+        timestamp(value["merge"]["merged_at"])
+        if value["merge"]["head_sha"] != value["workspace"]["commit_sha"]:
+            raise NativeContractError(
+                "Merged head differs from the validated publication."
+            )
+        merge_receipt(value["receipt"], None, value["workspace"])
+    elif kind == "native_completion":
+        fields(
+            value,
+            {
+                "schema_version",
+                "intent_ids",
+                "merge_intent_id",
+                "issue_number",
+                "issue_id",
+                "comment_id",
+                "marker",
+                "state",
+                "branch_deleted",
+            },
+        )
+        unique_ids(value["intent_ids"])
+        if not value["intent_ids"]:
+            raise NativeContractError(
+                "Completion requires registered reporting intents."
+            )
+        identifier(value["merge_intent_id"])
+        for key in ("issue_number", "issue_id", "comment_id"):
+            positive(value[key])
+        text(value["marker"], 200)
+        if value["state"] != "closed" or type(value["branch_deleted"]) is not bool:
+            raise NativeContractError(
+                "Issue completion must record the actual closed state."
+            )
+    elif kind == "native_merge_terminal":
+        fields(value, {"schema_version", "intent_id", "state"})
+        identifier(value["intent_id"])
+        if value["state"] != "not_started":
+            raise NativeContractError(
+                "Only a definitely unstarted merge mutation is terminal without its provider fact."
+            )
     else:
         raise NativeContractError("Unknown native artifact kind.")
     return copied(value)

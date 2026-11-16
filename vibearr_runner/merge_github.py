@@ -42,7 +42,11 @@ def merged_observation(raw, workspace, number):
     if raw.get("merged") is not True:
         return None
     merge_sha = raw.get("merge_commit_sha")
-    if raw.get("state") != "closed" or not isinstance(merge_sha, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", merge_sha):
+    if (
+        raw.get("state") != "closed"
+        or not isinstance(merge_sha, str)
+        or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", merge_sha)
+    ):
         raise DeliveryError("Merged PR lacks its provider merge commit.")
     try:
         when = datetime.fromisoformat(raw["merged_at"].replace("Z", "+00:00"))
@@ -50,7 +54,11 @@ def merged_observation(raw, workspace, number):
             raise ValueError
     except (KeyError, TypeError, ValueError, AttributeError):
         raise DeliveryError("Merged PR lacks a provider merge timestamp.") from None
-    return {"commit_sha": merge_sha, "head_sha": workspace["commit_sha"], "merged_at": when.isoformat()}
+    return {
+        "commit_sha": merge_sha,
+        "head_sha": workspace["commit_sha"],
+        "merged_at": when.isoformat(),
+    }
 
 
 class MergeGitHub(NativeGitHub):
@@ -70,24 +78,40 @@ class MergeGitHub(NativeGitHub):
         raise DeliveryError("Provider list exceeds the bounded pagination limit.")
 
     def content(self, repository, path, revision):
-        raw = self.request("GET", f"/repos/{repository}/contents/{quote(path, safe='/')}?{urlencode({'ref': revision})}")
+        raw = self.request(
+            "GET",
+            f"/repos/{repository}/contents/{quote(path, safe='/')}?{urlencode({'ref': revision})}",
+        )
         try:
-            if raw["type"] != "file" or raw["encoding"] != "base64" or raw["path"] != path:
+            if (
+                raw["type"] != "file"
+                or raw["encoding"] != "base64"
+                or raw["path"] != path
+            ):
                 raise ValueError
             data = base64.b64decode(raw["content"], validate=False)
             if len(data) > 262144:
                 raise ValueError
             return data
         except (KeyError, TypeError, ValueError):
-            raise DeliveryError("Trusted provider file could not be read exactly.") from None
+            raise DeliveryError(
+                "Trusted provider file could not be read exactly."
+            ) from None
 
     def base_sha(self, workspace):
         path = quote(workspace["base_branch"], safe="")
-        raw = self.request("GET", f"/repos/{workspace['repository']}/git/ref/heads/{path}")
-        if raw.get("ref") != "refs/heads/" + workspace["base_branch"] or raw.get("object", {}).get("type") != "commit":
+        raw = self.request(
+            "GET", f"/repos/{workspace['repository']}/git/ref/heads/{path}"
+        )
+        if (
+            raw.get("ref") != "refs/heads/" + workspace["base_branch"]
+            or raw.get("object", {}).get("type") != "commit"
+        ):
             raise DeliveryError("Base branch identity is invalid.")
         value = raw["object"].get("sha")
-        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value):
+        if not isinstance(value, str) or not re.fullmatch(
+            r"[0-9a-f]{40}|[0-9a-f]{64}", value
+        ):
             raise DeliveryError("Base branch revision is invalid.")
         return value
 
@@ -95,9 +119,14 @@ class MergeGitHub(NativeGitHub):
         profile = merge_profile(profile)
         actor = self.request("GET", "/user")
         if actor.get("id") != profile["actor_id"]:
-            raise DeliveryError("Delivery actor differs from trusted merge configuration.")
+            raise DeliveryError(
+                "Delivery actor differs from trusted merge configuration."
+            )
         identity, _ = self.repository(repository_id=profile["repository_id"])
-        if identity["repository_id"] != workspace["repository_id"] or identity["repository"] != workspace["repository"]:
+        if (
+            identity["repository_id"] != workspace["repository_id"]
+            or identity["repository"] != workspace["repository"]
+        ):
             raise DeliveryError("Merge repository differs from the claimed repository.")
         repository = workspace["repository"]
         raw = self.request("GET", f"/repos/{repository}")
@@ -112,16 +141,26 @@ class MergeGitHub(NativeGitHub):
             raise DeliveryError("Effective rule provenance is unavailable.")
         receipts = []
         for identity in sorted(rulesets):
-            raw = self.request("GET", f"/repos/{repository}/rulesets/{identity}?includes_parents=true")
-            if raw.get("id") != identity or raw.get("enforcement") != "active" or raw.get("bypass_actors") != []:
-                raise DeliveryError("Every effective ruleset must enforce rules without bypass actors.")
+            raw = self.request(
+                "GET", f"/repos/{repository}/rulesets/{identity}?includes_parents=true"
+            )
+            if (
+                raw.get("id") != identity
+                or raw.get("enforcement") != "active"
+                or raw.get("bypass_actors") != []
+            ):
+                raise DeliveryError(
+                    "Every effective ruleset must enforce rules without bypass actors."
+                )
             receipts.append({"id": identity, "digest": digest(raw)})
         required = {}
         strict = False
         for entry in rules:
             kind, params = entry.get("type"), entry.get("parameters", {})
             if kind == "required_status_checks":
-                strict = strict or params.get("strict_required_status_checks_policy") is True
+                strict = (
+                    strict or params.get("strict_required_status_checks_policy") is True
+                )
                 for check in params.get("required_status_checks", []):
                     name = check.get("context")
                     producer = check.get("integration_id")
@@ -129,47 +168,86 @@ class MergeGitHub(NativeGitHub):
                         raise DeliveryError("Required status producer rules conflict.")
                     required[name] = producer
             elif kind == "pull_request":
-                if params.get("required_approving_review_count", 0) or params.get("require_code_owner_review") or params.get("require_last_push_approval") or params.get("required_review_thread_resolution") or params.get("required_reviewers"):
-                    raise DeliveryError("Repository review rules require an unsupported merge gate.")
+                if (
+                    params.get("required_approving_review_count", 0)
+                    or params.get("require_code_owner_review")
+                    or params.get("require_last_push_approval")
+                    or params.get("required_review_thread_resolution")
+                    or params.get("required_reviewers")
+                ):
+                    raise DeliveryError(
+                        "Repository review rules require an unsupported merge gate."
+                    )
             elif kind != "required_linear_history":
                 raise DeliveryError(f"Unsupported effective merge rule: {kind}.")
         expected = {entry["name"]: entry["app_id"] for entry in profile["checks"]}
         expected.update({entry["context"]: None for entry in profile["reviews"]})
         if not strict or not required or required != expected:
-            raise DeliveryError("Enforced required checks must exactly match the nonempty trusted merge profile.")
+            raise DeliveryError(
+                "Enforced required checks must exactly match the nonempty trusted merge profile."
+            )
         try:
             self.request("GET", f"/repos/{repository}/branches/{base}/protection")
         except DeliveryRejected as exc:
             if exc.status != 404:
                 raise
         else:
-            raise DeliveryError("Classic branch protection requires separate qualification; remove overlapping rules or use rulesets.")
+            raise DeliveryError(
+                "Classic branch protection requires separate qualification; remove overlapping rules or use rulesets."
+            )
         for check in profile["checks"]:
             path = check["workflow_path"]
             base_content = self.content(repository, path, workspace["base_revision"])
             candidate = self.content(repository, path, workspace["commit_sha"])
-            if hashlib.sha256(base_content).hexdigest() != check["workflow_digest"] or candidate != base_content:
-                raise DeliveryError("Candidate or base changed a trusted required workflow.")
-            raw = self.request("GET", f"/repos/{repository}/actions/workflows/{check['workflow_id']}")
-            if raw.get("id") != check["workflow_id"] or raw.get("path") != path or raw.get("state") != "active":
+            if (
+                hashlib.sha256(base_content).hexdigest() != check["workflow_digest"]
+                or candidate != base_content
+            ):
+                raise DeliveryError(
+                    "Candidate or base changed a trusted required workflow."
+                )
+            raw = self.request(
+                "GET", f"/repos/{repository}/actions/workflows/{check['workflow_id']}"
+            )
+            if (
+                raw.get("id") != check["workflow_id"]
+                or raw.get("path") != path
+                or raw.get("state") != "active"
+            ):
                 raise DeliveryError("Required workflow identity changed.")
-        return {"actor_id": actor["id"], "profile_digest": digest(profile), "rulesets": receipts}
+        return {
+            "actor_id": actor["id"],
+            "profile_digest": digest(profile),
+            "rulesets": receipts,
+        }
 
     def checks(self, workspace, pull_number, profile):
         repository = workspace["repository"]
         head = workspace["commit_sha"]
-        runs = self.pages(f"/repos/{repository}/commits/{head}/check-runs?filter=latest", "check_runs")
+        runs = self.pages(
+            f"/repos/{repository}/commits/{head}/check-runs?filter=latest", "check_runs"
+        )
         observed = []
         for configured in profile["checks"]:
-            matches = [entry for entry in runs if entry.get("name") == configured["name"]]
+            matches = [
+                entry for entry in runs if entry.get("name") == configured["name"]
+            ]
             if not matches:
                 raise MergeWait("Required remote check is missing.")
             if len(matches) != 1:
-                raise DeliveryError("Required check name has duplicate or forged producers.")
+                raise DeliveryError(
+                    "Required check name has duplicate or forged producers."
+                )
             check = matches[0]
-            if check.get("head_sha") != head or check.get("app", {}).get("id") != configured["app_id"]:
+            if (
+                check.get("head_sha") != head
+                or check.get("app", {}).get("id") != configured["app_id"]
+            ):
                 raise DeliveryError("Remote check has the wrong head or producer.")
-            workflow_runs = self.pages(f"/repos/{repository}/actions/workflows/{configured['workflow_id']}/runs?{urlencode({'head_sha': head, 'event': 'pull_request'})}", "workflow_runs")
+            workflow_runs = self.pages(
+                f"/repos/{repository}/actions/workflows/{configured['workflow_id']}/runs?{urlencode({'head_sha': head, 'event': 'pull_request'})}",
+                "workflow_runs",
+            )
             if not workflow_runs:
                 raise MergeWait("Trusted workflow has no exact-head run.")
             latest = max(workflow_runs, key=lambda value: value.get("id", 0))
@@ -177,10 +255,21 @@ class MergeGitHub(NativeGitHub):
             if latest.get("check_suite_id") != suite:
                 raise MergeWait("A newer workflow run supersedes this check.")
             self.workflow_binding(latest, configured, workspace, pull_number)
-            jobs = self.pages(f"/repos/{repository}/actions/runs/{latest['id']}/attempts/{latest['run_attempt']}/jobs", "jobs")
-            matches = [value for value in jobs if value.get("name") == configured["name"]]
-            if len(matches) != 1 or matches[0].get("id") != check.get("id") or matches[0].get("head_sha") != head:
-                raise DeliveryError("Required check does not belong to the current workflow attempt.")
+            jobs = self.pages(
+                f"/repos/{repository}/actions/runs/{latest['id']}/attempts/{latest['run_attempt']}/jobs",
+                "jobs",
+            )
+            matches = [
+                value for value in jobs if value.get("name") == configured["name"]
+            ]
+            if (
+                len(matches) != 1
+                or matches[0].get("id") != check.get("id")
+                or matches[0].get("head_sha") != head
+            ):
+                raise DeliveryError(
+                    "Required check does not belong to the current workflow attempt."
+                )
             for value in (latest, check, matches[0]):
                 if value.get("status") != "completed":
                     raise MergeWait("Required exact-head checks are still pending.")
@@ -188,28 +277,62 @@ class MergeGitHub(NativeGitHub):
                     raise MergeRepair("Required remote validation did not succeed.")
             if not check.get("completed_at") or not check.get("started_at"):
                 raise DeliveryError("Required check lacks completed timing evidence.")
-            observed.append({"name": configured["name"], "producer_id": configured["app_id"], "head_sha": head, "conclusion": "success", "url": check["html_url"], "check_id": check["id"], "workflow_id": latest["workflow_id"], "run_id": latest["id"], "run_attempt": latest["run_attempt"], "suite_id": suite})
+            observed.append(
+                {
+                    "name": configured["name"],
+                    "producer_id": configured["app_id"],
+                    "head_sha": head,
+                    "conclusion": "success",
+                    "url": check["html_url"],
+                    "check_id": check["id"],
+                    "workflow_id": latest["workflow_id"],
+                    "run_id": latest["id"],
+                    "run_attempt": latest["run_attempt"],
+                    "suite_id": suite,
+                }
+            )
         return observed
 
     def workflow_binding(self, raw, configured, workspace, number):
-        if raw.get("workflow_id") != configured["workflow_id"] or raw.get("path") != configured["workflow_path"] or raw.get("event") != "pull_request" or raw.get("head_sha") != workspace["commit_sha"] or raw.get("head_repository", {}).get("id") != workspace["repository_id"]:
-            raise DeliveryError("Workflow provenance differs from the trusted candidate.")
+        if (
+            raw.get("workflow_id") != configured["workflow_id"]
+            or raw.get("path") != configured["workflow_path"]
+            or raw.get("event") != "pull_request"
+            or raw.get("head_sha") != workspace["commit_sha"]
+            or raw.get("head_repository", {}).get("id") != workspace["repository_id"]
+        ):
+            raise DeliveryError(
+                "Workflow provenance differs from the trusted candidate."
+            )
         pulls = raw.get("pull_requests", [])
         matches = [entry for entry in pulls if entry.get("number") == number]
         if len(matches) != 1:
             raise DeliveryError("Workflow run is not associated with the expected PR.")
         pull = matches[0]
-        for key, ref, sha in (("base", workspace["base_branch"], workspace["base_revision"]), ("head", workspace["branch"], workspace["commit_sha"])):
+        for key, ref, sha in (
+            ("base", workspace["base_branch"], workspace["base_revision"]),
+            ("head", workspace["branch"], workspace["commit_sha"]),
+        ):
             value = pull.get(key, {})
-            if value.get("ref") != ref or value.get("sha") != sha or value.get("repo", {}).get("id") != workspace["repository_id"]:
+            if (
+                value.get("ref") != ref
+                or value.get("sha") != sha
+                or value.get("repo", {}).get("id") != workspace["repository_id"]
+            ):
                 raise MergeRepair("Workflow tested a different base/head pair.")
 
     def reviews(self, workspace, pull_number, profile, *, run_id, context_digest):
-        statuses = self.pages(f"/repos/{workspace['repository']}/commits/{workspace['commit_sha']}/statuses")
+        statuses = self.pages(
+            f"/repos/{workspace['repository']}/commits/{workspace['commit_sha']}/statuses"
+        )
         receipts = []
         sessions = set()
         for configured in profile["reviews"]:
-            matches = [value for value in statuses if value.get("context") == configured["context"]]
+            matches = [
+                value
+                for value in statuses
+                if value.get("context") == configured["context"]
+            ]
             if not matches:
                 raise MergeWait("Waiting for trusted independent/root AI review.")
             status = max(matches, key=lambda value: value.get("id", 0))
@@ -223,17 +346,44 @@ class MergeGitHub(NativeGitHub):
             pattern = rf"https://github\.com/{re.escape(configured['report_repository'])}/blob/([0-9a-f]{{40}})/(.+)"
             match = re.fullmatch(pattern, url)
             if not match or not match[2].startswith(configured["report_prefix"]):
-                raise DeliveryError("AI review requires an immutable trusted report URL.")
-            identity, _ = self.repository(repository_url=f"https://github.com/{configured['report_repository']}.git")
+                raise DeliveryError(
+                    "AI review requires an immutable trusted report URL."
+                )
+            identity, _ = self.repository(
+                repository_url=f"https://github.com/{configured['report_repository']}.git"
+            )
             if identity["repository_id"] != configured["report_repository_id"]:
                 raise DeliveryError("AI review report repository identity changed.")
             content = self.content(configured["report_repository"], match[2], match[1])
-            report = review_report(json.loads(content), role=configured["role"], run_id=run_id, context_digest=context_digest, workspace=workspace, pull_number=pull_number)
+            report = review_report(
+                json.loads(content),
+                role=configured["role"],
+                run_id=run_id,
+                context_digest=context_digest,
+                workspace=workspace,
+                pull_number=pull_number,
+            )
             if report["session_id"] in sessions:
-                raise DeliveryError("Independent and root reviews require different AI sessions.")
+                raise DeliveryError(
+                    "Independent and root reviews require different AI sessions."
+                )
             sessions.add(report["session_id"])
-            receipts.append({"role": configured["role"], "status_id": status["id"], "creator_id": configured["creator_id"], "context": configured["context"], "report_url": url, "report_digest": hashlib.sha256(content).hexdigest(), "report": report})
+            receipts.append(
+                {
+                    "role": configured["role"],
+                    "status_id": status["id"],
+                    "creator_id": configured["creator_id"],
+                    "context": configured["context"],
+                    "report_url": url,
+                    "report_digest": hashlib.sha256(content).hexdigest(),
+                    "report": report,
+                }
+            )
         return receipts
 
     def merge_once(self, workspace, number):
-        return self.request("PUT", f"/repos/{workspace['repository']}/pulls/{number}/merge", {"sha": workspace["commit_sha"], "merge_method": "squash"})
+        return self.request(
+            "PUT",
+            f"/repos/{workspace['repository']}/pulls/{number}/merge",
+            {"sha": workspace["commit_sha"], "merge_method": "squash"},
+        )

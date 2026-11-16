@@ -124,7 +124,11 @@ class GitHubDeliveryClient:
             r"/repositories/[1-9][0-9]*", path
         )
         if (
-            (not path.startswith("/repos/") and not numeric_repository and not (method == "GET" and path == "/user"))
+            (
+                not path.startswith("/repos/")
+                and not numeric_repository
+                and not (method == "GET" and path == "/user")
+            )
             or "#" in path
             or "\n" in path
         ):
