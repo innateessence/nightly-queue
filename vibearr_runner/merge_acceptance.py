@@ -169,7 +169,9 @@ def collect_merge_run(queue, github, *, run_id, project_id, issue_number, screen
         raise ValueError("Provider does not confirm the recorded exact-head merge.")
     actual_receipt = {
         "policy": provider.policy(workspace, profile),
-        "checks": provider.checks(workspace, pull["number"], profile),
+        "checks": provider.confirm_checks(
+            workspace, profile, merged["receipt"]["checks"]
+        ),
         "reviews": provider.reviews(
             workspace,
             pull["number"],

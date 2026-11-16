@@ -354,6 +354,67 @@ class MergeGitHub(NativeGitHub):
                 raise MergeRepair("Workflow tested a different base/head pair.")
 
     @observed
+    def confirm_checks(self, workspace, profile, receipts):
+        repository, head = workspace["repository"], workspace["commit_sha"]
+        observed = []
+        for receipt in receipts:
+            configured = next(
+                value for value in profile["checks"] if value["name"] == receipt["name"]
+            )
+            check = self.request(
+                "GET", f"/repos/{repository}/check-runs/{receipt['check_id']}"
+            )
+            run = self.request(
+                "GET",
+                f"/repos/{repository}/actions/runs/{receipt['run_id']}/attempts/{receipt['run_attempt']}",
+            )
+            if (
+                check.get("id") != receipt["check_id"]
+                or check.get("name") != configured["name"]
+                or check.get("head_sha") != head
+                or check.get("app", {}).get("id") != configured["app_id"]
+                or check.get("check_suite", {}).get("id") != receipt["suite_id"]
+            ):
+                raise DeliveryError(
+                    "Historical check differs from its provider-verified merge receipt."
+                )
+            if (
+                run.get("id") != receipt["run_id"]
+                or run.get("run_attempt") != receipt["run_attempt"]
+                or run.get("workflow_id") != configured["workflow_id"]
+                or run.get("path") != configured["workflow_path"]
+                or run.get("head_sha") != head
+                or run.get("head_repository", {}).get("id")
+                != workspace["repository_id"]
+                or run.get("check_suite_id") != receipt["suite_id"]
+                or run.get("event") != "pull_request"
+            ):
+                raise DeliveryError(
+                    "Historical workflow provenance differs from the actual merged candidate."
+                )
+            jobs = self.pages(
+                f"/repos/{repository}/actions/runs/{receipt['run_id']}/attempts/{receipt['run_attempt']}/jobs",
+                "jobs",
+            )
+            matches = [
+                value
+                for value in jobs
+                if value.get("id") == receipt["check_id"]
+                and value.get("name") == configured["name"]
+                and value.get("head_sha") == head
+            ]
+            if len(matches) != 1 or any(
+                value.get("status") != "completed"
+                or value.get("conclusion") != "success"
+                for value in (check, run, matches[0])
+            ):
+                raise DeliveryError(
+                    "Historical merged candidate checks do not have successful immutable provider results."
+                )
+            observed.append(receipt)
+        return observed
+
+    @observed
     def reviews(self, workspace, pull_number, profile, *, run_id, context_digest):
         if not profile["reviews"]:
             return []

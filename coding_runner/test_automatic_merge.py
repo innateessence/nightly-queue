@@ -242,6 +242,10 @@ class Provider(MergeGitHub):
             return {"total_count": len(runs), "workflow_runs": runs}
         if "/jobs?" in path:
             return {"total_count": 1, "jobs": [self.job]}
+        if path.endswith("/check-runs/30"):
+            return self.check
+        if path.endswith("/actions/runs/20/attempts/1"):
+            return self.workflow
         raise AssertionError(path)
 
 
@@ -378,6 +382,20 @@ class MergeProviderTests(unittest.TestCase):
         self.provider.workflow["pull_requests"][0]["base"]["sha"] = "e" * 40
         with self.assertRaises(MergeRepair):
             self.provider.checks(workspace(), 9, profile())
+
+    def test_historical_check_confirmation_survives_github_removing_merged_pr_association(
+        self,
+    ):
+        self.provider.workflow["pull_requests"] = []
+        captured = receipt()["checks"]
+        self.assertEqual(
+            self.provider.confirm_checks(workspace(), profile(), captured), captured
+        )
+
+    def test_historical_confirmation_still_rejects_wrong_head(self):
+        self.provider.workflow["head_sha"] = "e" * 40
+        with self.assertRaises(DeliveryError):
+            self.provider.confirm_checks(workspace(), profile(), receipt()["checks"])
 
     def test_changed_required_workflow_cannot_select_its_own_policy(self):
         self.provider.content = lambda repo, path, revision: (
