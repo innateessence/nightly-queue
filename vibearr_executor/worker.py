@@ -3,13 +3,14 @@
 import json
 import os
 import select
+import shutil
 import signal
 import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
 
-from .artifacts import extract, result_manifest, snapshot
+from .artifacts import extract, result_manifest, snapshot, unpack
 from .contracts import MAX_LOG, canonical, digest
 from .secret_material import contains_secret, protection_material, redact
 
@@ -201,6 +202,35 @@ def main() -> None:
             }
         result["resources"] = resources
         Path("/secrets/backend").unlink(missing_ok=True)
+        from .validation_profile import BUILD_ARGV
+
+        if (
+            tuple(job["profile"]["argv"]) == BUILD_ARGV
+            and job["profile"]["phase"] == "setup"
+        ):
+            try:
+                from .dependency_artifacts import capture, manifest
+
+                if (
+                    result.get("exit_code") == 0
+                    and not result.get("timed_out")
+                    and not result.get("canceled")
+                ):
+                    requirements = unpack(source)["requirements.txt"][1]
+                    dependencies = capture(
+                        Path("/work/.vibearr-dependencies"), requirements
+                    )
+                    save(state / "dependencies.tar", dependencies)
+                    result["dependency_artifact"] = manifest(dependencies)
+            except Exception as exc:
+                result["dependency_error"] = type(exc).__name__ + ": " + str(exc)[:500]
+            finally:
+                for temporary in (".vibearr-dependencies", ".vibearr-build-tmp"):
+                    target = Path("/work") / temporary
+                    if target.is_symlink():
+                        target.unlink()
+                    elif target.is_dir():
+                        shutil.rmtree(target)
         try:
             exported = snapshot(Path("/work"))
             if contains_secret(exported, protected_values):

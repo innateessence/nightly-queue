@@ -103,6 +103,15 @@ class Client:
     def capabilities(self) -> dict:
         return self.request("/v1/capabilities")
 
+    def prepare_dependencies(self, manifest: dict) -> dict:
+        return self.request("/v1/dependency-builds/prepare", manifest)
+
+    def dependencies(self, build_id: str, action: str) -> dict:
+        identifier(build_id)
+        if action not in {"start", "status", "stop"}:
+            raise Rejected("Unknown dependency-build operation.")
+        return self.request(f"/v1/dependency-builds/{build_id}/{action}", {})
+
     def upload(self, kind: str, content: bytes) -> dict:
         return self.request(
             "/v1/artifacts",

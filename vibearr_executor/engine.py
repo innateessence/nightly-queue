@@ -65,7 +65,13 @@ class Docker:
             raise
 
     def read(self, container: str, filename: str, limit: int) -> bytes | None:
-        if filename not in {"booted", "result.json", "logs.bin", "source.tar"}:
+        if filename not in {
+            "booted",
+            "result.json",
+            "logs.bin",
+            "source.tar",
+            "dependencies.tar",
+        }:
             raise Rejected("Unknown result file.")
         try:
             code = "import pathlib,sys;sys.stdout.buffer.write(pathlib.Path(sys.argv[1]).read_bytes())"

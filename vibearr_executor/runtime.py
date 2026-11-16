@@ -98,6 +98,9 @@ class Runtime:
         if not identity.exists():
             durable(identity, str(uuid4()).encode())
         self.instance = identifier(identity.read_text())
+        from .dependency_builds import DependencyBuilds
+
+        self.dependency_builds = DependencyBuilds(self)
 
     def close(self):
         self.lockfile.close()
@@ -180,7 +183,12 @@ class Runtime:
         }
 
     def registered_profile(self, manifest: dict) -> Profile | None:
-        return self.profiles.get(manifest.get("profile_id", ""))
+        selected = self.profiles.get(manifest.get("profile_id", ""))
+        if selected is not None:
+            return selected
+        return self.dependency_builds.profiles(run_id=manifest.get("run_id")).get(
+            manifest.get("profile_id", "")
+        )
 
     def profile_is_current(self, record: dict) -> bool:
         profile = self.registered_profile(record["manifest"])
@@ -503,6 +511,10 @@ class Runtime:
             from .qualify import smoke_profiles
 
             profile = record["profile"]
+            if self.dependency_builds.blocked(operation_id):
+                raise Conflict(
+                    "A dependency build owns the executor; reconcile or stop it first."
+                )
             probes = smoke_profiles(profile["image"], profile["database_image"])
             is_probe = any(candidate.data() == profile for candidate in probes)
             if not is_probe and not capabilities(self)["qualified"]:
@@ -618,6 +630,13 @@ class Runtime:
                 ]
             )
             mounts = task_tmpfs(limits)
+            from .validation_profile import BUILD_ARGV
+
+            if (
+                tuple(record["profile"]["argv"]) == BUILD_ARGV
+                and record["profile"]["phase"] == "setup"
+            ):
+                mounts["/state"] = "rw,nosuid,nodev,noexec,size=320m,mode=0700"
             for destination, options in mounts.items():
                 arguments.extend(("--tmpfs", f"{destination}:{options}"))
             arguments.extend(
@@ -718,6 +737,15 @@ class Runtime:
         if logs is None or digest(logs) != result.get("log_digest"):
             raise ResultInvalid("Runtime log digest does not match.")
         durable(path / "logs.bin", logs)
+        if result.get("dependency_artifact"):
+            from .dependency_artifacts import MAX_DEPENDENCIES, manifest
+
+            dependencies = self.docker.read(name, "dependencies.tar", MAX_DEPENDENCIES)
+            if dependencies is None or canonical(manifest(dependencies)) != canonical(
+                result["dependency_artifact"]
+            ):
+                raise ResultInvalid("Protected dependency layer digest does not match.")
+            durable(path / "dependencies.tar", dependencies)
         if result.get("artifact"):
             exported = self.docker.read(name, "source.tar", MAX_ARCHIVE)
             source = (path / "input" / "source.tar").read_bytes()

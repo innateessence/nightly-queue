@@ -193,6 +193,12 @@ root = pathlib.Path(vibearr_executor.__file__).parent
 assert root.is_relative_to(sys.prefix)
 for name in ('Dockerfile', 'Codex.Dockerfile', 'codex_task.py', 'secret_material.py', 'worker.py', 'firewall.py', 'proxy.py', 'smoke.py', 'pg_smoke.py'):
     assert (root / name).is_file(), name
+for name in ('validation.Dockerfile', 'validation-requirements.txt', 'validation_black.toml', 'validation_ruff.toml', 'validation_mypy.ini'):
+    assert (root / name).is_file(), name
+from vibearr_executor.validation_profile import CHECK_IDS, ValidationProfile
+profile = ValidationProfile('sha256:' + 'a' * 64, 'sha256:' + 'b' * 64, 'c' * 64)
+assert profile.data()['required_checks'] == list(CHECK_IDS)
+assert ValidationProfile.parse(profile.data()) == profile
 assert 'django' not in sys.modules
 """
             self.run_command([str(executable), "-I", "-c", check], root)

@@ -105,7 +105,16 @@ class Handler(BaseHTTPRequestHandler):
             )
         if self.path == "/v1/prepare":
             return runtime.prepare(data)
+        if self.path == "/v1/dependency-builds/prepare":
+            return runtime.dependency_builds.prepare(data)
         parts = self.path.split("/")
+        if (
+            len(parts) == 5
+            and parts[:3] == ["", "v1", "dependency-builds"]
+            and not data
+            and parts[4] in {"start", "status", "stop"}
+        ):
+            return getattr(runtime.dependency_builds, parts[4])(parts[3])
         if len(parts) != 5 or parts[:3] != ["", "v1", "operations"]:
             raise Rejected("Unsupported endpoint.")
         operation_id, action = parts[3:]
