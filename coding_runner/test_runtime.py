@@ -17,6 +17,7 @@ from coding_runner.client import (
     AuthenticationError,
     Client,
     ConflictError,
+    SupersededSourceError,
     InvalidResponse,
     UnavailableError,
 )
@@ -74,6 +75,29 @@ class ServerCase(TestCase):
 
 
 class ClientTests(ServerCase):
+    def test_superseded_source_response_is_typed_without_transport_retry(self):
+        path = f"/api/v1/runner/runs/{uuid4()}/source/refresh/"
+        self.server.responses[path] = (409, {"code": "source_observation_superseded"})
+        with self.assertRaises(SupersededSourceError):
+            self.client.request("POST", path, {})
+        self.assertEqual(self.server.calls, [("POST", path)])
+
+    def test_same_code_on_other_endpoint_remains_generic_conflict(self):
+        path = "/api/v1/runner/runs/claim/"
+        self.server.responses[path] = (409, {"code": "source_observation_superseded"})
+        with self.assertRaises(ConflictError) as caught:
+            self.client.request("POST", path, {})
+        self.assertNotIsInstance(caught.exception, SupersededSourceError)
+
+    def test_unrecognized_source_conflicts_remain_terminal(self):
+        path = f"/api/v1/runner/runs/{uuid4()}/source/refresh/"
+        for body in ({"code": "other"}, b"invalid JSON", b"x" * 4097):
+            with self.subTest(body=type(body).__name__):
+                self.server.responses[path] = (409, body)
+                with self.assertRaises(ConflictError) as caught:
+                    self.client.request("POST", path, {})
+                self.assertNotIsInstance(caught.exception, SupersededSourceError)
+
     def test_local_stop_bounds_inflight_http_mutation_and_preserves_lock(self):
         stopped = threading.Event()
         self.server.release_mutation = threading.Event()

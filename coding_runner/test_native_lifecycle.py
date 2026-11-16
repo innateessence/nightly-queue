@@ -12,11 +12,12 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.error import URLError
 from uuid import uuid4
 
 from vibearr_runner.context import manual_context
+from vibearr_runner.client import ConflictError, SupersededSourceError
 from vibearr_runner.journal import Journal
 from vibearr_runner.native_codex import codex_profile
 from vibearr_runner.native_lifecycle import NativeLifecycle
@@ -350,6 +351,144 @@ class NativeLifecycleTests(unittest.TestCase):
         return NativeLifecycle(
             self.host, executor=self.executor, validation_profile=self.profile
         )
+
+    def superseded_source(self):
+        original = self.queue.request
+
+        def request(method, path, payload=None):
+            if path.endswith("/source/refresh/"):
+                raise SupersededSourceError("Newer observation")
+            return original(method, path, payload)
+
+        return patch.object(self.queue, "request", side_effect=request)
+
+    def test_superseded_source_pauses_and_resumes_same_agent_after_restart(self):
+        self.advance("agent")
+        self.assertEqual(self.engine().step(self.state), "running")
+        operation = self.executor.started[0]
+        self.executor.states[operation] = {
+            "operation_id": operation,
+            "state": "running",
+            "container_id": "same-container",
+        }
+        self.executor.pause = Mock(return_value={"paused": True})
+        self.executor.resume = Mock(return_value={"paused": False})
+        self.state["native"]["source_checked_at"] = 0
+        deadline = self.state["native"]["deadline"]
+        agent_deadline = self.state["native"]["agent"]["session"]["manifest"][
+            "deadline"
+        ]
+        with self.superseded_source():
+            self.assertEqual(self.engine().step(self.state), "wait")
+            self.state = self.journal.load()
+            self.assertEqual(self.engine().step(self.state), "wait")
+        self.assertTrue(self.state["native"]["paused"])
+        reads = self.state["native"]["transport_reads"]
+        self.assertEqual(next(iter(reads.values()))["attempts"], 1)
+        next(iter(reads.values()))["retry_at"] = 0
+        self.journal.save(self.state)
+        self.state = self.journal.load()
+        self.assertEqual(self.engine().step(self.state), "running")
+        self.executor.pause.assert_called_with(operation)
+        self.executor.resume.assert_called_once_with(operation)
+        self.assertEqual(self.executor.started, [operation])
+        self.assertEqual(
+            self.executor.states[operation]["container_id"], "same-container"
+        )
+        self.assertEqual(self.state["native"]["deadline"], deadline)
+        self.assertEqual(
+            self.state["native"]["agent"]["session"]["manifest"]["deadline"],
+            agent_deadline,
+        )
+        self.assertFalse(self.state["native"]["paused"])
+        self.assertEqual(self.state["native"]["transport_reads"], {})
+        self.assertEqual(self.queue.finishes, [])
+
+    def test_superseded_source_exhausts_without_relaunching_completed_work(self):
+        self.advance("delivery")
+        starts = list(self.executor.started)
+        self.state["native"]["source_checked_at"] = 0
+        with self.superseded_source():
+            for _ in range(2):
+                self.assertEqual(self.engine().step(self.state), "wait")
+                self.state = self.journal.load()
+                for record in self.state["native"]["transport_reads"].values():
+                    record["retry_at"] = 0
+                self.journal.save(self.state)
+            self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.assertEqual(self.executor.started, starts)
+        self.assertEqual(len(self.queue.finishes), 1)
+        self.assertEqual(self.queue.finishes[0]["outcome"], "failed")
+        self.assertIn("three bounded attempts", self.queue.finishes[0]["error_summary"])
+
+    def test_lost_source_pause_response_preserves_resume_after_restart(self):
+        from vibearr_executor.client import ExecutorUnavailable
+
+        self.advance("agent")
+        self.engine().step(self.state)
+        operation = self.executor.started[0]
+        self.executor.states[operation] = {
+            "operation_id": operation,
+            "state": "running",
+            "container_id": "same-container",
+        }
+        self.executor.pause = Mock(side_effect=ExecutorUnavailable("Lost pause reply"))
+        self.executor.resume = Mock(return_value={"paused": False})
+        self.state["native"]["source_checked_at"] = 0
+        with self.superseded_source():
+            with self.assertRaises(ReconciliationRequired):
+                self.engine().step(self.state)
+        self.state = self.journal.load()
+        self.assertTrue(self.state["native"]["paused"])
+        for record in self.state["native"]["transport_reads"].values():
+            record["retry_at"] = 0
+        self.assertEqual(self.engine().step(self.state), "running")
+        self.executor.resume.assert_called_once_with(operation)
+        self.assertEqual(self.executor.started, [operation])
+
+    def test_cancel_during_source_recollection_stops_without_another_read(self):
+        self.advance("delivery")
+        starts = list(self.executor.started)
+        self.state["native"]["source_checked_at"] = 0
+        with self.superseded_source() as requests:
+            self.assertEqual(self.engine().step(self.state), "wait")
+            self.state["run"]["run"]["cancellation_requested_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
+            self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        source_calls = [
+            entry
+            for entry in requests.call_args_list
+            if entry.args[1].endswith("/source/refresh/")
+        ]
+        self.assertEqual(len(source_calls), 1)
+        self.assertEqual(self.executor.started, starts)
+        self.assertEqual(self.queue.finishes[0]["outcome"], "canceled")
+
+    def test_generic_source_conflict_is_terminal_without_recollection(self):
+        self.advance("agent")
+        self.state["native"]["source_checked_at"] = 0
+        original = self.queue.request
+
+        def request(method, path, payload=None):
+            if path.endswith("/source/refresh/"):
+                raise ConflictError("Different source authority")
+            return original(method, path, payload)
+
+        with patch.object(self.queue, "request", side_effect=request):
+            self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.assertEqual(self.executor.started, [])
+        self.assertEqual(self.queue.finishes[0]["outcome"], "failed")
+
+    def test_deadline_stops_source_recollection_without_a_new_agent(self):
+        self.advance("agent")
+        self.state["native"]["source_checked_at"] = 0
+        with self.superseded_source():
+            self.assertEqual(self.engine().step(self.state), "wait")
+        self.state["native"]["deadline"] = "2000-01-01T00:00:00+00:00"
+        self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.assertEqual(self.executor.started, [])
+        self.assertIn("deadline", self.queue.finishes[0]["error_summary"])
 
     def transient_repository_read(self):
         with patch.object(NativeGitHub, "repository", REPOSITORY_READ):

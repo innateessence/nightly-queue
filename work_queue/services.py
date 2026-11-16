@@ -81,11 +81,22 @@ def repository_authority_state(project):
     return {field: getattr(project, field) for field in fields}
 
 
+class RepositoryObservationSuperseded(ValidationError):
+    pass
+
+
 def verify_repository_authority(project, expected):
-    if repository_authority_state(project) != expected:
-        raise ValidationError(
-            "Repository authority changed during source collection; refresh and retry."
-        )
+    current = repository_authority_state(project)
+    if current == expected:
+        return
+    version = "github_authority_version"
+    previous = {**current, version: expected[version]}
+    error = ValidationError
+    if previous == expected and current[version] > expected[version]:
+        error = RepositoryObservationSuperseded
+    raise error(
+        "Repository authority changed during source collection; refresh and retry."
+    )
 
 
 @transaction.atomic
