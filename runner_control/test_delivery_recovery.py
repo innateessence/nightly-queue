@@ -18,6 +18,7 @@ from .test_automatic_merge import MergeProtocolMixin
 class DeliveryRecoveryTests(MergeProtocolMixin, TestCase):
     def setUp(self):
         super().setUp()
+        self.github_source()
         self.complete_delivery()
         self.terminate()
         self.run = finish_run(
@@ -72,7 +73,9 @@ class DeliveryRecoveryTests(MergeProtocolMixin, TestCase):
 
     def test_recovery_archives_failed_result_and_preserves_original_session(self):
         before = self.run.evidence.count()
+        self.assertEqual(self.run.item.result_url, self.pull["url"])
         run, recovery = self.recover()
+        self.assertEqual(recovery.archive["item_result_url"], self.pull["url"])
         self.assertEqual(
             recovery.archive["finish_digest"], self.expected["expected_finish_digest"]
         )
@@ -138,6 +141,8 @@ class DeliveryRecoveryTests(MergeProtocolMixin, TestCase):
             self.recover()
         self.run.refresh_from_db()
         self.assertEqual(self.run.state, "completed")
+        self.run.item.refresh_from_db()
+        self.assertEqual(self.run.item.result_url, self.pull["url"])
         self.assertTrue(
             RunRetention.objects.get(run=self.run).reporting_acknowledged_at
         )
@@ -183,7 +188,8 @@ class DeliveryRecoveryTests(MergeProtocolMixin, TestCase):
     def test_changed_instructions_fence_recovery(self):
         from work_queue.models import QueueItem
 
-        QueueItem.objects.filter(pk=self.item.pk).update(instructions="Changed source")
+        metadata = {**self.item.source_metadata, "body": "Changed source"}
+        QueueItem.objects.filter(pk=self.item.pk).update(source_metadata=metadata)
         with self.assertRaises(RunConflict):
             self.recover()
 

@@ -208,6 +208,7 @@ def recover_delivery(*, runner, run_id, operation_id, expected):
         "result_status": run.result_status,
         "native_outcome": run.native_outcome,
         "result_url": run.result_url,
+        "item_result_url": run.item.result_url,
         "error_summary": run.error_summary,
         "finish_digest": run.finish_digest,
         "claim_digest": run.claim_digest,
@@ -223,6 +224,7 @@ def recover_delivery(*, runner, run_id, operation_id, expected):
     run.state, run.active_slot, run.stage = Run.State.ACTIVE, 1, Run.Stage.DELIVERY
     run.claim_digest = token_digest(str(token))
     run.item.status, run.item.claim_token = QueueItem.Status.RUNNING, token
+    run.item.result_url = ""
     authorize(run)
     from .merge_services import provider
 
