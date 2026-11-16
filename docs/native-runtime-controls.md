@@ -34,6 +34,19 @@ only once settled. No replacement build or image commit is created. Resume uses
 qualification, and cannot overwrite a newer pause intent. The original build
 deadline continues throughout the pause. Stop remains available at every phase.
 
+Ready and safely canceled build responses include `resources_terminated: true`,
+`receipt_digest`, and a protected `termination_receipt`. The receipt binds the
+executor instance, run/build identities, original setup receipt, assembly absence
+and qualification cleanup. A state label alone does not prove termination.
+Failed or unknown builds require successful stop/reconciliation before producing
+this receipt. Its digest remains available after retention.
+
+Stopping an ID that was never prepared returns HTTP 404 (`ExecutorNotFound`).
+Ordinary operation status keeps its existing `not-started` sentinel. A supervisor
+may use 404 as absence evidence only for an undispatched prepared intent after
+matching the persisted `instance_id`. Dispatched work still requires confirmed
+termination; 404 cannot release its fence.
+
 ## Retention
 
 Only an authenticated supervisor acting on an acknowledged retention candidate
@@ -86,7 +99,7 @@ resume. Selective source/log purge removed that exact derived image, retained it
 terminal identity, and preserved the operator parent image. No coding-model call,
 production stack, production database or external repository delivery was used.
 
-Validation included 156 executor unit tests, 1,607 Django tests (four expected
+Validation included 161 executor unit tests, 1,612 Django tests (four expected
 skips), repository-wide Black/Ruff/mypy, migration and system checks, and an
 installed executor wheel outside the checkout. Mocked cases additionally cover
 engine uncertainty, binding changes, independent phase gates, resume generation

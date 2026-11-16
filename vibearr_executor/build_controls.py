@@ -140,8 +140,7 @@ def resume(builds: DependencyBuilds, build_id: str) -> dict:
             current = control(builds, build_id)
             if current["generation"] != generation:
                 return builds.public(record)
-        builds.runtime.resume(build_id)
-        with builds.control_lock:
+            builds.runtime.resume(build_id)
             current = control(builds, build_id)
             if current["generation"] != generation:
                 checkpoint(builds, record)

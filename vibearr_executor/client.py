@@ -24,6 +24,10 @@ class ExecutorArtifactRemoved(ExecutorRejected):
     pass
 
 
+class ExecutorNotFound(ExecutorRejected):
+    pass
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *_args, **_kwargs):
         raise ExecutorUnavailable("Executor redirects are forbidden.")
@@ -90,6 +94,11 @@ class Client:
                     raise ExecutorUnavailable("Invalid executor response.")
                 return value
         except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                raise ExecutorNotFound(
+                    "Executor identity was never prepared in this state.",
+                    http_status=404,
+                ) from exc
             if exc.code == 410:
                 raise ExecutorArtifactRemoved(
                     "Executor artifact was removed by retention.", http_status=410

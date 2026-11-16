@@ -859,9 +859,15 @@ class Runtime:
             return self.public(record)
 
     def stop(self, operation_id: str) -> dict:
+        from .contracts import NotFound
+
         with self.lock:
             record = self.record(operation_id)
-            if "manifest" not in record or record["state"] == "exited":
+            if "manifest" not in record:
+                raise NotFound(
+                    "This operation was never prepared in this executor state."
+                )
+            if record["state"] == "exited":
                 return self.public(record)
             if not record.get("launch_intent"):
                 return operation_controls.forced_stop(self, record)
@@ -917,6 +923,32 @@ class Runtime:
 
     def pause(self, operation_id: str) -> dict:
         return operation_controls.pause(self, operation_id)
+
+    def termination_receipt(self, operation_id: str) -> dict:
+        from .contracts import NotFound
+
+        with self.lock:
+            record = self.record(operation_id)
+            if "manifest" not in record:
+                raise NotFound(
+                    "This operation was never prepared in this executor state."
+                )
+            observed = self.status(operation_id)
+            record = self.record(operation_id)
+            value = {
+                "schema_version": 1,
+                "instance_id": self.instance,
+                "operation_id": operation_id,
+                "run_id": record["manifest"]["run_id"],
+                "state": observed["state"],
+                "resources_terminated": observed["state"] == "exited"
+                and observed.get("descendants_terminated") is True,
+            }
+            if value["resources_terminated"]:
+                value["receipt_digest"] = record.get("receipt_digest") or digest(
+                    canonical(record.get("result", {}))
+                )
+            return value
 
     def resume(self, operation_id: str) -> dict:
         return operation_controls.resume(self, operation_id)

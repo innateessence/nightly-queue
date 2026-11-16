@@ -9,7 +9,8 @@ from uuid import uuid4
 
 from .artifacts import pack
 from . import build_controls
-from .contracts import Conflict, Profile, Rejected, digest
+from .contracts import Conflict, Profile, Rejected, canonical, digest
+from .engine import EngineError
 from .runtime import Runtime
 from .validation_profile import ValidationProfile
 
@@ -59,6 +60,35 @@ class BuildControlTests(unittest.TestCase):
 
     def cancel(self):
         return self.builds.stop(self.build_id)
+
+    def test_canceled_build_exposes_stable_protected_cleanup_receipt(self):
+        result = self.cancel()
+        receipt = result["termination_receipt"]
+        self.assertTrue(result["resources_terminated"])
+        self.assertEqual(result["receipt_digest"], digest(canonical(receipt)))
+        self.assertEqual(receipt["instance_id"], self.runtime.instance)
+        self.assertEqual(receipt["run_id"], self.request["run_id"])
+        self.assertTrue(receipt["setup_receipt"]["resources_terminated"])
+        self.assertEqual(self.cancel(), result)
+
+    def test_failed_build_needs_confirmed_stop_before_attesting_cleanup(self):
+        self.set_state("failed")
+        self.assertFalse(self.builds.status(self.build_id)["resources_terminated"])
+        result = self.cancel()
+        self.assertEqual(result["state"], "canceled")
+        self.assertTrue(result["resources_terminated"])
+
+    def test_uncertain_cleanup_never_creates_a_terminal_receipt(self):
+        with (
+            patch.object(
+                self.builds, "cleanup_qualification", side_effect=EngineError("unknown")
+            ),
+            self.assertRaises(EngineError),
+        ):
+            self.cancel()
+        result = self.builds.public(self.builds.read(self.build_id))
+        self.assertFalse(result["resources_terminated"])
+        self.assertNotIn("receipt_digest", result)
 
     def test_pause_before_setup_never_starts_a_container(self):
         with patch.object(self.runtime.docker, "run") as engine:
@@ -126,6 +156,51 @@ class BuildControlTests(unittest.TestCase):
         self.assertTrue(self.builds.status(self.build_id)["paused"])
         self.assertEqual(
             self.runtime.record(self.build_id)["deadline_monotonic"], original
+        )
+
+    def test_new_pause_cannot_acknowledge_frozen_before_old_resume_settles(self):
+        self.builds.pause(self.build_id)
+        entered, release, requested, acknowledged = [
+            threading.Event() for _ in range(4)
+        ]
+        failures = []
+
+        def unpause(_build_id):
+            entered.set()
+            if not release.wait(5):
+                raise RuntimeError("Test resume did not settle")
+
+        def resume():
+            try:
+                self.builds.resume(self.build_id)
+            except Exception as exc:
+                failures.append(exc)
+
+        def pause():
+            requested.set()
+            self.builds.pause(self.build_id)
+            acknowledged.set()
+
+        with (
+            patch.object(self.runtime, "resume", side_effect=unpause),
+            patch.object(self.builds, "start"),
+        ):
+            older = threading.Thread(target=resume)
+            newer = threading.Thread(target=pause)
+            older.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                newer.start()
+                self.assertTrue(requested.wait(2))
+                self.assertFalse(acknowledged.wait(0.1))
+            finally:
+                release.set()
+                older.join(5)
+                newer.join(5)
+        self.assertFalse(failures)
+        self.assertTrue(acknowledged.is_set())
+        self.assertTrue(
+            build_controls.control(self.builds, self.build_id)["pause_requested"]
         )
 
     def test_expiry_while_paused_cancels_original_build_without_start(self):

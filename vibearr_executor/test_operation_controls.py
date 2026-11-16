@@ -369,3 +369,25 @@ class OperationControlTests(unittest.TestCase):
             finally:
                 server.shutdown()
                 thread.join()
+
+    def test_missing_stop_has_distinct_http_404_without_creating_an_identity(self):
+        from .client import ExecutorNotFound
+
+        missing = str(uuid4())
+        with Server(("127.0.0.1", 0), Handler) as server:
+            server.runtime, server.token = self.runtime, "x" * 64
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                client = Client(f"http://127.0.0.1:{server.server_port}", server.token)
+                for call in (
+                    lambda: client.stop(missing),
+                    lambda: client.dependencies(missing, "stop"),
+                ):
+                    with self.assertRaises(ExecutorNotFound) as caught:
+                        call()
+                    self.assertEqual(caught.exception.http_status, 404)
+                self.assertFalse(self.runtime.path(missing).exists())
+            finally:
+                server.shutdown()
+                thread.join()

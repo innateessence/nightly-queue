@@ -14,6 +14,7 @@ from .contracts import (
     MAX_ARCHIVE,
     ArtifactRemoved,
     Conflict,
+    NotFound,
     Profile,
     Rejected,
     canonical,
@@ -77,6 +78,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise Rejected("Supply a JSON object.")
             self.reply(200, self.route(data))
+        except NotFound as exc:
+            self.reply(404, {"error": str(exc)})
         except ArtifactRemoved as exc:
             self.reply(410, {"error": str(exc)})
         except Conflict as exc:

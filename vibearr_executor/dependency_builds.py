@@ -12,11 +12,19 @@ import time
 from types import SimpleNamespace
 
 from .artifacts import unpack
-from .contracts import Conflict, Rejected, canonical, digest, identifier, sha256
+from .contracts import (
+    Conflict,
+    NotFound,
+    Rejected,
+    canonical,
+    digest,
+    identifier,
+    sha256,
+)
 from .dependency_artifacts import MAX_DEPENDENCIES, manifest, read_layer
 from .engine import EngineError
 from .validation_profile import BUILD_ARGV, ValidationProfile
-from . import build_controls, retention
+from . import build_controls, build_receipts, retention
 
 
 class DependencyBuilds:
@@ -33,7 +41,7 @@ class DependencyBuilds:
     def read(self, build_id):
         path = self.path(build_id) / "record.json"
         if not path.exists():
-            raise Rejected("Prepare this dependency build first.")
+            raise NotFound("This build was never prepared in this executor state.")
         return json.loads(path.read_bytes())
 
     def save(self, record):
@@ -202,10 +210,15 @@ class DependencyBuilds:
             "resources_removed",
             "tombstone",
             "deadline_expired",
+            "receipt_digest",
+            "termination_receipt",
         )
         value = {key: record[key] for key in keys if key in record}
         value["build_id"] = record["request"]["build_id"]
         value["run_id"] = record["request"]["run_id"]
+        value["resources_terminated"] = bool(
+            record.get("termination_receipt")
+        ) and record["state"] in {"ready", "canceled", "purged"}
         value.update(build_controls.public(self, record))
         value["available"] = record["state"] == "ready" and not build_controls.gated(
             self, value["build_id"]
@@ -380,6 +393,7 @@ class DependencyBuilds:
                 record["provenance"] = self.provenance(record)
                 record["state"] = "ready"
                 self.save(record)
+                build_receipts.confirm(self, record)
                 return True
             if not processes:
                 if record.get("qualification_intent"):
@@ -710,7 +724,7 @@ class DependencyBuilds:
         with self.runtime.lock:
             record = self.read(build_id)
             if record["state"] in {"ready", "canceled", "purged"}:
-                return self.public(record)
+                return build_receipts.read(self, build_id)
             record["cancel_requested"] = True
             self.save(record)
         self.runtime.stop(build_id)
@@ -732,7 +746,7 @@ class DependencyBuilds:
             self.cleanup_assembly(record)
         record["state"] = "canceled"
         self.save(record)
-        return self.public(record)
+        return build_receipts.confirm(self, record)
 
     def pause(self, build_id):
         return build_controls.pause(self, build_id)
