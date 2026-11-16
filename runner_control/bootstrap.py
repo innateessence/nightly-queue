@@ -199,20 +199,11 @@ def inspect(request, repository, *, mvp_defaults=False):
         changes.append(
             "Create autonomous self project with a new current cutoff; backfill remains disabled."
         )
-    project_import = project.credential_id if project else None
-    if project_import and project_import != credentials["import"].pk:
-        conflicts.append(
-            "project.credential_id: preserve the project's explicit import credential; select that ID or reconcile explicitly."
-        )
-    if (
-        not project_import
-        and api
-        and api.github_credential_id not in {None, credentials["import"].pk}
-    ):
+    if api and api.github_credential_id not in {None, credentials["import"].pk}:
         conflicts.append(
             "import_credential_id: preserve the saved import connection; select that ID or reconcile explicitly."
         )
-    if not project_import and (api is None or api.github_credential_id is None):
+    if api is None or api.github_credential_id is None:
         changes.append("Select the explicitly supplied import credential.")
     defaults = saved or RunnerSettings(**BOOTSTRAP_DEFAULTS)
     if mvp_defaults:
@@ -425,7 +416,7 @@ def bootstrap(request, *, apply=False, mvp_defaults=False):
                 project=project, repository=repository, expected=authority
             )
         api, _ = APISettings.objects.get_or_create(pk=1)
-        if api.github_credential_id is None and project.credential_id is None:
+        if api.github_credential_id is None:
             api.github_credential_id = request["import_credential_id"]
             api.save(update_fields=["github_credential"])
         overrides, _ = ProjectRunnerSettings.objects.get_or_create(project=project)

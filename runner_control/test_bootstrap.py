@@ -305,7 +305,7 @@ class BootstrapTests(TestCase):
             project.repository_url, "https://github.com/innateessence/renamed.git"
         )
 
-    def test_project_import_override_is_preserved(self):
+    def test_legacy_project_credential_is_preserved_separately_from_auto_import(self):
         project = Project.objects.create(
             name="Existing",
             repository_url=REPOSITORY_URL,
@@ -315,9 +315,13 @@ class BootstrapTests(TestCase):
             credential=self.credentials["repository"],
         )
         result = bootstrap(self.request, apply=True)
-        self.assertFalse(result["applied"])
+        self.assertTrue(result["applied"])
         project.refresh_from_db()
         self.assertEqual(project.credential_id, self.credentials["repository"].pk)
+        self.assertEqual(
+            APISettings.objects.get(pk=1).github_credential_id,
+            self.credentials["import"].pk,
+        )
 
     def test_existing_runner_token_is_never_rotated(self):
         bootstrap(self.request, apply=True)
