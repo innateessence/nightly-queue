@@ -115,7 +115,18 @@ Deterministic tests exercise the shared adapter contract, real isolated workers
 against a local fake HTTP server, unreachable inference, refused redirects,
 redacted authentication errors, timeout/pause termination, strict proposals,
 approval/source changes, ambiguous recovery, mixed providers/accounts and reserve
-blocking. These checks do not count as live authentication or delivery acceptance.
+blocking. Controlled verification can make a nonbillable model-list GET probe;
+it requires the selected model to appear, and never invokes inference. A probe
+alone does not qualify an integration.
+
+The pinned optional image was actually built, then started in an isolated test
+network with its own temporary model volume, UID 10001, read-only root, dropped
+capabilities and no published port. Version `0.40.16` and the empty model list
+were verified; no model was downloaded or invoked. A private-network peer checked
+version connectivity and the absence of database, broker and queue API DNS names.
+Compose configuration checks confirmed the profile, networks and mount policy.
+The temporary test container/network/volume were removed. These checks do not
+count as live authentication or delivery acceptance.
 
 The [connection form screenshot](screenshots/runner-opencode-connection.png) shows the actual rendered web settings.
 
@@ -124,6 +135,6 @@ Primary references reviewed:
 - [OpenCode configuration](https://opencode.ai/docs/config/) and [permissions](https://opencode.ai/docs/permissions/).
 - [OpenCode providers](https://opencode.ai/docs/providers/) and [Console inference](https://opencode.ai/docs/console/api/inference/).
 - [Pinned OpenCode release](https://github.com/anomalyco/opencode/releases/tag/v1.19.5).
-- [Ollama chat schema](https://docs.ollama.com/api/chat) and [API introduction](https://docs.ollama.com/api/introduction).
+- [Ollama chat schema](https://docs.ollama.com/api/chat), [model list](https://docs.ollama.com/api/tags) and [API introduction](https://docs.ollama.com/api/introduction).
 - [Ollama local-only configuration](https://github.com/ollama/ollama/blob/v0.40.16/docs/faq.mdx).
 - [Pinned Ollama release](https://github.com/ollama/ollama/releases/tag/v0.40.16).
