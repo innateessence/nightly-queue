@@ -19,6 +19,9 @@ current_tracker: contextvars.ContextVar[Any] = contextvars.ContextVar(
 current_execution: contextvars.ContextVar[Any] = contextvars.ContextVar(
     "runner_process_execution_limits", default=None
 )
+current_read_attempt: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "runner_read_attempt", default=None
+)
 
 
 def identity(pid: int) -> tuple[str, int, int] | None:
@@ -161,6 +164,42 @@ def reaped(process):
         tracker.reaped(process)
 
 
+def launch_process(arguments, execution, timeout, kwargs, on_launch, on_no_launch):
+    try:
+        if on_launch is not None and current_tracker.get() is None:
+            raise JournalError("Tracked dispatch requires a process launch gate.")
+        if execution:
+            kwargs["start_new_session"] = True
+            deadline, local_checkpoint, checkpoint = execution
+            if not local_checkpoint() or checkpoint() is not True:
+                raise BackendInterrupted(
+                    "Git preparation interrupted by execution controls."
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BudgetExceeded("Git preparation exhausted its active budget.")
+            timeout = remaining if timeout is None else min(timeout, remaining)
+
+        def release():
+            if execution:
+                deadline, local_checkpoint, checkpoint = execution
+                if not local_checkpoint() or checkpoint() is not True:
+                    raise BackendInterrupted(
+                        "Process launch interrupted by execution controls."
+                    )
+                if time.monotonic() >= deadline:
+                    raise BudgetExceeded("Process launch exhausted its active budget.")
+            on_launch()
+
+        if on_launch is not None:
+            kwargs["before_release"] = release
+        return popen(arguments, **kwargs), timeout
+    except BaseException:
+        if on_no_launch is not None:
+            on_no_launch()
+        raise
+
+
 def run(
     arguments,
     *,
@@ -169,12 +208,18 @@ def run(
     timeout=None,
     check=False,
     on_launch=None,
+    on_no_launch=None,
     **kwargs,
 ):
     execution = current_execution.get()
-    if on_launch is not None and current_tracker.get() is None:
-        raise JournalError("Mutation dispatch requires a tracked process launch gate.")
-    if not current_tracker.get() and execution is None:
+    if execution:
+        deadline, local_checkpoint, checkpoint = execution
+    if (
+        not current_tracker.get()
+        and execution is None
+        and on_launch is None
+        and on_no_launch is None
+    ):
         return subprocess.run(
             arguments,
             input=input,
@@ -187,32 +232,10 @@ def run(
         kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if input is not None:
         kwargs["stdin"] = subprocess.PIPE
-    if execution:
-        kwargs["start_new_session"] = True
-        deadline, local_checkpoint, checkpoint = execution
-        if not local_checkpoint() or checkpoint() is not True:
-            raise BackendInterrupted(
-                "Git preparation interrupted by execution controls."
-            )
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise BudgetExceeded("Git preparation exhausted its active budget.")
-        timeout = remaining if timeout is None else min(timeout, remaining)
-
-    def release():
-        if execution:
-            deadline, local_checkpoint, checkpoint = execution
-            if not local_checkpoint() or checkpoint() is not True:
-                raise BackendInterrupted(
-                    "Mutation launch interrupted by execution controls."
-                )
-            if time.monotonic() >= deadline:
-                raise BudgetExceeded("Mutation launch exhausted its active budget.")
-        on_launch()
-
-    if on_launch is not None:
-        kwargs["before_release"] = release
-    with popen(arguments, **kwargs) as process:
+    process, timeout = launch_process(
+        arguments, execution, timeout, kwargs, on_launch, on_no_launch
+    )
+    with process:
         try:
             if execution is None:
                 stdout, stderr = process.communicate(input, timeout=timeout)

@@ -14,6 +14,7 @@ from vibearr_runner.client import APIError
 from vibearr_runner.delivery import DeliveryError, SupervisorGit
 from vibearr_runner.journal import Journal
 from vibearr_runner.native_delivery import NativeDelivery
+from vibearr_runner.native_reads import read, NativeReadWait
 from vibearr_runner.recovery import ReconciliationRequired
 
 
@@ -215,3 +216,107 @@ class NativeMutationLaunchTests(unittest.TestCase):
         self.assertEqual(spawned.call_count, 1)
         self.assertTrue(self.marker.exists())
         self.assertTrue(self.host.native["delivery"]["push_dispatched"])
+
+    def read_ref(self):
+        self.transport.read = lambda key, operation: read(self.host, key, operation)
+        return self.transport.command(
+            [
+                "ls-remote",
+                "--refs",
+                "--",
+                "https://github.com/owner/repo.git",
+                "refs/heads/task/native",
+            ],
+            "https://github.com/owner/repo.git",
+            self.directory,
+            self.host.workspace_value.checkout,
+        )
+
+    def read_count(self):
+        return next(iter(self.host.native["transport_reads"].values()))["attempts"]
+
+    def test_repeated_prelaunch_read_pause_never_consumes_transport_attempts(self):
+        self.execution(checkpoint=lambda: False)
+        with patch.object(
+            processes, "popen", side_effect=AssertionError("unexpected spawn")
+        ):
+            for _ in range(5):
+                with self.assertRaises(BackendInterrupted):
+                    self.read_ref()
+        self.assertEqual(self.read_count(), 0)
+        self.assertFalse(self.marker.exists())
+
+    def test_blocked_read_worker_rejection_refunds_only_its_unreleased_attempt(self):
+        decisions = iter([True, False])
+        self.execution(checkpoint=lambda: next(decisions))
+        with patch.object(processes, "popen", side_effect=self.program):
+            with self.assertRaises(BackendInterrupted):
+                self.read_ref()
+        self.assertEqual(self.read_count(), 0)
+        self.assertFalse(self.marker.exists())
+        self.assertTrue(
+            all(p["status"] == "stopped" for p in self.host.state["processes"].values())
+        )
+
+    def test_read_pause_after_launch_keeps_the_actual_transport_attempt(self):
+        decisions = iter([True, True, False])
+        self.execution(checkpoint=lambda: next(decisions))
+        with patch.object(processes, "popen", side_effect=self.program):
+            with self.assertRaises(BackendInterrupted):
+                self.read_ref()
+        self.assertTrue(self.marker.exists())
+        self.assertEqual(self.read_count(), 1)
+
+    def test_prelaunch_checkpoint_failure_does_not_consume_read_attempt(self):
+        def unavailable():
+            raise APIError("checkpoint unavailable")
+
+        self.execution(checkpoint=unavailable)
+        with self.assertRaises(APIError):
+            self.read_ref()
+        self.assertEqual(self.read_count(), 0)
+        self.assertFalse(self.marker.exists())
+
+    def test_postlaunch_checkpoint_failure_preserves_read_attempt(self):
+        calls = []
+
+        def unavailable_after_launch():
+            calls.append(True)
+            if len(calls) == 3:
+                raise APIError("checkpoint unavailable")
+            return True
+
+        self.execution(checkpoint=unavailable_after_launch)
+        with patch.object(processes, "popen", side_effect=self.program):
+            with self.assertRaises(APIError):
+                self.read_ref()
+        self.assertTrue(self.marker.exists())
+        self.assertEqual(self.read_count(), 1)
+
+    def test_prelaunch_deadline_rejection_does_not_consume_read_attempt(self):
+        self.execution(deadline=time.monotonic() - 1)
+        with self.assertRaises(BudgetExceeded):
+            self.read_ref()
+        self.assertEqual(self.read_count(), 0)
+
+    def test_prelaunch_pause_preserves_previous_real_transport_failure(self):
+        self.execution()
+
+        def failed_read(arguments, **kwargs):
+            command = [
+                sys.executable,
+                "-c",
+                "import sys; sys.stderr.write('Could not resolve host'); sys.exit(128)",
+            ]
+            return self.spawn(command, **kwargs)
+
+        with patch.object(processes, "popen", side_effect=failed_read):
+            with self.assertRaises(NativeReadWait):
+                self.read_ref()
+        self.assertEqual(self.read_count(), 1)
+        record = next(iter(self.host.native["transport_reads"].values()))
+        record["retry_at"] = 0
+        self.execution(checkpoint=lambda: False)
+        with self.assertRaises(BackendInterrupted):
+            self.read_ref()
+        self.assertEqual(self.read_count(), 1)

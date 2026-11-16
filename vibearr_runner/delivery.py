@@ -349,6 +349,12 @@ class SupervisorGit:
                 "core.sshCommand=/usr/bin/false",
             ]
             launch = {} if on_launch is None else {"on_launch": on_launch}
+            attempt = processes.current_read_attempt.get()
+            if attempt is not None and arguments[0] in {"clone", "fetch", "ls-remote"}:
+                launch = {
+                    "on_launch": attempt.launched,
+                    "on_no_launch": attempt.rejected,
+                }
             result = processes.run(
                 command + arguments,
                 cwd=cwd,
