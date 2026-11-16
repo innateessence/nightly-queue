@@ -197,6 +197,9 @@ def main() -> None:
                 line.split()[0]: int(line.split()[1])
                 for line in path.read_text().splitlines()
             }
+        resources["pids.max"] = {
+            "value": int(Path("/sys/fs/cgroup/pids.max").read_text())
+        }
         result["resources"] = resources
         Path("/secrets/backend").unlink(missing_ok=True)
         try:

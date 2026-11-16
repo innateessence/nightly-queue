@@ -297,24 +297,27 @@ def limits():
 def main():
     kind = sys.argv[1]
     if kind == "pid-hold":
-        try:
-            for _ in range(80):
-                if os.fork() == 0:
-                    while True:
-                        time.sleep(1)
-        except OSError as exc:
-            check(
-                exc.errno == errno.EAGAIN,
-                "PID hold did not hit the actual process limit",
-            )
-        else:
-            raise RuntimeError("PID hold exceeded its fixed process limit")
-        Path("pids-full.txt").write_text(
-            "Task PID limit was reached before cancellation.\n"
-        )
-        print("pid-limit-held", flush=True)
+        forked = 0
+        recorded = False
         while True:
-            time.sleep(1)
+            check(forked < 80, "PID hold did not maintain its fixed process limit")
+            try:
+                if os.fork() == 0:
+                    time.sleep(600)
+                    os._exit(0)
+                forked += 1
+            except OSError as exc:
+                check(
+                    exc.errno == errno.EAGAIN,
+                    "PID hold failed before reaching its process limit",
+                )
+                if not recorded:
+                    Path("pids-full.txt").write_text(
+                        "Task PID limit was reached before cancellation.\n"
+                    )
+                    print("pid-limit-held", flush=True)
+                    recorded = True
+                time.sleep(0.02)
     if kind == "sleep":
         for _ in range(2):
             if os.fork() == 0:

@@ -391,10 +391,10 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
             )
             if occupied == held["limits"]["pids"]:
                 break
-            time.sleep(0.1)
+            time.sleep(0.137)
         require(
             occupied == 32,
-            "PID-hold fixture did not occupy all configured process slots",
+            f"PID-hold fixture did not occupy all configured process slots; observed {occupied}, expected32",
         )
         held_status = harness.client.status(held_op)
         require(
@@ -407,6 +407,15 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
             "Retry during PID exhaustion replaced the container",
         )
         held_stop = harness.client.stop(held_op)
+        held_resources = held_stop.get("result", {}).get("resources", {})
+        require(
+            held_resources.get("pids.max", {}).get("value") == 32,
+            "Protected PID limit changed during cancellation",
+        )
+        require(
+            held_resources.get("pids.events", {}).get("max", 0) > 0,
+            "No protected PID-limit enforcement event was recorded",
+        )
         require(
             held_stop["state"] == "exited" and held_stop.get("descendants_terminated"),
             "Stop during full PID occupancy did not confirm termination",
