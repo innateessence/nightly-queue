@@ -8,10 +8,10 @@ from pathlib import Path
 import time
 from uuid import uuid4
 
-from .client import APIError, ConflictError, NotFoundError
+from .client import APIError, ConflictError, NotFoundError, SupersededSourceError
 from .backends import BackendInterrupted
 from .budgets import BudgetExceeded
-from .delivery import DeliveryError, SupervisorGit
+from .delivery import DeliveryError, DeliveryReadUnavailable, SupervisorGit
 from .native_preflight import NativePreflight
 from .native_resources import NativeResources
 from .native_sessions import NativeBackendRegistry, NativeSession, NativeSessionError
@@ -142,20 +142,32 @@ class NativeLifecycle:
             raise NativeFailure(reason) from None
 
     def refresh_source(self, mode):
-        try:
-            return self.client.request(
-                "POST",
-                f"/api/v1/runner/runs/{self.run_id}/source/refresh/",
-                {
-                    "claim_token": self.token,
-                    "mode": mode,
-                },
-            )
-        except APIError as exc:
-            if type(exc) is APIError or isinstance(exc, ConflictError):
-                raise NativeFailure(
-                    "Current source authority rejected this frozen attempt; stop and retry explicitly."
+        from .native_reads import NativeReadWait
+
+        def collect():
+            try:
+                return self.client.request(
+                    "POST",
+                    f"/api/v1/runner/runs/{self.run_id}/source/refresh/",
+                    {"claim_token": self.token, "mode": mode},
+                )
+            except SupersededSourceError:
+                raise DeliveryReadUnavailable(
+                    "Source observation was superseded; collect fresh provider context."
                 ) from None
+            except APIError as exc:
+                if type(exc) is APIError or isinstance(exc, ConflictError):
+                    raise NativeFailure(
+                        "Current source authority rejected this frozen attempt; stop and retry explicitly."
+                    ) from None
+                raise
+
+        try:
+            return self.read("source-refresh:" + mode, collect)
+        except NativeReadWait:
+            self.native["paused"] = True
+            self.save()
+            self.resources.controls(self.run_id, self.executor, pause=True)
             raise
 
     def status(
