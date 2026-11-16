@@ -16,12 +16,13 @@ nonempty `access_token`, `refresh_token`, `id_token`, `account_id`; optional
 formats fail closed. This validates storage, not login freshness or tool support.
 The shape is grounded in the [upstream Codex authentication implementation](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/manager.rs).
 
-OpenCode connection JSON contains `provider` (`openai`, `anthropic`, `opencode`, or
-`ollama`), an `api_key`, and optional `base_url`. Ollama requires an explicit HTTP(S)
-URL and permits no API key. URLs cannot contain userinfo, query strings or fragments.
-These are application connection fields; a verified adapter must translate them
-into its pinned tool's configuration, never copy arbitrary JSON to tool settings.
-See [OpenCode provider documentation](https://opencode.ai/docs/providers/).
+OpenCode connections can be created using provider, endpoint and API-key form fields,
+or strict JSON containing `provider` (`openai`, `anthropic`, `opencode`, or
+`ollama`), optional `api_key` for local Ollama, and optional `base_url`. Ollama
+requires an explicit trusted local origin or `/api` base; hosted providers use fixed
+official endpoints. URLs cannot contain userinfo, query strings or fragments.
+The [OpenCode provider API candidate](runner-opencode-ollama.md) uses no native
+backend tools. Native OpenCode CLI execution remains unsupported.
 Claude stored tokens do not establish allowance support or grant permission to
 copy tokens into agent environments. Interactive refresh, undocumented session
 formats and live adapter compatibility remain outside this storage boundary.

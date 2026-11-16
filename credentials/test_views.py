@@ -44,13 +44,23 @@ class CredentialViewTests(TestCase):
         self.assertContains(response, "No credentials yet.")
         self.assertContains(response, "Save credential")
         self.assertContains(response, "0 credentials")
-        self.assertTrue(response.context["form"].fields["secret"].required)
+        self.assertFalse(response.context["form"].fields["secret"].required)
 
     def test_form_has_name_provider_and_type_in_order(self):
         response = self.client.get(self.url)
         form = response.context["form"]
         self.assertEqual(
-            list(form.fields), ["name", "provider", "kind", "secret", "passphrase"]
+            list(form.fields),
+            [
+                "name",
+                "provider",
+                "kind",
+                "secret",
+                "passphrase",
+                "connection_provider",
+                "connection_endpoint",
+                "connection_api_key",
+            ],
         )
         self.assertEqual(
             list(form.fields["provider"].choices),

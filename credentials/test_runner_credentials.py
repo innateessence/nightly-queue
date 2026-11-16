@@ -45,7 +45,7 @@ class BackendCredentialTests(TestCase):
         self.assertNotIn("private-secret-value", str(caught.exception))
 
     def test_opencode_ollama_connection(self):
-        secret = '{"provider":"ollama","base_url":"http://ollama:11434/v1"}'
+        secret = '{"provider":"ollama","base_url":"http://runner-ollama:11434/api"}'
         credential = self.make_credential(
             provider="opencode", kind="connection", secret=secret
         )

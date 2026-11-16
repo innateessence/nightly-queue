@@ -84,7 +84,9 @@ def api_settings(request):
 
 
 @never_cache
-@sensitive_post_parameters("secret", "passphrase")
+@sensitive_post_parameters(
+    "secret", "passphrase", "connection_api_key", "connection_endpoint"
+)
 @require_http_methods(["GET", "POST"])
 def credential_list(request):
     data = request.POST if request.method == "POST" else None
@@ -99,7 +101,9 @@ def credential_list(request):
 
 
 @never_cache
-@sensitive_post_parameters("secret", "passphrase")
+@sensitive_post_parameters(
+    "secret", "passphrase", "connection_api_key", "connection_endpoint"
+)
 @require_http_methods(["GET", "POST"])
 def credential_edit(request, credential_id):
     credential = get_object_or_404(Credential, pk=credential_id)
