@@ -64,7 +64,12 @@ class Client:
         self.request_lock = threading.Lock()
 
     def request(
-        self, method: str, path: str, payload: dict[str, Any] | None = None
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         if not path.startswith("/api/v1/runner/") or "?" in path or "#" in path:
             raise ValueError("Use a runner API path.")
@@ -81,7 +86,10 @@ class Client:
             headers["Content-Type"] = "application/json"
         request = Request(self.url + path, data=body, headers=headers, method=method)
         mutation = method != "GET"
-        deadline = time.monotonic() + self.timeout
+        if timeout is not None and not 0 < timeout:
+            raise ValueError("Request timeout must be positive.")
+        allowance = min(self.timeout, timeout) if timeout is not None else self.timeout
+        deadline = time.monotonic() + allowance
         if not self.request_lock.acquire(blocking=False):
             self._unavailable(mutation)
         finished = threading.Event()

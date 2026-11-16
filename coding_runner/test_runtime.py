@@ -74,6 +74,55 @@ class ServerCase(TestCase):
 
 
 class ClientTests(ServerCase):
+    def test_per_request_timeout_cannot_extend_the_configured_maximum(self):
+        release = threading.Event()
+
+        def stalled(*args, **kwargs):
+            release.wait(2)
+            raise TimeoutError
+
+        try:
+            with patch.object(self.client.opener, "open", side_effect=stalled):
+                started = time.monotonic()
+                with self.assertRaises(UnavailableError):
+                    self.client.request("GET", "/api/v1/runner/identity/", timeout=60)
+                self.assertLess(time.monotonic() - started, 0.7)
+        finally:
+            release.set()
+        self.assertTrue(self.client.request_lock.acquire(timeout=2))
+        self.client.request_lock.release()
+
+    def test_invalid_per_request_timeout_never_starts_transport(self):
+        with patch.object(self.client.opener, "open") as transport:
+            for timeout in [0, -1, float("nan")]:
+                with self.assertRaises(ValueError):
+                    self.client.request(
+                        "GET", "/api/v1/runner/identity/", timeout=timeout
+                    )
+        transport.assert_not_called()
+
+    def test_request_timeout_caps_the_normal_client_deadline(self):
+        self.client.timeout = 15
+        release = threading.Event()
+
+        def stalled(*args, **kwargs):
+            release.wait(2)
+            raise TimeoutError
+
+        try:
+            with patch.object(self.client.opener, "open", side_effect=stalled):
+                started = time.monotonic()
+                with self.assertRaises(UnavailableError):
+                    self.client.request("GET", "/api/v1/runner/identity/", timeout=0.1)
+                self.assertLess(time.monotonic() - started, 0.7)
+                with self.assertRaises(UnavailableError):
+                    self.client.identity()
+                self.assertEqual(self.client.opener.open.call_count, 1)
+        finally:
+            release.set()
+        self.assertTrue(self.client.request_lock.acquire(timeout=2))
+        self.client.request_lock.release()
+
     def test_slow_headers_cannot_extend_request_deadline(self):
         class SlowHeaders(BaseHTTPRequestHandler):
             def do_GET(self):

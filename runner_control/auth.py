@@ -28,7 +28,7 @@ def runner_authentication(request):
     return None
 
 
-def runner_api_view(method):
+def runner_api_view(*methods):
     def decorate(view):
         @csrf_exempt
         @wraps(view)
@@ -37,9 +37,11 @@ def runner_api_view(method):
             if runner is None:
                 return unauthorized()
             request.runner_identity = runner
-            if request.method != method:
-                response = JsonResponse({"error": f"Use {method}."}, status=405)
-                response["Allow"] = method
+            if request.method not in methods:
+                response = JsonResponse(
+                    {"error": f"Use {', '.join(methods)}."}, status=405
+                )
+                response["Allow"] = ", ".join(methods)
             else:
                 try:
                     response = view(request, *args, **kwargs)

@@ -191,6 +191,14 @@ def record_evidence(
     if created and progress is not None:
         for field, value in progress.items():
             setattr(run, field, value)
+        if progress.get("stage") in {
+            Run.Stage.IMPLEMENTATION,
+            Run.Stage.VALIDATION,
+            Run.Stage.DELIVERY,
+        }:
+            from .plan_services import require_saved_plan
+
+            require_saved_plan(run)
         run.save(update_fields=[*progress, "updated_at"])
     return evidence
 

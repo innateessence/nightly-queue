@@ -1,0 +1,292 @@
+from datetime import datetime, timedelta
+
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.utils import timezone
+
+from credentials.redaction import redact_run_payload
+
+from coding_runner.context import ContextError, digest, discussion_digest
+from coding_runner.plans import revision, validate_context, validate_plan
+from work_queue.api import item_data
+
+from .models import ContextSnapshot, PlanVersion
+from .services import (
+    RunConflict,
+    RunNotFound,
+    append_evidence,
+    lock_controller,
+    owned_run,
+    verify_active,
+)
+
+MAX_DOCUMENTS = 200
+
+
+def claimed_item(run):
+    item = item_data(run.item)
+    item.update(
+        repository_url=run.item.repository_url, base_branch=run.item.base_branch
+    )
+    return item
+
+
+def checked(operation):
+    try:
+        return operation()
+    except ContextError as exc:
+        raise ValidationError({"document": str(exc)}) from None
+
+
+def require_safe_document(run, document):
+    if redact_run_payload(run, document) != document:
+        raise ValidationError(
+            {
+                "document": "Saved documents must not contain selected credential material."
+            }
+        )
+
+
+def previous_operation(model, run, operation_id, document, reason, **extra):
+    previous = model.objects.filter(run=run, operation_id=operation_id).first()
+    if previous is None:
+        if model.objects.filter(run=run).count() >= MAX_DOCUMENTS:
+            raise RunConflict("Run document version limit reached.")
+        return None
+    same = previous.digest == digest(document) and previous.reason == reason
+    if not same or any(
+        str(getattr(previous, key)) != str(value) for key, value in extra.items()
+    ):
+        raise RunConflict("Document operation ID already contains different content.")
+    return previous
+
+
+def locked_run(runner, run_id, claim_token):
+    lock_controller(runner)
+    run = owned_run(runner, run_id)
+    verify_active(run, claim_token)
+    return run
+
+
+@transaction.atomic
+def save_context(
+    *,
+    runner,
+    run_id,
+    claim_token,
+    operation_id,
+    document,
+    base_commit,
+    reason,
+    resolved_base_branch,
+):
+    run = locked_run(runner, run_id, claim_token)
+    require_safe_document(run, document)
+    reason = redact_run_payload(run, reason)
+    if redact_run_payload(run, resolved_base_branch) != resolved_base_branch:
+        raise ValidationError(
+            {
+                "resolved_base_branch": "Base branch contains selected credential material."
+            }
+        )
+    checked(lambda: revision(base_commit))
+    if not resolved_base_branch.strip() or (
+        run.item.base_branch and resolved_base_branch != run.item.base_branch
+    ):
+        raise ValidationError(
+            {"resolved_base_branch": "Record the actual resolved base branch."}
+        )
+    checked(lambda: validate_context(document, claimed_item(run)))
+    previous = previous_operation(
+        ContextSnapshot,
+        run,
+        operation_id,
+        document,
+        reason,
+        inspected_base_commit=base_commit,
+        resolved_base_branch=resolved_base_branch,
+    )
+    if previous is not None:
+        return previous
+    latest = run.contexts.last()
+    if latest is not None and not reason.strip():
+        raise ValidationError({"reason": "Describe why the context was refreshed."})
+    changes = []
+    discussion = discussion_digest(document)
+    if latest and latest.discussion_digest != discussion:
+        changes.append("discussion")
+    if latest and latest.resolved_base_branch != resolved_base_branch:
+        changes.append("resolved_base_branch")
+    if latest and latest.inspected_base_commit != base_commit:
+        changes.append("base_commit")
+    snapshot = ContextSnapshot.objects.create(
+        run=run,
+        operation_id=operation_id,
+        sequence=latest.sequence + 1 if latest else 1,
+        document=document,
+        digest=digest(document),
+        discussion_digest=discussion,
+        inspected_base_commit=base_commit,
+        resolved_base_branch=resolved_base_branch,
+        reason=reason,
+        changes=changes,
+    )
+    run.context_reference = str(snapshot.pk)
+    run.save(update_fields=["context_reference", "updated_at"])
+    return snapshot
+
+
+@transaction.atomic
+def save_plan(*, runner, run_id, claim_token, operation_id, document, reason):
+    run = locked_run(runner, run_id, claim_token)
+    require_safe_document(run, document)
+    reason = redact_run_payload(run, reason)
+    previous = previous_operation(PlanVersion, run, operation_id, document, reason)
+    if previous is not None:
+        return previous
+    latest_context = run.contexts.last()
+    if latest_context is None:
+        raise RunConflict("Save complete context before a plan.")
+    require_safe_document(run, latest_context.document)
+    checked(
+        lambda: validate_plan(
+            document,
+            latest_context.document,
+            str(latest_context.pk),
+            latest_context.inspected_base_commit,
+        )
+    )
+    if document["resolved_base_branch"] != latest_context.resolved_base_branch:
+        raise RunConflict("Plan must preserve the inspected resolved base branch.")
+    latest = run.plans.last()
+    if latest is not None and not reason.strip():
+        raise ValidationError(
+            {"reason": "Describe the material plan revision or assessment."}
+        )
+    plan = PlanVersion.objects.create(
+        run=run,
+        context=latest_context,
+        operation_id=operation_id,
+        version=latest.version + 1 if latest else 1,
+        supersedes=latest,
+        document=document,
+        digest=digest(document),
+        reason=reason,
+    )
+    run.plan_reference = str(plan.pk)
+    run.save(update_fields=["plan_reference", "updated_at"])
+    return plan
+
+
+@transaction.atomic
+def valid_handoff(run, *, require_refresh=True):
+    plan = run.plans.last()
+    current = run.contexts.last()
+    if plan is None or current is None:
+        raise RunConflict(
+            "Implementation requires a saved valid plan and complete context."
+        )
+    require_safe_document(run, plan.document)
+    require_safe_document(run, plan.context.document)
+    require_safe_document(run, current.document)
+    if run.plan_reference != str(plan.pk) or run.context_reference != str(current.pk):
+        raise RunConflict("Context or plan reference is not the latest saved version.")
+    checked(
+        lambda: validate_plan(
+            plan.document,
+            plan.context.document,
+            str(plan.context_id),
+            plan.context.inspected_base_commit,
+        )
+    )
+    if plan.document["blockers"]:
+        raise RunConflict("Unresolved plan blockers prevent implementation.")
+    if (
+        current.discussion_digest != plan.context.discussion_digest
+        or current.inspected_base_commit != plan.context.inspected_base_commit
+        or current.resolved_base_branch != plan.context.resolved_base_branch
+    ):
+        raise RunConflict(
+            "Discussion or base changed; save a revised plan with an assessment reason."
+        )
+    now = timezone.now()
+    cutoff = now - timedelta(minutes=5)
+    fetched_at = datetime.fromisoformat(
+        current.document["fetched_at"].replace("Z", "+00:00")
+    )
+    if require_refresh and (
+        current.created_at < plan.created_at
+        or current.created_at < cutoff
+        or fetched_at < plan.created_at
+        or fetched_at < cutoff
+        or fetched_at > now + timedelta(seconds=30)
+    ):
+        raise RunConflict(
+            "Refresh complete discussion and inspect the base before handoff."
+        )
+    return plan, current
+
+
+def saved_handoff(run, operation_id):
+    evidence = run.evidence.filter(operation_id=operation_id).first()
+    if evidence is None:
+        raise RunNotFound
+    if evidence.kind != "plan_handoff":
+        raise RunConflict("This operation ID already has different evidence.")
+    try:
+        plan = run.plans.get(pk=evidence.payload["plan_id"])
+        context = run.contexts.get(pk=evidence.payload["context_id"])
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        PlanVersion.DoesNotExist,
+        ContextSnapshot.DoesNotExist,
+    ):
+        raise RunConflict(
+            "Handoff evidence does not reference saved documents."
+        ) from None
+    return plan, context
+
+
+@transaction.atomic
+def handoff(*, runner, run_id, claim_token, operation_id, context_id, base_commit):
+    run = locked_run(runner, run_id, claim_token)
+    if run.evidence.filter(operation_id=operation_id).exists():
+        plan, current = saved_handoff(run, operation_id)
+        if (
+            str(current.pk) != str(context_id)
+            or current.inspected_base_commit != base_commit
+        ):
+            raise RunConflict(
+                "This handoff operation ID already has different content."
+            )
+        return plan, current
+    plan, current = valid_handoff(run)
+    if (
+        str(current.pk) != str(context_id)
+        or current.inspected_base_commit != base_commit
+    ):
+        raise RunConflict(
+            "Handoff must use the latest refreshed context and inspected base."
+        )
+    payload = {
+        "plan_id": str(plan.pk),
+        "context_id": str(current.pk),
+        "base_commit": base_commit,
+    }
+    append_evidence(run, operation_id, "plan_handoff", payload)
+    return plan, current
+
+
+def require_saved_plan(run):
+    plan, current = valid_handoff(run)
+    evidence = run.evidence.filter(kind="plan_handoff").last()
+    if evidence is None or evidence.payload != {
+        "plan_id": str(plan.pk),
+        "context_id": str(current.pk),
+        "base_commit": current.inspected_base_commit,
+    }:
+        raise RunConflict(
+            "Verify the refreshed saved-plan handoff before implementation."
+        )

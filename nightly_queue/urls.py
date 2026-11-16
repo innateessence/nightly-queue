@@ -23,5 +23,6 @@ urlpatterns = [
     path("", include("credentials.urls")),
     path("", include("projects.urls")),
     path("", include("work_queue.urls")),
+    path("", include("runner_control.plan_urls")),
     path("api/v1/runner/", include("runner_control.urls")),
 ]
