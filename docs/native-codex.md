@@ -24,6 +24,17 @@ The recipe pins Python 3.12.12, Git, and Codex **0.169.0**, including its separa
 extracting each executable. Linux x86-64 and ARM64 archives have separate pins.
 Deploy the resulting immutable `sha256:` image ID, rather than a mutable tag.
 
+That image contains the CLI, Git, and Python; it does not contain this
+application's requirements. For repository work, bootstrap must register a
+separately reviewed image derived from that immutable Codex image with the
+repository's common requirements installed. Build it once without model or
+GitHub credentials, using a trusted recipe and reviewed requirements. Qualify its
+new image ID and select that ID in the agent profile. Do not select the bare
+fixture image for Django application work or let candidate Dockerfiles choose
+the agent image. Later candidate dependency changes are resolved and checked by
+the independent, credential-free validation builder; the model phase retains
+only its model endpoint allowlist.
+
 Use `vibearr_runner.native_codex.codex_profile(image, kind)` to construct the
 registered profile. Its default IDs are `codex-token-v1` and `codex-session-v1`.
 The helper fixes the launch recipe and selected-secret slot. Profile limits are
