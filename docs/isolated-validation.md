@@ -43,6 +43,10 @@ denied. The supervisor and credentialed agent retain their own private defaults.
 The check uses the image-owned interpreter with startup site hooks disabled;
 dependency-supplied Python executables and `.pth` startup files do not select or
 replace the required test entrypoint.
+The type checker and its Django plugin are loaded from the image before candidate
+paths are added. The pinned type toolchain uses its matching Django version;
+application tests separately import the selected candidate dependency environment.
+Mypy does not retain its large incremental cache in the source export.
 
 ## Install and select a profile
 
@@ -96,7 +100,9 @@ actual zero exit code, timeout flag, ordered timestamps, log reference and diges
 References use `executor:<operation-uuid>:logs`; read them through the authenticated
 bounded log API. Truncated logs, nonzero exits, timeouts, cancellation, missing
 termination, changed command coverage, or changed dependencies cannot qualify a
-successful delivery. Commit the inspected candidate before extracting it; any
+successful delivery. Successful source exports are read back and their bytes and
+file inventory verified against the protected receipt, even though test-generated
+files are never imported into the publishing checkout. Commit the inspected candidate before extracting it; any
 later tree change requires another validation attempt.
 
 `reconcile(session)` and `stop(session)` use the original frozen operation
@@ -165,10 +171,11 @@ python -I -m vibearr_runner.validation_cli \
   --evidence /private/validation-evidence.json --acceptance
 ```
 
-This qualifies the image and runs a passing candidate twice, proves that its
-database marker does not survive into the next run, rejects a deliberate failing
-test, rejects ignore-all/candidate-recipe bypass, and builds/qualifies/validates a
-candidate adding an actual dependency. Every case preserves actual exit/log/tree
+This qualifies the image, validates the exact candidate, and runs a database-marker
+candidate twice to prove that database state does not survive. It rejects a
+deliberate failing test, ignore-all/candidate-recipe bypass, and a type error even
+when candidate files share the pinned plugin's package name. It also builds,
+qualifies and validates a candidate adding an actual dependency. Every case preserves actual exit/log/tree
 evidence and only creates run-owned disposable resources. It needs Docker on the
 executor host, the pinned database image and package access; it needs no native
 coding agent, paid model call, production stack or production database.

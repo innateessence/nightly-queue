@@ -7,6 +7,7 @@ import re
 import os
 import json
 import math
+import base64
 import subprocess
 import selectors
 import time
@@ -201,6 +202,7 @@ class CandidateSource:
 class ValidationRunner:
     def __init__(self, client):
         self.client = client
+        self.verified_exports: dict[str, str] = {}
 
     def prepare(
         self,
@@ -384,6 +386,8 @@ class ValidationRunner:
                 or result.get("canceled") is not False
                 or result.get("log_truncated") is not False
                 or result.get("error")
+                or result.get("export_error")
+                or not isinstance(result.get("artifact"), dict)
             ):
                 return {
                     "state": "failed",
@@ -391,6 +395,7 @@ class ValidationRunner:
                     "operation": observed,
                 }
             operation = entry["manifest"]["operation_id"]
+            self.verify_export(entry["manifest"], result["artifact"])
             sha256(result.get("log_digest"))
             try:
                 timestamps = [result["started_at"], result["ended_at"]]
@@ -433,6 +438,61 @@ class ValidationRunner:
                 "checks": checks,
             },
         }
+
+    def verify_export(self, job: dict, protected: dict):
+        from vibearr_executor.artifacts import inventory, safe_path
+        from vibearr_executor.contracts import (
+            MAX_ARCHIVE,
+            Rejected,
+            canonical,
+            digest,
+            sha256,
+        )
+
+        expected = {
+            "schema_version",
+            "source_digest",
+            "result_digest",
+            "files",
+            "deleted",
+        }
+        if (
+            set(protected) != expected
+            or type(protected["schema_version"]) is not int
+            or protected["schema_version"] != 1
+            or protected["source_digest"] != job["source_digest"]
+        ):
+            raise Rejected(
+                "Protected validation export is missing or bound to another source."
+            )
+        sha256(protected["result_digest"])
+        signature = digest(canonical(protected))
+        operation = job["operation_id"]
+        if self.verified_exports.get(operation) == signature:
+            return
+        response = self.client.operation(operation, "result")
+        try:
+            content = base64.b64decode(response["content"], validate=True)
+            valid = (
+                len(content) <= MAX_ARCHIVE
+                and canonical(response["manifest"]) == canonical(protected)
+                and digest(content) == protected["result_digest"]
+                and inventory(content) == protected["files"]
+            )
+            deleted = protected["deleted"]
+            valid = (
+                valid and isinstance(deleted, list) and deleted == sorted(set(deleted))
+            )
+            if valid:
+                for name in deleted:
+                    safe_path(name)
+        except (KeyError, ValueError, TypeError):
+            valid = False
+        if not valid:
+            raise Rejected(
+                "Validation export bytes or file inventory differ from the protected result."
+            )
+        self.verified_exports[operation] = signature
 
     def start(self, session: dict) -> dict:
         observed = self.status(session)

@@ -126,9 +126,19 @@ def acceptance(client, source, profile, state: Path):
             "vibearr_executor/validation_task.py": b"raise SystemExit(0)\n",
         },
     )
+    typed = fixture(
+        source,
+        state / "plugin-origin-source",
+        {
+            "mypy_django_plugin/__init__.py": b"",
+            "mypy_django_plugin/main.py": b"raise SystemExit(0)\n",
+            "validation_type_error.py": b'value: int = "not an integer"\n',
+        },
+    )
     for name, candidate, expected_check in (
         ("deliberate-test-failure", failing, "django"),
         ("ignore-and-recipe-bypass-rejected", ignored, "black"),
+        ("trusted-plugin-detects-type-error", typed, "mypy"),
     ):
         output = state / name
         output.mkdir(mode=0o700)

@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import shutil
 import importlib.util
+import base64
+from unittest.mock import patch
 import tempfile
 import unittest
 from uuid import uuid4
@@ -14,7 +16,7 @@ from vibearr_runner.policy import ExecutionPolicy
 
 SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
 if SDK_AVAILABLE:
-    from vibearr_executor.artifacts import pack, unpack
+    from vibearr_executor.artifacts import pack, unpack, result_manifest
     from vibearr_executor.contracts import Conflict, Rejected, digest
     from vibearr_executor.validation_profile import CHECK_IDS, ValidationProfile
 
@@ -95,6 +97,7 @@ class ClientFixture:
         self.manifests = {}
         self.states = {}
         self.started = []
+        self.source = b""
 
     def capabilities(self):
         from vibearr_executor import PROTOCOL_VERSION, QUALIFICATION_VERSION
@@ -112,7 +115,16 @@ class ClientFixture:
         }
 
     def upload(self, _kind, content):
+        if _kind == "source":
+            self.source = content
         return {"sha256": digest(content)}
+
+    def operation(self, _operation, action):
+        assert action == "result"
+        return {
+            "manifest": result_manifest(self.source, self.source),
+            "content": base64.b64encode(self.source).decode(),
+        }
 
     def prepare(self, manifest):
         operation = manifest["operation_id"]
@@ -142,6 +154,7 @@ class ClientFixture:
                 "canceled": False,
                 "log_truncated": False,
                 "log_digest": "a" * 64,
+                "artifact": result_manifest(self.source, self.source),
             },
         }
 
@@ -232,6 +245,34 @@ class NativeValidationTests(unittest.TestCase):
         self.runner.start(session)
         self.client.states[self.client.started[0]]["result"]["log_truncated"] = True
         self.assertEqual(self.runner.status(session)["state"], "failed")
+
+    def test_missing_export_cannot_qualify_success(self):
+        session = self.prepare()
+        self.runner.start(session)
+        self.client.states[self.client.started[0]]["result"].pop("artifact")
+        self.assertEqual(self.runner.status(session)["state"], "failed")
+
+    def test_export_error_cannot_qualify_success(self):
+        session = self.prepare()
+        self.runner.start(session)
+        self.client.states[self.client.started[0]]["result"][
+            "export_error"
+        ] = "Unsafe workspace"
+        self.assertEqual(self.runner.status(session)["state"], "failed")
+
+    def test_export_bytes_are_verified_before_success(self):
+        session = self.prepare()
+        operation = session["operations"][0]["manifest"]["operation_id"]
+        self.client.start(operation)
+        response = self.client.operation(operation, "result")
+        response["content"] = base64.b64encode(
+            pack({"other": (0o644, b"different")})
+        ).decode()
+        with (
+            patch.object(self.client, "operation", return_value=response),
+            self.assertRaises(Rejected),
+        ):
+            self.runner.status(session)
 
     def test_mismatched_result_identity_cannot_qualify_success(self):
         session = self.prepare()

@@ -75,6 +75,14 @@ def main() -> int:
     mypy_main: Any = None
     if check == "mypy":
         from mypy.main import main as mypy_main
+        import mypy_django_plugin.main
+
+        if not str(Path(mypy_django_plugin.main.__file__).resolve()).startswith(
+            "/usr/local/lib/python3.12/site-packages/"
+        ):
+            raise RuntimeError(
+                "The type-checking plugin must come from the trusted image."
+            )
     os.chdir(WORK)
     dependencies = Path("/opt/candidate/venv/lib/python3.12/site-packages")
     if dependencies.exists():
@@ -112,7 +120,7 @@ def main() -> int:
                 "--config-file",
                 str(ROOT / "validation_mypy.ini"),
                 "--cache-dir",
-                "/work/.validation-tmp/mypy",
+                "/dev/null",
             ],
             clean_exit=True,
         )
