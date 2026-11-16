@@ -9,7 +9,7 @@ from .client import (
     Client,
     InvalidResponse,
 )
-from .journal import Journal
+from .journal import Journal, JournalError
 from .gates import GateEvaluator
 from .backend_registry import BackendRegistry, ScopedCredentials
 from .recovery import RecoveryCoordinator, ReconciliationRequired
@@ -61,7 +61,7 @@ class Controller:
         if identity.get("schema_version") != 1 or type(runner_id) is not int:
             raise InvalidResponse("Runner identity response is invalid.")
         if state.get("runner_id") not in {None, runner_id}:
-            raise OwnershipLost("Journal belongs to a different runner identity.")
+            raise JournalError("Journal belongs to a different runner identity.")
         self.check_shutdown()
         configuration = self.client.configuration()
         if configuration.get("schema_version") != 1:
@@ -266,6 +266,9 @@ class Controller:
                 )
                 self.stop.wait(delay)
                 delay = min(delay * 2, 60)
+            except JournalError:
+                self.suspend_owned(state, ownership_lost=True)
+                raise
 
     def suspend_owned(self, state, *, ownership_lost=False):
         native = state.get("native") or state.get("native_preflight")
