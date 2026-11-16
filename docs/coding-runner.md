@@ -10,8 +10,9 @@ The next execution component is a dedicated `coding-runner` Docker Compose servi
 in this repository. This document defines the planned implementation. The current
 stack stores tasks, imports GitHub issues, and exposes claim/finish APIs; it does
 not fetch issue comments, research solutions, generate implementation plans,
-execute coding tasks, or create pull requests. The workflow and web settings below
-are planned behavior, not currently available features.
+execute coding tasks, or create pull requests. The workflow below remains planned. The runner settings and effective configuration
+contract are implemented in [runner settings](runner-settings.md); execution remains
+disabled pending the runtime and controlled release checks.
 
 ## Responsibilities
 

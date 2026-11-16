@@ -1,5 +1,5 @@
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 
 from .validators import normalize_repository_url, validate_branch
 
@@ -29,7 +29,12 @@ class Project(models.Model):
 
     def save(self, *args, **kwargs):
         self.full_clean()
-        return super().save(*args, **kwargs)
+        from runner_control.settings_models import RunnerSettings
+
+        with transaction.atomic():
+            RunnerSettings.objects.get_or_create(pk=1)
+            list(RunnerSettings.objects.select_for_update().filter(pk=1))
+            return super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.name} (#{self.pk})"

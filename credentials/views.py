@@ -1,5 +1,9 @@
 from django.contrib import messages
 from django.shortcuts import redirect, render
+
+from runner_control.configuration import configuration_document
+from runner_control.settings_forms import RunnerSettingsForm
+from runner_control.settings_models import RunnerSettings
 from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_http_methods
@@ -13,14 +17,31 @@ from .models import APISettings, Credential
 def api_settings(request):
     saved = APISettings.objects.filter(pk=1).first() or APISettings()
     data = request.POST if request.method == "POST" else None
-    form = APISettingsForm(data, instance=saved)
-    if request.method == "POST" and form.is_valid():
+    runner_saved = RunnerSettings.objects.filter(pk=1).first() or RunnerSettings()
+    runner_post = request.method == "POST" and request.POST.get("section") == "runner"
+    form = APISettingsForm(data if not runner_post else None, instance=saved)
+    runner_form = RunnerSettingsForm(
+        data if runner_post else None, instance=runner_saved, prefix="runner"
+    )
+    if runner_post and runner_form.is_valid():
+        runner_form.save()
+        messages.success(
+            request,
+            "Coding runner settings saved. Live execution remains release-gated.",
+        )
+        return redirect("api_settings")
+    if request.method == "POST" and not runner_post and form.is_valid():
         saved = form.save(commit=False)
         fields = list(form.fields) if not saved._state.adding else None
         saved.save(update_fields=fields)
         messages.success(request, "Settings saved.")
         return redirect("api_settings")
-    return render(request, "credentials/settings.html", {"form": form})
+    context = {
+        "form": form,
+        "runner_form": runner_form,
+        "runner_configuration": configuration_document(),
+    }
+    return render(request, "credentials/settings.html", context)
 
 
 @never_cache

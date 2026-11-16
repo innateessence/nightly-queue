@@ -146,7 +146,8 @@ class ProjectViewTests(TestCase):
         self.assertFalse(field.value())
         self.assertContains(response, 'type="checkbox" name="autonomous"')
         self.assertContains(
-            response, "Find open issues and create a pull request for each."
+            response,
+            "Import open issues and make imported issues eligible for claiming. Manual tasks remain independently claimable.",
         )
 
     def test_create_without_toggle_saves_manual_project(self):

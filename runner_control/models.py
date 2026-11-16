@@ -95,3 +95,6 @@ class RunEvidence(models.Model):
                 fields=["run", "operation_id"], name="runner_evidence_operation"
             )
         ]
+
+
+from .settings_models import ProjectRunnerSettings, RunnerSettings  # noqa: F401, E402
