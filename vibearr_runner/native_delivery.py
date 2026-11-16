@@ -21,9 +21,9 @@ class NativeDelivery:
     def clients(self, *, reconciliation=False):
         grant = self.host.secret("repository", reconciliation=reconciliation)
         token = grant["material"]["secret"]
-        return NativeGitHub(token, read_only=reconciliation), SupervisorGit(
-            token=token, read_only=reconciliation
-        )
+        return NativeGitHub(
+            token, read_only=reconciliation, read=self.host.read
+        ), SupervisorGit(token=token, read_only=reconciliation, read=self.host.read)
 
     def identity(self, github):
         workspace = self.native["candidate"]["workspace"]
@@ -318,6 +318,20 @@ class NativeDelivery:
     def _reconcile_publications(self):
         if not self.data.get("intents"):
             return []
+        if not self.data.get("push_dispatched") and not self.data.get(
+            "create_dispatched"
+        ):
+            return [
+                {
+                    "intent_id": identity,
+                    "publication_id": self.data["publication_id"],
+                    "stage": stage,
+                    "state": "not_started",
+                    "pushed_sha": "",
+                    "pull_request": None,
+                }
+                for stage, identity in self.data["intents"].items()
+            ]
         github, transport = self.clients(reconciliation=True)
         workspace, checkout = self.identity(github)
         remote = transport.observed_remote(checkout)

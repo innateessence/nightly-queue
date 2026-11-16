@@ -10,6 +10,7 @@ import shlex
 import sys
 import time
 from http.client import HTTPException
+from email.utils import parsedate_to_datetime
 from typing import Any, NoReturn
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -33,6 +34,30 @@ class DeliveryUnknown(DeliveryError):
 
 class DeliveryWait(DeliveryError):
     pass
+
+
+class DeliveryReadUnavailable(DeliveryError):
+    def __init__(self, message, *, retry_at=0):
+        super().__init__(message)
+        self.retry_at = retry_at
+
+
+def github_retry_at(headers):
+    values = [0.0]
+    retry = headers.get("Retry-After", "")
+    try:
+        values.append(time.time() + max(0, float(retry)))
+    except (ValueError, TypeError):
+        try:
+            values.append(parsedate_to_datetime(retry).timestamp())
+        except (ValueError, TypeError, OverflowError):
+            pass
+    if headers.get("X-RateLimit-Remaining") == "0":
+        try:
+            values.append(float(headers.get("X-RateLimit-Reset", "")))
+        except (ValueError, TypeError):
+            pass
+    return max(value for value in values if 0 <= value < float("inf"))
 
 
 class PullRequestChanged(DeliveryError):
@@ -142,7 +167,7 @@ class GitHubDeliveryClient:
         return result
 
     def unavailable(self, method: str) -> NoReturn:
-        error = DeliveryUnknown if method != "GET" else DeliveryError
+        error = DeliveryUnknown if method != "GET" else DeliveryReadUnavailable
         raise error(
             "GitHub response unavailable; reconcile delivery before retrying."
         ) from None
@@ -166,7 +191,13 @@ class GitHubDeliveryClient:
                 return json.loads(raw)
         except HTTPError as exc:
             status = exc.code
+            retry_at = github_retry_at(exc.headers)
+            limited = status == 429 or status == 403 and retry_at > time.time()
             exc.close()
+            if method == "GET" and (status >= 500 or limited):
+                raise DeliveryReadUnavailable(
+                    f"GitHub read returned HTTP {status}.", retry_at=retry_at
+                ) from None
             if method != "GET" and status >= 500:
                 raise DeliveryUnknown(
                     "GitHub mutation outcome requires reconciliation."
@@ -222,11 +253,17 @@ class GitHubDeliveryClient:
 
 class SupervisorGit:
     def __init__(
-        self, *, token: str = "", trusted_local: bool = False, read_only=False
+        self,
+        *,
+        token: str = "",
+        trusted_local: bool = False,
+        read_only=False,
+        read=None,
     ):
         self.token = token
         self.trusted_local = trusted_local
         self.read_only = read_only
+        self.read = read
 
     def remote(self, workspace: Workspace, arguments: list[str]) -> str:
         return self.command(
@@ -236,6 +273,14 @@ class SupervisorGit:
     def command(
         self, arguments: list[str], repository_url: str, directory, cwd=None
     ) -> str:
+        if self.read and arguments and arguments[0] == "ls-remote":
+            key = "git:" + json.dumps([repository_url, arguments])
+            return self.read(
+                key, lambda: self._command(arguments, repository_url, directory, cwd)
+            )
+        return self._command(arguments, repository_url, directory, cwd)
+
+    def _command(self, arguments, repository_url, directory, cwd):
         if self.read_only and (
             not arguments or arguments[0] not in {"ls-remote", "clone", "fetch"}
         ):
@@ -290,11 +335,38 @@ class SupervisorGit:
                 timeout=120,
             )
             if result.returncode or len(result.stdout) > 1048576:
+                diagnostics = result.stderr.lower()
+                transient = any(
+                    value in diagnostics
+                    for value in (
+                        b"could not resolve",
+                        b"failed to connect",
+                        b"connection reset",
+                        b"connection timed out",
+                        b"operation timed out",
+                        b"http 500",
+                        b"http 502",
+                        b"http 503",
+                        b"http 504",
+                        b"error: 500",
+                        b"error: 502",
+                        b"error: 503",
+                        b"error: 504",
+                    )
+                )
+                if arguments[0] == "ls-remote" and transient:
+                    raise DeliveryReadUnavailable(
+                        "Git remote read is temporarily unavailable."
+                    )
                 raise DeliveryError(
                     "Repository operation failed; branch and any pull request are preserved."
                 )
             return result.stdout.decode().strip()
         except (OSError, subprocess.TimeoutExpired, UnicodeError):
+            if arguments[0] == "ls-remote":
+                raise DeliveryReadUnavailable(
+                    "Git remote read is temporarily unavailable."
+                ) from None
             raise DeliveryUnknown(
                 "Repository operation outcome requires reconciliation."
             ) from None

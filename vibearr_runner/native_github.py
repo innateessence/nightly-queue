@@ -42,6 +42,18 @@ def repository_identity(value, *, expected_id=None):
 
 
 class NativeGitHub(GitHubDeliveryClient):
+    def __init__(self, *args, read=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.read = read
+
+    def request(self, method, path, payload=None):
+        if method == "GET" and self.read:
+            return self.read(
+                "github:" + path,
+                lambda: super(NativeGitHub, self).request(method, path, payload),
+            )
+        return super().request(method, path, payload)
+
     def repository(self, *, repository_id=None, repository_url=""):
         path = (
             f"/repositories/{repository_id}"

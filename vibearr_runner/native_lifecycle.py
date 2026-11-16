@@ -376,6 +376,42 @@ class NativeLifecycle:
         )
 
     def step(self, state):
+        from .native_reads import NativeReadWait, NativeReadExhausted
+
+        try:
+            return self._step(state)
+        except NativeReadWait as exc:
+            self.wait_status(str(exc))
+            return "wait"
+        except NativeReadExhausted as exc:
+            self.native.update(
+                failure=str(exc), outcome=self.native.get("outcome", "failed")
+            )
+            self.save()
+            try:
+                return self._step(state)
+            except NativeReadWait as waiting:
+                self.wait_status(str(waiting))
+                return "wait"
+            except (NativeReadExhausted, DeliveryError) as unresolved:
+                self.wait_status(str(unresolved))
+                raise ReconciliationRequired(
+                    "Remote publication reconciliation is unavailable; retain the original ownership."
+                ) from None
+        except DeliveryError as exc:
+            if not self.native.get("failure"):
+                raise
+            self.wait_status(str(exc))
+            raise ReconciliationRequired(
+                "Remote publication reconciliation is unavailable; retain the original ownership."
+            ) from None
+
+    def read(self, key, operation):
+        from .native_reads import read
+
+        return read(self, key, operation)
+
+    def _step(self, state):
         from vibearr_executor.client import ExecutorUnavailable
         from vibearr_executor.contracts import Rejected
         from .native_contract import NativeContractError
@@ -527,7 +563,7 @@ class NativeLifecycle:
         from .native_github import NativeGitHub
 
         token = self.secret("repository")["material"]["secret"]
-        github = NativeGitHub(token, read_only=True)
+        github = NativeGitHub(token, read_only=True, read=self.read)
         identity, _ = github.repository(repository_id=repository["repository_id"])
         if (
             identity["repository_url"] != repository["repository_url"]
@@ -540,7 +576,7 @@ class NativeLifecycle:
         manager = self.host.workspaces
         if isinstance(manager, WorkspaceManager):
             manager.require_new_branch = True
-            remote = SupervisorGit(token=token)
+            remote = SupervisorGit(token=token, read=self.read)
             manager.remote_git = lambda arguments, cwd=None: remote.command(
                 arguments, item["repository_url"], self.journal.directory, cwd
             )
