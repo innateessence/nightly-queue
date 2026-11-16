@@ -458,11 +458,19 @@ def agent_intent(
 
 @checked
 def validation_intent(
-    *, context_id, context_digest, policy_digest, attempt, session, workspace_id
+    *,
+    context_id,
+    context_digest,
+    policy_digest,
+    attempt,
+    session,
+    workspace_id,
+    provenance=None,
 ):
     data = copied(session)
     data["profile"] = profile_reference(profile_from_data(data["profile"]))
     data["workspace_id"] = workspace_id
+    data["provenance"] = provenance
     return intent_document(
         "validation",
         context_id=context_id,
@@ -593,10 +601,15 @@ def validate_validation_session(data):
             "source_digest",
             "operations",
             "workspace_id",
+            "provenance",
         },
     )
     identifier(data["workspace_id"])
-    complete = {key: entry for key, entry in data.items() if key != "workspace_id"}
+    complete = {
+        key: entry
+        for key, entry in data.items()
+        if key not in {"workspace_id", "provenance"}
+    }
     complete["profile"] = profile_from_reference(data["profile"]).data()
     from .native_validation import ValidationRunner
 
@@ -607,6 +620,14 @@ def validate_validation_session(data):
         deadlines.add(entry["manifest"]["deadline"])
     if len(deadlines) != 1:
         raise NativeContractError("Validation commands must share the frozen deadline.")
+    if data["provenance"] is not None:
+        from vibearr_executor.validation_profile import validate_dependency_provenance
+
+        validate_dependency_provenance(
+            data["provenance"],
+            profile_from_reference(data["profile"]),
+            run_id=data["run_id"],
+        )
 
 
 def validate_dependency_request(data):
@@ -771,16 +792,31 @@ def receipt_passed(value):
 
 
 @checked
-def agent_result(*, intent_id, session, outcome):
+def agent_result(*, intent_id, session, outcome, observed=None):
     selected = session.to_data() if hasattr(session, "to_data") else session
     result = outcome["result"]
-    observed = {
-        "state": "exited",
-        "descendants_terminated": True,
-        "operation_id": selected["manifest"]["operation_id"],
-        "result": result,
-    }
+    if observed is None:
+        if outcome["successful"]:
+            raise NativeContractError(
+                "Agent success requires its actual terminal container status."
+            )
+        observed = {
+            "state": "exited",
+            "descendants_terminated": True,
+            "operation_id": selected["manifest"]["operation_id"],
+            "result": result,
+        }
+    if observed.get("operation_id") != selected["manifest"][
+        "operation_id"
+    ] or canonical(observed.get("result")) != canonical(result):
+        raise NativeContractError(
+            "Agent outcome differs from its terminal container status."
+        )
     receipt = receipt_summary(observed)
+    if outcome["successful"] and not receipt["container_id"]:
+        raise NativeContractError(
+            "Agent success requires its original container identity."
+        )
     artifact = outcome["artifact"]
     if canonical(artifact) != canonical(result.get("artifact")):
         raise NativeContractError("Agent export differs from its protected result.")
@@ -848,6 +884,7 @@ def workspace_record(
     workspace,
     source_digest,
     export_digest,
+    requirements_digest,
 ):
     return validate_native_artifact(
         "native_workspace",
@@ -860,6 +897,7 @@ def workspace_record(
             "workspace": workspace,
             "source_digest": source_digest,
             "export_digest": export_digest,
+            "requirements_digest": requirements_digest,
         },
     )
 
@@ -1040,11 +1078,17 @@ def validate_native_artifact(kind, value):
                 "workspace",
                 "source_digest",
                 "export_digest",
+                "requirements_digest",
             },
         )
         for key in ("context_id", "agent_intent_id"):
             identifier(value[key])
-        for key in ("context_digest", "source_digest", "export_digest"):
+        for key in (
+            "context_digest",
+            "source_digest",
+            "export_digest",
+            "requirements_digest",
+        ):
             sha(value[key])
         if type(value["attempt"]) is not int or not 0 <= value["attempt"] <= 2:
             raise NativeContractError("Native work permits at most2 repairs.")

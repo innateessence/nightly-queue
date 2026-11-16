@@ -166,7 +166,9 @@ class NativeContractTests(unittest.TestCase):
             "usage": {"actual_provider_units": 12},
             "usage_unit": "tokens",
         }
-        value = agent_result(intent_id=str(uuid4()), session=session, outcome=outcome)
+        value = agent_result(
+            intent_id=str(uuid4()), session=session, outcome=outcome, observed=observed
+        )
         self.assertEqual(value["session_id"], "ses_real-provider-identity")
         self.assertEqual(
             value["usage"],
