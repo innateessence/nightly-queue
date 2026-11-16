@@ -24,6 +24,15 @@ a same-state service restart and changes for an empty replacement state director
 The supervisor must persist it before prepare and compare it during recovery;
 matching host/image qualification alone cannot establish operation continuity.
 
+`Client.termination_receipt(operation_id)` reads protected presence through
+`POST /v1/operations/<uuid>/termination_receipt`. It returns `schema_version`,
+`instance_id`, `operation_id`, `run_id`, `manifest_digest`, `state` and
+`resources_terminated`; confirmed terminal results also include `receipt_digest`.
+An existing prepared operation has `state: not-started` and
+`resources_terminated: false`. This distinguishes prepared work from a missing
+identity (HTTP 404) without launching it. Before same-ID recovery, the supervisor
+must match the frozen instance, run, operation and canonical manifest digest.
+
 `Client.pause_dependencies(build_id)` records an independent, durable phase gate.
 It pauses active setup through the operation API and prevents entry into the next
 assembly or qualification phase. A fixed copy/commit already in progress, or an
@@ -101,8 +110,13 @@ production stack, production database or external repository delivery was used.
 An additional never-launched paused build expired on its original deadline,
 confirmed setup/resource termination and returned stable cancellation. Actual
 never-prepared stop requests returned 404 under the same persisted instance ID.
+The final presence endpoint was then checked through an installed wheel and HTTP:
+prepared identity/manifest binding, successful same-ID task termination, stable
+readback after purge, missing 404, unauthorized 401 and malformed-UUID 400. The
+current source passed all thirteen OCI checks again; evidence identifies the
+source digest for each proof.
 
-Validation included 161 executor unit tests, 1,612 Django tests (four expected
+Validation included 164 executor unit tests, 1,615 Django tests (four expected
 skips), four distribution artifact tests, repository-wide Black/Ruff/mypy,
 migration and system checks, and an installed executor wheel outside the checkout. Mocked cases additionally cover
 engine uncertainty, binding changes, independent phase gates, resume generation

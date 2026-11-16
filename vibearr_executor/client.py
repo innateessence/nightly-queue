@@ -172,6 +172,7 @@ class Client:
             "logs",
             "secret",
             "result",
+            "termination_receipt",
         }:
             raise Rejected("Unknown executor operation.")
         return self.request(f"/v1/operations/{operation_id}/{action}", data or {})
@@ -181,6 +182,9 @@ class Client:
 
     def status(self, operation_id: str) -> dict:
         return self.operation(operation_id, "status")
+
+    def termination_receipt(self, operation_id: str) -> dict:
+        return self.operation(operation_id, "termination_receipt")
 
     def stop(self, operation_id: str) -> dict:
         return self.operation(operation_id, "stop")

@@ -383,11 +383,73 @@ class OperationControlTests(unittest.TestCase):
                 for call in (
                     lambda: client.stop(missing),
                     lambda: client.dependencies(missing, "stop"),
+                    lambda: client.termination_receipt(missing),
                 ):
                     with self.assertRaises(ExecutorNotFound) as caught:
                         call()
                     self.assertEqual(caught.exception.http_status, 404)
                 self.assertFalse(self.runtime.path(missing).exists())
+            finally:
+                server.shutdown()
+                thread.join()
+
+    def test_http_prepared_presence_binds_manifest_without_launching(self):
+        with Server(("127.0.0.1", 0), Handler) as server:
+            server.runtime, server.token = self.runtime, "x" * 64
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                client = Client(f"http://127.0.0.1:{server.server_port}", server.token)
+                with patch.object(self.runtime.docker, "run") as engine:
+                    receipt = client.termination_receipt(self.operation)
+                engine.assert_not_called()
+                self.assertEqual(receipt["operation_id"], self.operation)
+                self.assertEqual(receipt["run_id"], self.manifest["run_id"])
+                self.assertEqual(
+                    receipt["manifest_digest"], digest(canonical(self.manifest))
+                )
+                self.assertEqual(receipt["instance_id"], self.runtime.instance)
+                self.assertFalse(receipt["resources_terminated"])
+                self.assertEqual(receipt["state"], "not-started")
+            finally:
+                server.shutdown()
+                thread.join()
+
+    def test_http_terminal_presence_retains_original_receipt_after_purge(self):
+        original = self.terminal()
+        self.runtime.purge(self.operation, self.manifest["run_id"], ["source", "logs"])
+        with Server(("127.0.0.1", 0), Handler) as server:
+            server.runtime, server.token = self.runtime, "x" * 64
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                client = Client(f"http://127.0.0.1:{server.server_port}", server.token)
+                receipt = client.termination_receipt(self.operation)
+                self.assertTrue(receipt["resources_terminated"])
+                self.assertEqual(
+                    receipt["receipt_digest"], digest(canonical(original["result"]))
+                )
+                self.assertEqual(
+                    receipt["manifest_digest"], digest(canonical(self.manifest))
+                )
+            finally:
+                server.shutdown()
+                thread.join()
+
+    def test_http_presence_requires_authentication_and_strict_uuid(self):
+        from .client import ExecutorRejected
+
+        with Server(("127.0.0.1", 0), Handler) as server:
+            server.runtime, server.token = self.runtime, "x" * 64
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                client = Client(f"http://127.0.0.1:{server.server_port}", "y" * 64)
+                with self.assertRaises(ExecutorRejected) as caught:
+                    client.termination_receipt(self.operation)
+                self.assertEqual(caught.exception.http_status, 401)
+                with self.assertRaises(ValueError):
+                    client.termination_receipt("../other")
             finally:
                 server.shutdown()
                 thread.join()
