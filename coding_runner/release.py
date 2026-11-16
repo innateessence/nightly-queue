@@ -533,6 +533,7 @@ def main() -> int:
                         state,
                         request.account,
                         versions[request.account["credential_id"]],
+                        stage,
                     )
                     return super()._run(stage, request, progress, checkpoint, stop)
 

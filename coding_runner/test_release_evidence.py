@@ -1,11 +1,19 @@
 import io
 import json
+from pathlib import Path
+import sys
+import tempfile
+import threading
 import unittest
 import zipfile
 from urllib.error import HTTPError
 from unittest.mock import Mock, patch
 
+from .backends import BackendOutputError
+from .journal import Journal
+from .qualification_trace import ModelTraceTransport
 from .release_evidence import verify_boundary_workflow
+from .test_backends import response
 
 
 class WorkflowEvidenceTests(unittest.TestCase):
@@ -120,3 +128,75 @@ class WorkflowEvidenceTests(unittest.TestCase):
         self.responses()
         with self.assertRaisesRegex(ValueError, "does not match"):
             verify_boundary_workflow(self.boundary, "fixture-token")
+
+
+class ModelTraceTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.journal = Journal(Path(temporary.name) / "journal")
+        self.journal.__enter__()
+        self.addCleanup(self.journal.__exit__)
+        self.state = self.journal.load()
+        self.journal.save(self.state)
+        self.original = self.journal.path.read_bytes()
+        self.account = {
+            "backend": "codex",
+            "credential_id": 7,
+            "model": "fixture-model",
+        }
+        self.token = "selected-fixture-credential"
+
+    def exchange(self, value, stage="research"):
+        transport = ModelTraceTransport(
+            self.journal, self.state, self.account, 2, stage
+        )
+        script = (
+            "import json,sys; json.load(sys.stdin); print(json.dumps("
+            + repr(value)
+            + "))"
+        )
+        transport.command = lambda: [sys.executable, "-I", "-c", script]
+        return transport.exchange(
+            {"token": self.token, "request": {"model": self.account["model"]}},
+            timeout=3,
+            checkpoint=lambda: True,
+            stop=threading.Event(),
+        )
+
+    def assert_no_trace(self):
+        self.assertNotIn("release_evidence", self.state)
+        self.assertNotIn("release_evidence", self.journal.load())
+        self.assertNotIn(self.token, self.journal.path.read_text())
+        self.assertEqual(self.journal.path.read_bytes(), self.original)
+
+    def test_secret_response_id_is_rejected_before_journal_persistence(self):
+        value = response()
+        value["response"]["id"] = "provider-echo-" + self.token
+        with self.assertRaises(BackendOutputError):
+            self.exchange(value)
+        self.assert_no_trace()
+
+    def test_secret_proposal_is_rejected_before_journal_persistence(self):
+        value = response("complete", {"summary": "credential echo: " + self.token})
+        value["response"]["id"] = "resp_fixture"
+        with self.assertRaises(BackendOutputError):
+            self.exchange(value, stage="implementation")
+        self.assert_no_trace()
+
+    def test_valid_implementation_response_persists_exact_trace(self):
+        value = response("complete", {"summary": "Finished the fixture change"})
+        value["response"]["id"] = "resp_fixture"
+        self.assertEqual(self.exchange(value, stage="implementation"), value)
+        traces = self.journal.load()["release_evidence"]["model_responses"]
+        self.assertEqual(len(traces), 1)
+        self.assertEqual(traces[0]["response_id"], "resp_fixture")
+        self.assertEqual(traces[0]["secret_version"], 2)
+        self.assertEqual(traces[0]["model"], "fixture-model")
+
+    def test_native_tool_response_cannot_enter_durable_trace(self):
+        value = response()
+        value["response"].update(id="resp_fixture", output=[{"type": "function_call"}])
+        with self.assertRaises(BackendOutputError):
+            self.exchange(value)
+        self.assert_no_trace()
