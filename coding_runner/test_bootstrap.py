@@ -207,7 +207,34 @@ class AcceptanceTests(unittest.TestCase):
         self.assertEqual(scenarios["delivery"]["normal_repair_limit"], 2)
         self.assertIn("status-filter", scenarios["merge"]["tasks"][0]["body"])
         self.assertNotIn("Add a queue status filter", repr(scenarios["delivery"]))
-        self.assertFalse(scenarios["merge"]["available"])
+        self.assertTrue(scenarios["merge"]["available"])
+
+    def test_merge_scenario_delegates_to_exact_two_issue_driver(self):
+        with (
+            patch(
+                "sys.argv",
+                [
+                    "self_acceptance",
+                    "--execute",
+                    "--scenario=merge",
+                    "--project-id",
+                    "1",
+                    "--first-issue",
+                    "12",
+                    "--second-issue",
+                    "13",
+                    "--state",
+                    "/tmp/owned-state",
+                    "--evidence",
+                    "/tmp/owned-evidence",
+                ],
+            ),
+            patch("vibearr_runner.merge_acceptance.main", return_value=0) as merge_main,
+        ):
+            self.assertEqual(self_acceptance.main(), 0)
+        arguments = merge_main.call_args.args[0]
+        self.assertIn("--execute", arguments)
+        self.assertEqual(arguments[arguments.index("--second-issue") + 1], "13")
 
     def test_evidence_history_fetches_all_pages(self):
         queue = Mock()

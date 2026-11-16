@@ -99,6 +99,7 @@ def capture_page(
     return {
         "schema_version": 1,
         "revision": revision,
+        "tree_sha": git(["rev-parse", "HEAD^{tree}"], Path(source_checkout)),
         "url": url,
         "path": str(output),
         "sha256": hashlib.sha256(data).hexdigest(),
@@ -107,16 +108,22 @@ def capture_page(
     }
 
 
-def screenshot_receipts(values, expected_revision):
+def screenshot_receipts(
+    values, expected_revision, *, alternate_revision=None, expected_tree=None
+):
     if not isinstance(values, list) or not values:
         raise ValueError("UI acceptance requires actual rendered browser screenshots.")
     for value in values:
         if (
-            value.get("revision") != expected_revision
+            value.get("revision") not in {expected_revision, alternate_revision}
             or value.get("browser") != "/opt/google/chrome/chrome"
         ):
             raise ValueError(
                 "Screenshot does not identify the actual accepted UI revision/browser."
+            )
+        if expected_tree is not None and value.get("tree_sha") != expected_tree:
+            raise ValueError(
+                "Screenshot was not rendered from the exact validated UI tree."
             )
         data = Path(value["path"]).read_bytes()
         if not data.startswith(b"\x89PNG\r\n\x1a\n") or hashlib.sha256(
@@ -213,7 +220,19 @@ def collect_merge_run(queue, github, *, run_id, project_id, issue_number, screen
         raise ValueError(
             "Completion references another source issue or merge operation."
         )
-    screenshot_receipts(screenshots, observed["commit_sha"])
+    commit = provider.request(
+        "GET", f"/repos/{workspace['repository']}/git/commits/{observed['commit_sha']}"
+    )
+    if commit.get("tree", {}).get("sha") != workspace["tree_sha"]:
+        raise ValueError(
+            "Actual squash merge tree differs from the independently validated candidate."
+        )
+    screenshot_receipts(
+        screenshots,
+        observed["commit_sha"],
+        alternate_revision=workspace["commit_sha"],
+        expected_tree=workspace["tree_sha"],
+    )
     return {
         **record,
         "merge": merged,
@@ -224,9 +243,9 @@ def collect_merge_run(queue, github, *, run_id, project_id, issue_number, screen
 
 
 def collect_merge_scenario(
-    queue, github, *, project_id, first, second, screenshots, restarts
+    queue, github, *, project_id, first, second, screenshots, restarts, receipts=None
 ):
-    from .self_acceptance import timestamp
+    from .self_acceptance import restart_evidence, timestamp
 
     records = [
         collect_merge_run(
@@ -321,12 +340,20 @@ def collect_merge_scenario(
             raise ValueError(
                 "Merge/completion checkpoints were not reconciled by distinct supervisor processes."
             )
+    if not receipts or any(value["run_id"] not in receipts for value in records):
+        raise ValueError(
+            "Actual agent/validation restart and completion acknowledgement receipts are required."
+        )
+    runtime_restarts = [
+        restart_evidence(value, receipts[value["run_id"]]) for value in records
+    ]
     return {
         "schema_version": 1,
         "scenario": "merge",
         "passed": True,
         "records": records,
         "restarts": restarts,
+        "runtime_restarts": runtime_restarts,
         "first_merge_in_second_initial_base": {
             "merge_sha": merge_sha,
             "initial_base_sha": initial_base,
@@ -414,6 +441,7 @@ def execute(
             second=runs[1],
             screenshots=screenshots,
             restarts=restarts,
+            receipts={value["run_id"]: value for value in receipts},
         )
     write_report(evidence, report)
     return {
@@ -425,7 +453,7 @@ def execute(
     }
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--export-scenarios", action="store_true")
     parser.add_argument("--execute", action="store_true")
@@ -436,7 +464,7 @@ def main():
     parser.add_argument("--evidence", type=Path)
     parser.add_argument("--screenshots", type=Path)
     parser.add_argument("--max-seconds", type=int, default=3600)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.export_scenarios:
         from .self_acceptance import scenario_tasks
 

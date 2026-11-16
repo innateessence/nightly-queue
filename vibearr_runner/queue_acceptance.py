@@ -69,6 +69,9 @@ def summary(state, result, observations=None):
         "reporting_pending": "reporting-pending",
     }
     waypoint = checkpoints.get(delivery.get("checkpoint"), waypoint)
+    from .merge_acceptance import merge_waypoint
+
+    waypoint = merge_waypoint(native, waypoint)
     return {
         "schema_version": 1,
         "pid": os.getpid(),
@@ -169,8 +172,8 @@ def run_acceptance(
         raise ValueError(
             "Use an acceptance progress filename; controller journals and other private records are reserved."
         )
-    if expected_outcome not in {"delivered", "failed"}:
-        raise ValueError("Choose delivered or failed acceptance outcome.")
+    if expected_outcome not in {"delivered", "merged", "failed"}:
+        raise ValueError("Choose delivered, merged or failed acceptance outcome.")
     with Journal(directory) as journal:
         initial_state = journal.load()
         progress_file = directory / progress_name
@@ -337,7 +340,15 @@ def evidence_document(
     expected_outcome="delivered",
     executor_observations=None,
 ):
-    required = WAYPOINTS if expected_outcome == "delivered" else {"agent-completed"}
+    required = (
+        WAYPOINTS
+        if expected_outcome in {"delivered", "merged"}
+        else {"agent-completed"}
+    )
+    if expected_outcome == "merged":
+        from .merge_acceptance import MERGE_WAYPOINTS
+
+        required = required | MERGE_WAYPOINTS
     if run_id is None or not required <= set(observed):
         raise RuntimeError(
             "Acceptance did not observe every required restart checkpoint."
@@ -348,7 +359,9 @@ def evidence_document(
     queue.controller_secret = state["controller_secret"]
     response = queue.reconcile(run_id)
     run, item = response["run"], response["item"]
-    expected_status = "succeeded" if expected_outcome == "delivered" else "failed"
+    expected_status = (
+        "succeeded" if expected_outcome in {"delivered", "merged"} else "failed"
+    )
     if (
         run["state"] != "completed"
         or run["result_status"] != expected_status
@@ -365,9 +378,16 @@ def evidence_document(
         ),
         None,
     )
-    if expected_outcome == "delivered" and delivery is None:
+    if expected_outcome in {"delivered", "merged"} and delivery is None:
         raise RuntimeError(
             "Acceptance completion lacks historical version2 delivery readback."
+        )
+    if (
+        expected_outcome == "merged"
+        and delivery.get("delivery", {}).get("mode") != "merge"
+    ):
+        raise RuntimeError(
+            "Merge acceptance requires actual merged version2 delivery evidence."
         )
     document = {
         "schema_version": 1,
@@ -387,6 +407,10 @@ def evidence_document(
             for value in state.get("completion_receipts", [])
         ),
     }
+    if expected_outcome == "merged" and document["reporting_acknowledged"] is not True:
+        raise RuntimeError(
+            "Merge acceptance requires the original run's final completion acknowledgement."
+        )
     atomic_bytes(evidence, json.dumps(document, sort_keys=True, indent=2).encode())
     return {
         "run_id": run_id,

@@ -157,7 +157,15 @@ their optional branch cleanup is left to normal repository policy.
 
 ## MVP acceptance
 
-Feature06's ordinary-controller driver is extended for merge mode. Reserve two
+Feature06's ordinary-controller driver is extended for merge mode. Use
+`python -m vibearr_runner.self_acceptance --scenario merge --execute` with the
+same selected state/project and both finite issue IDs; `merge_acceptance` also
+provides the dedicated entrypoint. Resume the same journal and receipt files
+after interruptions. Supply `--screenshots` only after the trusted operator has
+rendered each exact validated candidate in an owned app with installed Chrome;
+the native agent must not download a browser or fabricate screenshots.
+
+Reserve two
 distinct finite UI source tasks: A adds queue status filtering with every status
 and malformed-input tests; B depends on A and preserves status in filter links
 and clear behavior with regression tests. Do not preimplement these tasks or use

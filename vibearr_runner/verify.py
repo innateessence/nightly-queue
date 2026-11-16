@@ -25,6 +25,7 @@ def portable_suite():
     )
     for module in (
         "test_workspaces",
+        "test_automatic_merge",
         "test_implementation",
         "test_delivery",
         "test_recovery",
