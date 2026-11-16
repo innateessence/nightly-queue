@@ -151,6 +151,64 @@ class PlanContractTests(unittest.TestCase):
             store.handoff(ITEM, BASE, issue_client=issue_client)
         client.request.assert_not_called()
 
+    def test_handoff_api_requests_share_remaining_deadline(self):
+        from unittest.mock import patch
+
+        clock = [0.0]
+        client = Mock()
+
+        def request(*args, **kwargs):
+            clock[0] += 0.4
+            return (
+                {"context": self.context}
+                if args[1].endswith("/contexts/")
+                else {"plan": self.plan, "context": self.context}
+            )
+
+        client.request.side_effect = request
+        store = ContextPlanStore(client, str(uuid4()), str(uuid4()), Mock())
+        with patch(
+            "coding_runner.plan_store.time.monotonic", side_effect=lambda: clock[0]
+        ):
+            store.handoff({**ITEM, "source": "manual"}, BASE, timeout_seconds=1.0)
+        self.assertAlmostEqual(client.request.call_args_list[0].kwargs["timeout"], 1.0)
+        self.assertAlmostEqual(client.request.call_args_list[1].kwargs["timeout"], 0.6)
+
+    def test_expired_context_save_cannot_start_handoff_mutation(self):
+        from unittest.mock import patch
+
+        clock = [0.0]
+        client = Mock()
+
+        def request(*args, **kwargs):
+            clock[0] = 2.0
+            return {"context": self.context}
+
+        client.request.side_effect = request
+        store = ContextPlanStore(client, str(uuid4()), str(uuid4()), Mock())
+        with patch(
+            "coding_runner.plan_store.time.monotonic", side_effect=lambda: clock[0]
+        ):
+            with self.assertRaisesRegex(ContextError, "budget"):
+                store.handoff({**ITEM, "source": "manual"}, BASE, timeout_seconds=1.0)
+        self.assertEqual(client.request.call_count, 1)
+
+    def test_gate_closure_after_context_save_prevents_handoff_mutation(self):
+        allowed = [True]
+        client = Mock()
+
+        def request(*args, **kwargs):
+            allowed[0] = False
+            return {"context": self.context}
+
+        client.request.side_effect = request
+        store = ContextPlanStore(client, str(uuid4()), str(uuid4()), Mock())
+        with self.assertRaisesRegex(ContextError, "interrupted"):
+            store.handoff(
+                {**ITEM, "source": "manual"}, BASE, checkpoint=lambda: allowed[0]
+            )
+        self.assertEqual(client.request.call_count, 1)
+
     def test_manual_refresh_uses_supervisor_document_and_resolved_branch(self):
         client = Mock()
         client.request.return_value = {"context": self.context}

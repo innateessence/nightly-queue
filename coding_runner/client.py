@@ -1,9 +1,10 @@
 import json
+import math
 from http.client import HTTPException
 import socket
 import threading
 import time
-from typing import Any, NoReturn
+from typing import Any, Callable, NoReturn
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
@@ -70,6 +71,7 @@ class Client:
         payload: dict[str, Any] | None = None,
         *,
         timeout: float | None = None,
+        checkpoint: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         if not path.startswith("/api/v1/runner/") or "?" in path or "#" in path:
             raise ValueError("Use a runner API path.")
@@ -86,8 +88,10 @@ class Client:
             headers["Content-Type"] = "application/json"
         request = Request(self.url + path, data=body, headers=headers, method=method)
         mutation = method != "GET"
-        if timeout is not None and not 0 < timeout:
-            raise ValueError("Request timeout must be positive.")
+        if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
+            raise ValueError("Request timeout must be finite and positive.")
+        if checkpoint is not None and checkpoint() is not True:
+            raise UnavailableError("Request interrupted before transport.")
         allowance = min(self.timeout, timeout) if timeout is not None else self.timeout
         deadline = time.monotonic() + allowance
         if not self.request_lock.acquire(blocking=False):
@@ -107,7 +111,17 @@ class Client:
         # Socket timeouts alone do not bound DNS or a peer dripping HTTP headers.
         worker = threading.Thread(target=send, daemon=True)
         worker.start()
-        if not finished.wait(max(0, deadline - time.monotonic())):
+        while True:
+            if checkpoint is not None and checkpoint() is not True:
+                self._unavailable(mutation)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._unavailable(mutation)
+            if finished.wait(min(0.1, remaining)):
+                break
+        if time.monotonic() >= deadline:
+            self._unavailable(mutation)
+        if checkpoint is not None and checkpoint() is not True:
             self._unavailable(mutation)
         result = outcome[0]
         if isinstance(result, Exception):
@@ -124,7 +138,10 @@ class Client:
         self, request: Request, mutation: bool, deadline: float
     ) -> dict[str, Any]:
         try:
-            with self.opener.open(request, timeout=self.timeout) as response:
+            remaining = min(self.timeout, deadline - time.monotonic())
+            if remaining <= 0:
+                self._unavailable(mutation)
+            with self.opener.open(request, timeout=remaining) as response:
                 if response.status != 200:
                     raise InvalidResponse("Unexpected successful response status.")
                 if response.headers.get_content_type() != "application/json":

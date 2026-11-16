@@ -1,6 +1,8 @@
 import copy
 import io
 import json
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -69,6 +71,44 @@ class GitHubContextTests(unittest.TestCase):
     def responses(self, *responses):
         return patch.object(self.client, "_get", side_effect=responses)
 
+    def test_local_stop_bounds_stalled_issue_transport_and_preserves_lock(self):
+        stopped = threading.Event()
+        release = threading.Event()
+        timer = threading.Timer(0.05, stopped.set)
+        callback_threads = []
+
+        def checkpoint():
+            callback_threads.append(threading.get_ident())
+            return not stopped.is_set()
+
+        def stalled(*args, **kwargs):
+            release.wait(2)
+            raise TimeoutError
+
+        try:
+            with patch.object(
+                self.client.opener, "open", side_effect=stalled
+            ) as transport:
+                timer.start()
+                started = time.monotonic()
+                with self.assertRaisesRegex(ContextError, "interrupted"):
+                    self.client._get(
+                        "https://api.github.com/repos/original/issues/issues/7",
+                        checkpoint=checkpoint,
+                    )
+                self.assertLess(time.monotonic() - started, 0.7)
+                with self.assertRaisesRegex(ContextError, "previous"):
+                    self.client._get(
+                        "https://api.github.com/repos/original/issues/issues/7"
+                    )
+                self.assertEqual(transport.call_count, 1)
+        finally:
+            timer.cancel()
+            release.set()
+        self.assertTrue(self.client.request_lock.acquire(timeout=2))
+        self.client.request_lock.release()
+        self.assertEqual(set(callback_threads), {threading.get_ident()})
+
     def test_complete_empty_comments_is_explicit(self):
         with self.responses((issue(), ""), ([], "")):
             result = self.client.fetch(ITEM)
@@ -76,6 +116,50 @@ class GitHubContextTests(unittest.TestCase):
         self.assertEqual(result["title"], "Current title")
         self.assertEqual(result["issue"]["author"], "author")
         validate_context(result, ITEM)
+
+    def test_aggregate_deadline_stops_comment_pagination(self):
+        clock = [0.0]
+        link = '<https://api.github.com/repos/original/issues/issues/7/comments?per_page=100&page=2>; rel="next"'
+        pages = [(issue(comments=2), ""), ([comment()], link), ([comment(2)], "")]
+
+        def page(*args, **kwargs):
+            clock[0] += 0.6
+            return pages.pop(0)
+
+        with patch(
+            "coding_runner.context.time.monotonic", side_effect=lambda: clock[0]
+        ):
+            with patch.object(self.client, "_get", side_effect=page) as fetch:
+                with self.assertRaisesRegex(ContextError, "budget"):
+                    self.client.fetch(ITEM, deadline=1.0)
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(len(pages), 1)
+
+    def test_gate_closure_stops_before_next_comment_page(self):
+        allowed = [True]
+        link = '<https://api.github.com/repos/original/issues/issues/7/comments?per_page=100&page=2>; rel="next"'
+        pages = [(issue(comments=2), ""), ([comment()], link), ([comment(2)], "")]
+
+        def page(*args, **kwargs):
+            response = pages.pop(0)
+            if len(pages) == 1:
+                allowed[0] = False
+            return response
+
+        with patch.object(self.client, "_get", side_effect=page) as fetch:
+            with self.assertRaisesRegex(ContextError, "interrupted"):
+                self.client.fetch(ITEM, checkpoint=lambda: allowed[0])
+        self.assertEqual(fetch.call_count, 2)
+
+    def test_request_timeout_is_capped_by_aggregate_remaining_time(self):
+        opener = unittest.mock.Mock()
+        opener.open.return_value = Response(issue())
+        self.client.opener = opener
+        with patch("coding_runner.context.time.monotonic", return_value=10.0):
+            self.client._get(
+                "https://api.github.com/repos/original/issues/issues/7", deadline=10.2
+            )
+        self.assertAlmostEqual(opener.open.call_args.kwargs["timeout"], 0.2)
 
     def test_fetches_every_comment_page_from_frozen_issue_repository(self):
         next_page = "https://api.github.com/repos/original/issues/issues/7/comments?page=2&per_page=100"
