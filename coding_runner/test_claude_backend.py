@@ -315,7 +315,7 @@ class ClaudeWorkerTests(unittest.TestCase):
         method, path, body, headers = connection.request.call_args.args
         self.assertEqual((method, path), ("POST", "/v1/messages"))
         self.assertEqual(headers["anthropic-version"], "2026-10-21")
-        self.assertEqual(headers["x-api-key"], TOKEN)
+        self.assertEqual(headers["Authorization"], "Bearer " + TOKEN)
         self.assertEqual(json.loads(body)["tools"], [])
 
     def test_authentication_response_body_is_withheld(self):
@@ -530,3 +530,163 @@ class ClaudeApprovalRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(BackendError, "unresolved"):
             self.step()
         self.assertEqual(self.transport.exchange.call_count, 1)
+
+
+class ClaudeQualificationTests(unittest.TestCase):
+    def setUp(self):
+        from .backend_transports import PROOF_PROTOCOL, TRANSPORTS
+
+        self.account = {**ACCOUNT, "model": "claude-sonnet-5-5"}
+        self.entry = {
+            **self.account,
+            "secret_version": 1,
+            "transport": TRANSPORTS["claude"],
+        }
+        self.proof = {
+            "qualified": True,
+            "transport": PROOF_PROTOCOL,
+            "accounts": [self.entry],
+        }
+        self.credentials = Mock(side_effect=grant)
+        self.credentials.qualification.return_value = {
+            **self.entry,
+            "verification": self.proof,
+        }
+        self.backend = ClaudeBackend(self.credentials)
+
+    def readiness(self, deployment=True):
+        with patch("coding_runner.release.matches_deployment", return_value=deployment):
+            return self.backend.readiness(self.account)
+
+    def test_exact_live_qualification_and_deployment_can_enable_candidate(self):
+        self.assertTrue(self.readiness().ready)
+        self.assertTrue(self.readiness().authenticated)
+
+    def test_native_or_codex_transport_proof_cannot_enable_claude(self):
+        for transport in (
+            "claude-code-native",
+            "codex-responses-structured-proposals-v1",
+        ):
+            self.credentials.qualification.return_value["transport"] = transport
+            self.assertFalse(self.readiness().ready)
+
+    def test_rotated_credential_requires_new_live_evidence(self):
+        self.credentials.qualification.return_value["secret_version"] = 2
+        self.assertFalse(self.readiness().ready)
+
+    def test_another_account_or_model_cannot_supply_proof(self):
+        for key, value in (
+            ("credential_id", 99),
+            ("model", "claude-opus-5-5"),
+            ("backend", "codex"),
+        ):
+            qualified = {**self.entry, key: value, "verification": self.proof}
+            self.credentials.qualification.return_value = qualified
+            self.assertFalse(self.readiness().ready)
+
+    def test_expired_or_changed_deployment_blocks_candidate(self):
+        self.assertFalse(self.readiness(deployment=False).ready)
+
+    def test_proof_must_contain_the_exact_account_transport(self):
+        self.proof["accounts"] = [{**self.entry, "transport": "native"}]
+        self.assertFalse(self.readiness().ready)
+
+    def test_old_single_provider_envelope_cannot_enable_candidate(self):
+        self.proof["transport"] = "codex-responses-structured-proposals-v1"
+        self.assertFalse(self.readiness().ready)
+
+
+class ClaudeTrackedProcessTests(unittest.TestCase):
+    def setUp(self):
+        from .processes import ProcessTracker, current_tracker
+
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.journal = Journal(self.root / "state")
+        self.journal.__enter__()
+        self.addCleanup(self.journal.__exit__)
+        self.state = self.journal.load()
+        self.tracker = ProcessTracker(self.journal, self.state)
+        self.tracker_context = current_tracker.set(self.tracker)
+        self.addCleanup(current_tracker.reset, self.tracker_context)
+
+    def test_worker_is_recorded_before_execution_and_reaped(self):
+        marker = self.root / "recorded"
+        journal_path = self.journal.directory / "journal.json"
+        script = (
+            "import json,sys,pathlib; state=json.loads(pathlib.Path("
+            + repr(str(journal_path))
+            + ").read_text()); assert any(row['status']=='running' and row['pid'] and row['start'] for row in state['processes'].values()); pathlib.Path("
+            + repr(str(marker))
+            + ").write_text('recorded'); print("
+            + repr(json.dumps(response()))
+            + ")"
+        )
+        backend = ClaudeBackend(grant, transport=codex_tests.FakeProcess(script))
+        result = backend.research(
+            BackendRequest(ACCOUNT, "claude-sonnet-5-5", "", {}),
+            progress=Mock(),
+            checkpoint=lambda: True,
+            stop=threading.Event(),
+        )
+        self.assertEqual(result.kind, "read")
+        self.assertEqual(marker.read_text(), "recorded")
+        records = self.journal.load()["processes"]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(next(iter(records.values()))["status"], "stopped")
+        self.assertNotIn(TOKEN, json.dumps(records))
+
+    def test_timed_out_claude_worker_has_durable_stopped_record(self):
+        backend = ClaudeBackend(
+            grant, transport=codex_tests.FakeProcess("import time; time.sleep(10)")
+        )
+        with self.assertRaises(BackendTimeout):
+            backend.research(
+                BackendRequest(ACCOUNT, "claude-sonnet-5-5", "", {}, 0.1),
+                progress=Mock(),
+                checkpoint=lambda: True,
+                stop=threading.Event(),
+            )
+        records = self.journal.load()["processes"]
+        self.assertEqual(next(iter(records.values()))["status"], "stopped")
+        self.tracker.recover()
+        self.assertIsNone(backend.transport.process)
+
+
+class ClaudeTraceTests(unittest.TestCase):
+    def test_qualified_trace_records_actual_provider_transport(self):
+        from .qualification_trace import ModelTraceTransport
+
+        state = {}
+        journal = Mock()
+        account = {**ACCOUNT, "model": "claude-sonnet-5-5"}
+        transport = ModelTraceTransport(journal, state, account, 2)
+        value = response()
+        value["response"]["id"] = "msg_test_only"
+        with patch.object(ProcessTransport, "exchange", return_value=value):
+            transport.exchange({"request": {"model": account["model"]}})
+        trace = state["release_evidence"]["model_responses"][0]
+        self.assertEqual(trace["transport"], "claude-messages-structured-proposals-v1")
+        self.assertEqual(trace["secret_version"], 2)
+        self.assertNotIn(TOKEN, json.dumps(trace))
+
+    def test_native_tool_response_cannot_produce_qualification_trace(self):
+        from .qualification_trace import ModelTraceTransport
+
+        state = {}
+        transport = ModelTraceTransport(Mock(), state, ACCOUNT, 1)
+        value = response()
+        value["response"].update(id="msg_test_only", content=[{"type": "tool_use"}])
+        with (
+            patch.object(ProcessTransport, "exchange", return_value=value),
+            self.assertRaises(BackendOutputError),
+        ):
+            transport.exchange({"request": {"model": "claude-sonnet-5-5"}})
+        self.assertNotIn("release_evidence", state)
+
+    def test_claude_trace_uses_claude_worker(self):
+        from .qualification_trace import ModelTraceTransport
+
+        command = ModelTraceTransport(Mock(), {}, ACCOUNT, 1).command()
+        self.assertEqual(Path(command[-1]).name, "claude_worker.py")

@@ -5,6 +5,8 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from coding_runner.backend_transports import PROOF_PROTOCOL, TRANSPORTS
+
 from .models import ReleaseQualification, Run
 from .services import RunConflict, json_digest, lock_controller
 from coding_runner.release_evidence import valid_response_id, verify_boundary_workflow
@@ -51,7 +53,8 @@ def scope(document):
             "global": defaults,
             "credentials": credentials,
             "projects": projects,
-            "transport": TRANSPORT,
+            "transport": PROOF_PROTOCOL,
+            "transports": TRANSPORTS,
         }
     )
 
@@ -71,6 +74,7 @@ def accounts(document):
                 "model": effective[f"{stage}_model"],
             }
             entry["secret_version"] = versions.get(entry["credential_id"])
+            entry["transport"] = TRANSPORTS.get(entry["backend"])
             if entry["backend"] and entry not in values:
                 values.append(entry)
     return values
@@ -100,7 +104,7 @@ def verification(document):
         "environment_digest": entry.environment_digest,
         "code_revision": entry.code_revision,
         "expires_at": entry.expires_at.isoformat(),
-        "transport": TRANSPORT,
+        "transport": PROOF_PROTOCOL,
         "accounts": accounts(document),
     }
 
@@ -131,9 +135,9 @@ def authorize(runner, repository_url, environment_digest, code_revision, note):
     projects = [
         row for row in document["projects"] if row["repository_url"] == repository_url
     ]
-    if any(row["backend"] != "codex" for row in accounts(document)):
+    if any(not row["transport"] for row in accounts(document)):
         raise ValidationError(
-            "This controlled harness currently supports the Codex structured-proposal API transport."
+            "This controlled harness requires a supported structured-proposal API transport."
         )
     if not projects or any(not row["structurally_valid"] for row in projects):
         raise ValidationError(
@@ -331,41 +335,9 @@ def complete(entry_id, runner, report):
         raise RunConflict("PR observations must straddle a controller restart.")
     if first.get("head_branch") != second.get("head_branch"):
         raise RunConflict("Restart changed the delivered branch.")
-    responses = report.get("model_responses", [])
-    if (
-        not isinstance(responses, list)
-        or not responses
-        or any(
-            not isinstance(row, dict)
-            or not valid_response_id(row.get("response_id"))
-            or not isinstance(row.get("backend"), str)
-            or not isinstance(row.get("model"), str)
-            or type(row.get("credential_id")) is not int
-            or type(row.get("secret_version")) is not int
-            or row.get("transport") != TRANSPORT
-            for row in responses
-        )
-    ):
-        raise RunConflict(
-            "Live backend authentication and structured proposal evidence are required."
-        )
-    observed = {
-        (
-            row.get("backend"),
-            row.get("credential_id"),
-            row.get("model"),
-            row.get("secret_version"),
-        )
-        for row in responses
-    }
-    required = {
-        (row["backend"], row["credential_id"], row["model"], row["secret_version"])
-        for row in accounts(configuration_document())
-    }
-    if not required.issubset(observed):
-        raise RunConflict(
-            "Not every selected account/model/credential version was exercised live."
-        )
+    verify_model_responses(
+        report.get("model_responses", []), accounts(configuration_document())
+    )
     fields = {
         field
         for event in entry.evidence.get("ui_changes", [])
@@ -412,3 +384,48 @@ def complete(entry_id, runner, report):
     entry.blocker = ""
     entry.save()
     return entry
+
+
+def verify_model_responses(responses, required_accounts):
+    if (
+        not isinstance(responses, list)
+        or not responses
+        or any(
+            not isinstance(row, dict)
+            or not valid_response_id(row.get("response_id"))
+            or not isinstance(row.get("backend"), str)
+            or not isinstance(row.get("model"), str)
+            or type(row.get("credential_id")) is not int
+            or type(row.get("secret_version")) is not int
+            or row.get("backend") not in TRANSPORTS
+            or row.get("transport") != TRANSPORTS.get(row.get("backend"))
+            for row in responses
+        )
+    ):
+        raise RunConflict(
+            "Live backend authentication and structured proposal evidence are required."
+        )
+    observed = {
+        (
+            row.get("backend"),
+            row.get("credential_id"),
+            row.get("model"),
+            row.get("secret_version"),
+            row.get("transport"),
+        )
+        for row in responses
+    }
+    required = {
+        (
+            row["backend"],
+            row["credential_id"],
+            row["model"],
+            row["secret_version"],
+            row["transport"],
+        )
+        for row in required_accounts
+    }
+    if not required.issubset(observed):
+        raise RunConflict(
+            "Not every selected account/model/credential version was exercised live."
+        )

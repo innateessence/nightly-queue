@@ -22,6 +22,7 @@ from .backends import (
     Progress,
 )
 from .client import APIError
+from .backend_transports import qualification_matches
 from .gates import UsageReading
 from .proposal_backend import ProcessTransport, parse_proposal
 
@@ -153,6 +154,14 @@ class ClaudeBackend:
                 ("Selected Claude API token is unavailable or unsupported.",),
                 CAPABILITIES,
             )
+        try:
+            version = self.credentials(account).get("credential", {}).get("version")
+            if valid_model(account.get("model")) and qualification_matches(
+                self.credentials, account, version
+            ):
+                return BackendReadiness(True, True, (), CAPABILITIES)
+        except (BackendError, APIError):
+            pass
         return BackendReadiness(
             False,
             False,

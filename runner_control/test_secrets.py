@@ -622,5 +622,6 @@ class SelectedSecretTests(TestCase):
     def test_backend_change_blocks_active_run_delivery(self):
         self.claim()
         self.settings.research_backend = "claude"
+        self.settings.research_model = "claude-sonnet-5-5"
         self.settings.save()
         self.assertEqual(self.run_secret().status_code, 400)

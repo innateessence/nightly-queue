@@ -98,3 +98,59 @@ class ClaudeSettingsTests(TestCase):
         form = RunnerSettingsForm()
         self.assertIn(credential, form.fields["research_credential"].queryset)
         self.assertIn(credential, form.fields["implementation_credential"].queryset)
+
+
+class ClaudeReleaseContractTests(TestCase):
+    def entries(self):
+        from coding_runner.backend_transports import TRANSPORTS
+
+        return [
+            {
+                "backend": provider,
+                "credential_id": index,
+                "model": model,
+                "secret_version": 1,
+                "transport": TRANSPORTS[provider],
+            }
+            for provider, index, model in (
+                ("codex", 7, "web-model"),
+                ("claude", 13, "claude-sonnet-5-5"),
+                ("claude", 14, "claude-opus-5-5"),
+            )
+        ]
+
+    def test_live_evidence_requires_each_selected_account_model_and_transport(self):
+        from .release import verify_model_responses
+
+        entries = self.entries()
+        rows = [{**entry, "response_id": "fixture-response"} for entry in entries]
+        verify_model_responses(rows, entries)
+
+    def test_codex_transport_cannot_qualify_claude_account(self):
+        from .release import verify_model_responses
+        from .services import RunConflict
+
+        entries = self.entries()
+        rows = [{**entry, "response_id": "fixture-response"} for entry in entries]
+        rows[1]["transport"] = rows[0]["transport"]
+        with self.assertRaises(RunConflict):
+            verify_model_responses(rows, entries)
+
+    def test_missing_distinct_claude_account_blocks_qualification(self):
+        from .release import verify_model_responses
+        from .services import RunConflict
+
+        entries = self.entries()
+        rows = [{**entry, "response_id": "fixture-response"} for entry in entries[:2]]
+        with self.assertRaises(RunConflict):
+            verify_model_responses(rows, entries)
+
+    def test_old_secret_version_cannot_qualify_rotated_account(self):
+        from .release import verify_model_responses
+        from .services import RunConflict
+
+        entries = self.entries()
+        rows = [{**entry, "response_id": "fixture-response"} for entry in entries]
+        rows[1]["secret_version"] = 0
+        with self.assertRaises(RunConflict):
+            verify_model_responses(rows, entries)

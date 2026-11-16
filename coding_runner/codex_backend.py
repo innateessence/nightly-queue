@@ -19,6 +19,7 @@ from .backends import (
 )
 from .gates import UsageReading
 from .client import APIError
+from .backend_transports import qualification_matches
 from .proposal_backend import ProcessTransport, parse_proposal
 from .proposal_backend import validate_proposal as validate_proposal
 
@@ -114,17 +115,12 @@ class CodexBackend:
                 ("Selected Codex API token is unavailable or unsupported.",),
                 CAPABILITIES,
             )
-        qualification = getattr(
-            self.credentials, "qualification", lambda account: None
-        )(account)
-        if qualification:
-            from .release import matches_deployment
-
-            grant = self.credentials(account)
-            current_version = grant.get("credential", {}).get("version")
-            valid = current_version == qualification.get("secret_version")
-            if valid and matches_deployment(qualification["verification"]):
+        try:
+            version = self.credentials(account).get("credential", {}).get("version")
+            if qualification_matches(self.credentials, account, version):
                 return BackendReadiness(True, True, (), CAPABILITIES)
+        except (BackendError, APIError):
+            pass
         return BackendReadiness(
             False,
             False,
