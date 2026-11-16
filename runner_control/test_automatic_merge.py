@@ -16,6 +16,7 @@ from credentials.test_models import TEST_KEY
 from projects.models import Project
 from vibearr_runner import native_contract as contract
 from vibearr_runner.delivery import DeliveryError
+from vibearr_runner.merge_contract import merge_profile
 from vibearr_executor.artifacts import pack
 from work_queue.models import MergeEvidence, QueueItem
 
@@ -29,7 +30,7 @@ from .settings_models import RunnerSettings
 from .test_native_protocol import NativeProtocolMixin
 
 
-def trusted_profile(repository_id=123):
+def trusted_profile(repository_id=123, *, reviews=False):
     return {
         "schema_version": 1,
         "repository_id": repository_id,
@@ -52,7 +53,7 @@ def trusted_profile(repository_id=123):
                 "report_repository_id": 789,
                 "report_prefix": "reviews/",
             }
-            for role in ("independent", "root")
+            for role in (("independent", "root") if reviews else ())
         ],
         "ci_timeout_seconds": 1800,
         "delete_branch": False,
@@ -79,6 +80,25 @@ class MergeProtocolMixin(NativeProtocolMixin):
             "revision": document["revision"],
         }
         self.run.configuration_snapshot = snapshot
+        self.run.configuration_revision = document["revision"]
+        self.run.save(
+            update_fields=["configuration_snapshot", "configuration_revision"]
+        )
+
+    def optional_review_gates(self):
+        saved = RunnerSettings.objects.get(pk=1)
+        saved.merge_profile = trusted_profile(reviews=True)
+        saved.save()
+        document = configuration_document()
+        selected = next(
+            entry
+            for entry in document["projects"]
+            if entry["project_id"] == self.project.pk
+        )
+        self.run.configuration_snapshot.update(
+            **selected,
+            **{"global": document["global"], "revision": document["revision"]},
+        )
         self.run.configuration_revision = document["revision"]
         self.run.save(
             update_fields=["configuration_snapshot", "configuration_revision"]
@@ -127,7 +147,11 @@ class MergeProtocolMixin(NativeProtocolMixin):
 
     def receipt(self):
         reviews = []
-        for role in ("independent", "root"):
+        profile = merge_profile(
+            self.run.configuration_snapshot["effective"]["merge_profile"]
+        )
+        for configured in profile["reviews"]:
+            role = configured["role"]
             reviews.append(
                 {
                     "role": role,
@@ -156,7 +180,7 @@ class MergeProtocolMixin(NativeProtocolMixin):
         return {
             "policy": {
                 "actor_id": 456,
-                "profile_digest": contract.digest(trusted_profile()),
+                "profile_digest": contract.digest(profile),
                 "rulesets": [{"id": 10, "digest": "a" * 64}],
             },
             "checks": [
@@ -187,7 +211,9 @@ class MergeProtocolMixin(NativeProtocolMixin):
                 "workspace": self.workspace,
                 "pull_request": self.pull,
                 "stage": stage,
-                "profile": trusted_profile(),
+                "profile": merge_profile(
+                    self.run.configuration_snapshot["effective"]["merge_profile"]
+                ),
                 "receipt": self.receipt(),
             },
         )
@@ -447,6 +473,33 @@ class MergeProtocolMixin(NativeProtocolMixin):
 
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
 class AutomaticMergeTests(MergeProtocolMixin, TestCase):
+    def test_omitted_review_list_is_disabled_for_automatic_merge(self):
+        saved = RunnerSettings.objects.get(pk=1)
+        saved.merge_profile.pop("reviews")
+        saved.save()
+        self.run.configuration_snapshot["effective"]["merge_profile"].pop("reviews")
+        self.run.save(update_fields=["configuration_snapshot"])
+        self.start_merge()
+        self.assertEqual(
+            self.merge_intent_entry.payload["data"]["profile"]["reviews"], []
+        )
+
+    def test_ci_only_merge_does_not_require_or_start_ai_review_sessions(self):
+        self.start_merge()
+        self.assertEqual(
+            self.merge_intent_entry.payload["data"]["profile"]["reviews"], []
+        )
+        self.assertEqual(
+            self.merge_intent_entry.payload["data"]["receipt"]["reviews"], []
+        )
+        self.assertEqual(
+            self.run.evidence.filter(
+                kind="native_intent", payload__kind="agent"
+            ).count(),
+            1,
+        )
+        self.assertFalse(self.run.evidence.filter(kind="native_review").exists())
+
     def test_failed_local_validation_after_base_update_allows_remaining_agent_repair(
         self,
     ):
@@ -695,6 +748,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
         self.assertFalse(RepositoryMergeFence.objects.exists())
 
     def test_review_of_other_head_does_not_authorize_merge(self):
+        self.optional_review_gates()
         self.complete_delivery()
         value = self.merge_intent()
         value["data"]["receipt"]["reviews"][0]["report"]["head_sha"] = "b" * 40
@@ -702,6 +756,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
             self.write("native_intent", value)
 
     def test_two_reviews_cannot_reuse_same_ai_session(self):
+        self.optional_review_gates()
         self.complete_delivery()
         value = self.merge_intent()
         reviews = value["data"]["receipt"]["reviews"]

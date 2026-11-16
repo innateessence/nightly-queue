@@ -55,7 +55,7 @@ class RunnerSettingsForm(forms.ModelForm):
             "minimum_remaining_usage_percent": "40 permits work only while more than 40% remains. Zero still blocks exhausted accounts.",
             "setup_commands": "JSON list of setup commands, restricted to the configured isolated task policy.",
             "execution_policy": "Versioned native execution limits. Task content cannot change this policy. Runtime and agent installation are still required.",
-            "merge_profile": "Trusted required workflows and independent/root AI review producers. Required for automatic merge; leave unset for PR-only delivery.",
+            "merge_profile": "Trusted required workflows and optional review producers. Required for automatic merge; leave unset for PR-only delivery.",
             "validation_commands": "JSON list of required validation commands.",
         }
         widgets = {
