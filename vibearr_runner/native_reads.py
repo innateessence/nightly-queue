@@ -3,7 +3,7 @@
 import hashlib
 import time
 
-from .delivery import DeliveryError, DeliveryReadUnavailable
+from .delivery import DeliveryError, DeliveryReadUnavailable, DeliveryRejected
 from .processes import current_read_attempt
 
 
@@ -43,6 +43,10 @@ def read(host, key, operation):
     token = current_read_attempt.set(attempt)
     try:
         result = operation()
+    except DeliveryRejected:
+        del records[identity]
+        host.save()
+        raise
     except DeliveryReadUnavailable as exc:
         if attempt.no_launch_confirmed:
             raise DeliveryError(

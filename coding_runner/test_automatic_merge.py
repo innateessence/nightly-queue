@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -18,6 +19,7 @@ from vibearr_runner.merge_github import (
 )
 from vibearr_runner.native_contract import NativeContractError, digest
 from vibearr_runner.native_merge import NativeMerge
+from vibearr_runner.native_reads import read
 from vibearr_runner.merge_review import publish_review
 from vibearr_runner.merge_setup import apply_setup
 from vibearr_runner.merge_acceptance import merge_waypoint
@@ -328,6 +330,21 @@ class MergeProviderTests(unittest.TestCase):
     def test_nonempty_current_rules_and_trusted_producers_pass(self):
         self.assertEqual(self.provider.policy(workspace(), profile())["actor_id"], 25)
         self.assertEqual(len(self.provider.checks(workspace(), 9, profile())), 1)
+
+    def test_pending_ci_polls_preserve_expected_classic_protection_absence(self):
+        host = SimpleNamespace(native={}, save=lambda: None)
+        request = self.provider.request
+        self.provider.check["status"] = "in_progress"
+
+        def observed_request(method, path, payload=None):
+            return read(host, "github:" + path, lambda: request(method, path, payload))
+
+        with patch.object(self.provider, "request", side_effect=observed_request):
+            for _ in range(5):
+                self.provider.policy(workspace(), profile())
+                with self.assertRaises(MergeWait):
+                    self.provider.checks(workspace(), 9, profile())
+        self.assertEqual(host.native["transport_reads"], {})
 
     def test_admin_bypass_is_rejected_even_with_green_checks(self):
         self.provider.bypass = [
