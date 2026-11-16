@@ -128,3 +128,4 @@ class ActionApproval(models.Model):
 
 from .settings_models import ProjectRunnerSettings, RunnerSettings  # noqa: F401, E402
 from .gate_models import RunnerGateEvidence  # noqa: F401, E402
+from .plan_models import ContextSnapshot, PlanVersion  # noqa: F401, E402

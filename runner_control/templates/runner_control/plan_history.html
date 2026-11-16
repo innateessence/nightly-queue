@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Saved plans · Nightly{% endblock %}
+{% block heading %}<section class="page-heading"><div><p class="eyebrow">CODING RUNNER</p><h1>Context and plans</h1><p class="subtitle">Saved research and every revision, together with the task.</p></div></section>{% endblock %}
+{% block content %}
+<section class="queue-items">
+{% for run in runs %}<article class="panel queue-item"><p class="eyebrow">{{ run.get_state_display }} · {{ run.get_stage_display }}</p><h2><a href="{% url 'runner_plan_detail' run.pk %}">{{ run.item.title|default:"Empty queue" }}</a></h2><p>{{ run.created_at }} · {{ run.pk }}</p>{% if run.wait_reason %}<p>{{ run.wait_reason }}</p>{% endif %}</article>{% empty %}<article class="panel queue-item"><h2>No saved runs yet.</h2><p>Context snapshots and plans appear here after an authorized runner saves them.</p></article>{% endfor %}
+</section>
+{% endblock %}

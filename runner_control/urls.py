@@ -1,8 +1,11 @@
 from django.urls import path
 
-from . import api, approval_api, configuration_api, gate_api, secrets
+from . import api, approval_api, configuration_api, gate_api, plan_api, secrets
 
 urlpatterns = [
+    path("runs/<uuid:run_id>/contexts/", plan_api.contexts, name="runner_contexts"),
+    path("runs/<uuid:run_id>/plans/", plan_api.plans, name="runner_plans"),
+    path("runs/<uuid:run_id>/handoff/", plan_api.handoff, name="runner_handoff"),
     path("secrets/", secrets.selected_secret, name="runner_selected_secret"),
     path("gates/", gate_api.gates, name="runner_gates"),
     path("gates/report/", gate_api.report, name="runner_gate_report"),

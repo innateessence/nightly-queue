@@ -58,6 +58,7 @@
       <a href="{% url 'index' %}"{% block queue_current %}{% endblock %}>Queue</a>
       <a href="{% url 'project_list' %}"{% block projects_current %}{% endblock %}>Projects</a>
       <a href="{% url 'credential_list' %}"{% block credentials_current %}{% endblock %}>Credentials</a>
+      <a href="{% url 'runner_plan_history' %}">Runs</a>
       <a href="{% url 'api_settings' %}"{% block settings_current %}{% endblock %}>Settings</a>
       <a href="{% url 'runner_approval_inbox' %}">Approvals</a>
     </nav>

@@ -162,3 +162,6 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 5.0,
     },
 }
+
+# Context uploads are bounded again by the runner document API.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
