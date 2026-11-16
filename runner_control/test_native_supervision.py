@@ -2,6 +2,7 @@ from dataclasses import replace
 import json
 from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -174,3 +175,19 @@ class NativeSupervisionTests(NativeProtocolMixin, TestCase):
         self.run.refresh_from_db()
         self.assertEqual(self.run.state, "active")
         self.assertEqual(self.run.active_slot, 1)
+
+    def test_definitively_rejected_dispatch_metadata_terminates_without_a_model_call(
+        self,
+    ):
+        self.run_to("agent")
+        with patch(
+            "runner_control.native_services.validate_intent_binding",
+            side_effect=ValidationError("Rejected fixture intent"),
+        ):
+            self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.state, "completed")
+        self.assertEqual(self.run.result_status, "failed")
+        self.assertEqual(self.executor.started, [])
+        self.assertEqual(len(self.state["native"]["rejected_metadata"]), 1)
+        self.assertFalse(self.run.evidence.filter(kind="native_intent").exists())

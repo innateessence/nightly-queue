@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 from uuid import uuid4
 
-from .client import APIError, ConflictError
+from .client import APIError, ConflictError, NotFoundError
 from .delivery import DeliveryError, SupervisorGit
 from .native_preflight import NativePreflight
 from .native_resources import NativeResources
@@ -204,9 +204,7 @@ class NativeLifecycle:
                 "Native metadata operation changed before acknowledgement."
             )
         if not record["acknowledged"]:
-            client = DurableClient(self.client, self.journal, self.state)
-            client.request(
-                "POST",
+            response = self.metadata_request(
                 f"/api/v1/runner/runs/{self.run_id}/artifacts/",
                 {
                     "operation_id": record["operation_id"],
@@ -215,9 +213,48 @@ class NativeLifecycle:
                     "data": payload,
                 },
             )
+            evidence = response.get("evidence", {})
+            if (
+                evidence.get("operation_id") != record["operation_id"]
+                or evidence.get("kind") != kind
+                or evidence.get("data") != payload
+            ):
+                raise ReconciliationRequired(
+                    "Native metadata acknowledgement differs from the frozen operation."
+                )
             record["acknowledged"] = True
             self.save()
         return record["operation_id"]
+
+    def metadata_request(self, path, payload):
+        durable = DurableClient(self.client, self.journal, self.state)
+        try:
+            return durable.request("POST", path, payload)
+        except APIError as exc:
+            if type(exc) is not APIError and not isinstance(exc, ConflictError):
+                raise
+            lookup = f"/api/v1/runner/runs/{self.run_id}/operations/{payload['operation_id']}/"
+            try:
+                response = self.client.request("GET", lookup)["response"]
+            except NotFoundError:
+                pending = self.state.get("request")
+                if (
+                    pending
+                    and pending["path"] == path
+                    and pending["payload"] == payload
+                ):
+                    self.native.setdefault("rejected_metadata", []).append(
+                        {"operation_id": payload["operation_id"], "path": path}
+                    )
+                    self.state["request"] = None
+                    self.save()
+                reason = "Native metadata was rejected and confirmed absent; terminate this attempt without replacing its execution."
+                if payload.get("kind") == "native_termination":
+                    raise ReconciliationRequired(reason) from None
+                raise NativeFailure(reason) from None
+            self.state["request"].update(status="received", response=response)
+            self.save()
+            return response
 
     def intent(self, payload, key):
         identity = self.artifact("native_intent", payload, key)
@@ -363,7 +400,8 @@ class NativeLifecycle:
         )
         try:
             if (state.get("request") or {}).get("status") == "pending":
-                DurableClient(self.client, self.journal, state).recover()
+                pending = state["request"]
+                self.metadata_request(pending["path"], pending["payload"])
             if self.native.get("failure"):
                 return self.finish_failure()
             if self.run["run"].get("cancellation_requested_at"):
@@ -519,9 +557,7 @@ class NativeLifecycle:
             "context_request", {"operation_id": str(uuid4()), "document": data}
         )
         self.save()
-        client = DurableClient(self.client, self.journal, self.state)
-        saved = client.request(
-            "POST",
+        saved = self.metadata_request(
             f"/api/v1/runner/runs/{self.run_id}/contexts/",
             {
                 "claim_token": self.token,
@@ -551,8 +587,7 @@ class NativeLifecycle:
             "plan_request", {"operation_id": str(uuid4()), "document": plan}
         )
         self.save()
-        saved_plan = client.request(
-            "POST",
+        saved_plan = self.metadata_request(
             f"/api/v1/runner/runs/{self.run_id}/plans/",
             {
                 "claim_token": self.token,

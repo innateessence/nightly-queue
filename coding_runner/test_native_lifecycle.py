@@ -214,6 +214,13 @@ class Queue:
             }
         if path.endswith("/artifacts/"):
             self.artifacts.append(deepcopy(payload))
+            return {
+                "evidence": {
+                    "operation_id": payload["operation_id"],
+                    "kind": payload["kind"],
+                    "data": payload["data"],
+                }
+            }
         if path.endswith("/finish/"):
             self.finishes.append(deepcopy(payload))
         return {}
