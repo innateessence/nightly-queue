@@ -5,11 +5,12 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import shlex
 import sys
 import time
 from http.client import HTTPException
-from typing import Any
+from typing import Any, NoReturn
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import ProxyHandler, Request, build_opener
@@ -33,6 +34,14 @@ class DeliveryWait(DeliveryError):
     pass
 
 
+class PullRequestChanged(DeliveryError):
+    def __init__(self, pull_request: dict):
+        super().__init__(
+            "Pull request revision or state changed; operator reconciliation is required."
+        )
+        self.pull_request = pull_request
+
+
 def pull_identity(
     value: Any, repository: str, head: str, base: str, commit: str
 ) -> dict:
@@ -45,22 +54,23 @@ def pull_identity(
         valid = valid and value["head"]["repo"]["full_name"] == repository
         valid = valid and value["base"]["repo"]["full_name"] == repository
         valid = valid and value["head"]["ref"] == head and value["base"]["ref"] == base
-        valid = valid and value["head"]["sha"] == commit
-        valid = valid and value["state"] == "open"
     except (KeyError, TypeError):
         valid = False
     if not valid:
         raise DeliveryError(
             "Pull request repository, branch, revision, or URL did not match."
         )
-    return {
+    observed = {
         "number": number,
         "url": url,
         "repository": repository,
         "head": head,
         "base": base,
-        "commit_sha": commit,
+        "commit_sha": value["head"].get("sha"),
     }
+    if observed["commit_sha"] != commit or value.get("state") != "open":
+        raise PullRequestChanged(observed)
+    return observed
 
 
 class GitHubDeliveryClient:
@@ -74,6 +84,7 @@ class GitHubDeliveryClient:
         self.token = token
         self.timeout = timeout
         self.opener = build_opener(ProxyHandler({}), NoRedirects())
+        self.request_lock = threading.Lock()
 
     def request(self, method: str, path: str, payload: dict | None = None):
         if not path.startswith("/repos/") or "#" in path or "\n" in path:
@@ -88,10 +99,42 @@ class GitHubDeliveryClient:
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        if body is not None:
+            headers["Content-Type"] = "application/json"
         request = Request(
             "https://api.github.com" + path, data=body, headers=headers, method=method
         )
         deadline = time.monotonic() + self.timeout
+        if not self.request_lock.acquire(blocking=False):
+            self.unavailable(method)
+        finished = threading.Event()
+        outcome: list[Any] = []
+
+        def send():
+            try:
+                outcome.append(self.send(request, method, deadline))
+            except Exception as exc:
+                outcome.append(exc)
+            finally:
+                self.request_lock.release()
+                finished.set()
+
+        # One worker bounds DNS and headers without accumulating timed-out requests.
+        threading.Thread(target=send, daemon=True).start()
+        if not finished.wait(max(0, deadline - time.monotonic())):
+            self.unavailable(method)
+        result = outcome[0]
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def unavailable(self, method: str) -> NoReturn:
+        error = DeliveryUnknown if method != "GET" else DeliveryError
+        raise error(
+            "GitHub response unavailable; reconcile delivery before retrying."
+        ) from None
+
+    def send(self, request: Request, method: str, deadline: float):
         try:
             with self.opener.open(request, timeout=self.timeout) as response:
                 if (
@@ -116,11 +159,8 @@ class GitHubDeliveryClient:
                     "GitHub mutation outcome requires reconciliation."
                 ) from None
             raise DeliveryError(f"GitHub delivery returned HTTP {status}.") from None
-        except (URLError, OSError, HTTPException, ValueError):
-            error = DeliveryUnknown if method != "GET" else DeliveryError
-            raise error(
-                "GitHub response unavailable; reconcile delivery before retrying."
-            ) from None
+        except (URLError, OSError, HTTPException, ValueError, RecursionError):
+            self.unavailable(method)
 
     def find(self, repository: str, head: str, base: str, commit: str) -> dict | None:
         owner = repository.split("/")[0]
@@ -149,7 +189,14 @@ class GitHubDeliveryClient:
             "draft": True,
         }
         value = self.request("POST", f"/repos/{repository}/pulls", payload)
-        return pull_identity(value, repository, head, base, commit)
+        try:
+            return pull_identity(value, repository, head, base, commit)
+        except PullRequestChanged:
+            raise
+        except DeliveryError:
+            raise DeliveryUnknown(
+                "Created pull request identity is unavailable; reconcile delivery before retrying."
+            ) from None
 
 
 class SupervisorGit:
@@ -239,10 +286,12 @@ class SupervisorGit:
             raise DeliveryError("Remote branch revision was invalid.")
         return revision
 
-    def push(self, workspace: Workspace, commit: str):
+    def push(self, workspace: Workspace, commit: str, *, checkpoint=None):
         remote = self.observed_remote(workspace)
         if remote == commit:
             return
+        if checkpoint is not None:
+            checkpoint()
         # Push itself remains a non-forced fast-forward check, including races.
         self.remote(
             workspace,
@@ -322,6 +371,8 @@ class DeliveryStage:
                     state, run_id, workspace, evidence, plan, claim_token
                 )
         except (DeliveryError, APIError, WorkspaceError, BackendError) as exc:
+            if isinstance(exc, PullRequestChanged):
+                delivery["pull_request"] = exc.pull_request
             delivery["error"] = str(exc)
             self.save(state, delivery)
             return {
@@ -381,6 +432,7 @@ class DeliveryStage:
             }
             delivery["phase"] = "commit_pending"
             self.save(state, delivery)
+            self.allowed()
             git(
                 [
                     "-c",
@@ -403,7 +455,7 @@ class DeliveryStage:
         self.allowed()
         delivery["phase"] = "push_pending"
         self.save(state, delivery)
-        self.repository_git.push(workspace, committed)
+        self.repository_git.push(workspace, committed, checkpoint=self.allowed)
         delivery["phase"] = "pushed"
         self.save(state, delivery)
         self.allowed()
@@ -415,6 +467,7 @@ class DeliveryStage:
                 raise DeliveryUnknown(
                     "Pull request creation remains unknown; retry lookup or request operator reconciliation."
                 )
+            self.allowed()
             delivery["phase"] = "pr_pending"
             delivery["create_unknown"] = True
             self.save(state, delivery)

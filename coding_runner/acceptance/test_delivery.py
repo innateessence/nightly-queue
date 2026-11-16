@@ -237,6 +237,73 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(self.step()["status"], "wait")
         self.assertEqual(self.github.creates, 0)
 
+    def test_gate_closure_during_lookup_prevents_pr_creation(self):
+        def find(*arguments):
+            self.stage.gate = lambda: False
+            return None
+
+        self.github.find = find
+        self.assertEqual(self.step()["status"], "wait")
+        self.assertEqual(self.github.creates, 0)
+        self.client.request.assert_not_called()
+
+    def test_gate_closure_during_remote_lookup_prevents_push(self):
+        original = self.repo_git.observed_remote
+
+        def observed(workspace):
+            revision = original(workspace)
+            self.stage.gate = lambda: False
+            return revision
+
+        self.repo_git.observed_remote = observed
+        self.assertEqual(self.step()["status"], "wait")
+        self.assertEqual(original(self.workspace), "")
+        self.assertEqual(self.github.creates, 0)
+
+    def test_gate_closure_after_commit_intent_prevents_commit(self):
+        original = self.stage.save
+        before = git(["rev-parse", "HEAD"], self.workspace.checkout)
+
+        def save(state, delivery):
+            original(state, delivery)
+            if delivery["phase"] == "commit_pending":
+                self.stage.gate = lambda: False
+
+        self.stage.save = save
+        self.assertEqual(self.step()["status"], "wait")
+        self.assertEqual(git(["rev-parse", "HEAD"], self.workspace.checkout), before)
+
+    def test_mismatched_revision_preserves_created_pr_for_operator(self):
+        github = GitHubDeliveryClient("test-token")
+
+        def response(method, path, payload=None):
+            if method == "GET":
+                return []
+            return {
+                "number": 23,
+                "html_url": "https://github.com/example/repo/pull/23",
+                "state": "open",
+                "head": {
+                    "repo": {"full_name": "example/repo"},
+                    "ref": "nq/task",
+                    "sha": "a" * 40,
+                },
+                "base": {"repo": {"full_name": "example/repo"}, "ref": "main"},
+            }
+
+        github.request = response
+        self.stage.github = github
+        result = self.step()
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(
+            result["pull_request"]["url"], "https://github.com/example/repo/pull/23"
+        )
+        self.assertEqual(result["pull_request"]["commit_sha"], "a" * 40)
+        self.assertEqual(
+            self.journal.load()["delivery"]["pull_request"], result["pull_request"]
+        )
+        self.client.request.assert_not_called()
+
     def test_commit_is_reconciled_after_journal_response_loss(self):
         original_save = self.stage.save
 

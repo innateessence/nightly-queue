@@ -31,6 +31,7 @@ class DeliveryAPITests(TestCase):
             "head_revision": self.context["inspected_base_commit"],
             "content_digest": "c" * 64,
             "diff_digest": "d" * 64,
+            "tree_digest": "b" * 64,
             "changed": "yes",
         }
         action = self.plan["document"]["validation_actions"][0]
@@ -129,6 +130,14 @@ class DeliveryAPITests(TestCase):
 
     def test_wrong_repository_is_rejected(self):
         self.payload["pull_request"]["repository"] = "other/repo"
+        self.assertEqual(self.upload().status_code, 400)
+
+    def test_missing_committed_tree_attestation_is_rejected(self):
+        self.workspace.pop("tree_digest")
+        self.assertEqual(self.upload().status_code, 400)
+
+    def test_invalid_committed_tree_attestation_is_rejected(self):
+        self.workspace["tree_digest"] = "b" * 40
         self.assertEqual(self.upload().status_code, 400)
 
     def test_wrong_head_is_rejected(self):

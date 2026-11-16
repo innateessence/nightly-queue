@@ -19,6 +19,8 @@ a missing/closed gate returns `wait`. The stage holds the workspace lock while
 checking validation, committing, publishing, and recording delivery. It imports
 feature 09's exact-content verifier with `already_locked=True`; a commit may
 change HEAD metadata only, with the full validated content and base unchanged.
+It refreshes gates immediately before commit, after remote branch lookup before
+push, and after PR lookup before creation.
 Validation is never rerun by this stage. Changed files require returning to
 feature 09's explicit revalidation path.
 
@@ -49,8 +51,12 @@ An ambiguous PR POST is never blindly repeated. Lookup must discover the same
 open PR; if lookup remains empty, creation stays uncertain for operator recovery.
 Multiple matching PRs, closed PRs, remote divergence, unexpected commits, and
 changed validated content stop publication. Existing PR text and branches remain
-intact. A successful creation uses a draft PR containing the problem,
-implementation, passing validation evidence digests, and original issue link.
+intact. A canonical PR matching the repository, head branch, and base remains
+journaled for the operator even when its revision or open state fails validation;
+that observation cannot authorize success. Invalid or missing identity after a
+successful creation response requires reconciliation. A successful creation uses
+a draft PR containing the problem, implementation, passing validation evidence
+digests, and original issue link.
 
 ## Server trust boundary
 
@@ -62,7 +68,7 @@ checkout or GitHub credential; remote inspection occurs in the supervisor.
 
 Server validation checks the current saved plan/context and handoff, frozen
 repository/head/base, actual pushed commit and commit-tree SHA, canonical GitHub
-PR identity, nonempty validation bound to the exact workspace/base/content/diff,
+PR identity, nonempty validation bound to the exact workspace/base/content/diff/tree,
 zero integer exit codes, uninterrupted execution, and required plan/configured
 checks. Each check must reference a consumed human-approved action execution on
 this run with the exact action binding. Configured string commands must match
@@ -94,6 +100,10 @@ it pushes an explicit SHA to the bound branch without force. The GitHub client
 uses selected-token headers, disables proxies/redirects, fixes the API origin,
 and limits request/response sizes and request time. Wrong repository, head, base,
 revision, URL, closed PR, and incomplete/ambiguous lookup are rejected.
+The absolute request deadline includes DNS, headers, and JSON decoding. One
+daemon transport worker per client retains its lock until the request exits,
+preventing overlapping retries after a timeout. A late mutation response remains
+unknown to its caller and must be reconciled.
 
 ## Verification
 

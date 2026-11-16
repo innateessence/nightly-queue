@@ -132,6 +132,7 @@ def checked_delivery(run, payload):
         "head_revision",
         "content_digest",
         "diff_digest",
+        "tree_digest",
         "changed",
     }
     if (
@@ -148,6 +149,7 @@ def checked_delivery(run, payload):
     sha(workspace["head_revision"])
     sha(workspace["content_digest"], 64)
     sha(workspace["diff_digest"], 64)
+    sha(workspace["tree_digest"], 64)
     checks = evidence["validation"]
     if not isinstance(checks, list) or not 1 <= len(checks) <= 128:
         reject()
