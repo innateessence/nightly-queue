@@ -78,6 +78,20 @@ class RuntimeContractTests(unittest.TestCase):
             self.runtime.start(other["operation_id"])
         engine.assert_not_called()
 
+    def test_unknown_operation_fences_a_new_operation_in_the_same_run(self):
+        self.runtime.prepare(self.manifest)
+        record = self.runtime.record(self.manifest["operation_id"])
+        record.update(state="unknown", launch_intent=True)
+        self.runtime.save(record)
+        other = {**self.manifest, "operation_id": str(uuid4())}
+        self.runtime.prepare(other)
+        with (
+            patch.object(self.runtime.docker, "run") as engine,
+            self.assertRaises(Conflict),
+        ):
+            self.runtime.start(other["operation_id"])
+        engine.assert_not_called()
+
     def test_changed_smoke_recipe_cannot_bypass_qualification(self):
         from .contracts import Profile
 

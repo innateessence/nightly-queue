@@ -466,16 +466,32 @@ class Runtime:
                     "Installed runtime/profile qualification is missing or stale. Run automated boundary verification first."
                 )
             active_runs = set()
+            active_operations = []
             for path in self.operations.iterdir():
                 other = self.record(path.name)
                 if other.get("launch_intent") and other["state"] != "exited":
                     active_runs.add(other["manifest"]["run_id"])
+                    if other["operation_id"] != operation_id:
+                        active_operations.append(other)
             if (
                 record["manifest"]["run_id"] not in active_runs
                 and len(active_runs) >= self.max_active_runs
             ):
                 raise Conflict(
                     "An active or unknown run holds the executor fence; reconcile/stop it first."
+                )
+            parallel_database_probes = (
+                is_probe
+                and profile["profile_id"] == "smoke-database-v1"
+                and len(active_operations) == 1
+                and active_operations[0]["state"] == "running"
+                and active_operations[0]["profile"] == profile
+                and active_operations[0]["manifest"]["run_id"]
+                == record["manifest"]["run_id"]
+            )
+            if active_operations and not parallel_database_probes:
+                raise Conflict(
+                    "Another operation holds the execution fence, including within this run; reconcile/stop it first."
                 )
             if record.get("launch_intent"):
                 existing = self.owned(record, record["name"])

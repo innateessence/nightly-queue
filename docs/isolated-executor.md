@@ -86,6 +86,9 @@ control origin. Add `--deny-ip` for additional executor-host public/NAT addresse
 local hostname addresses and all non-public destinations are already denied by
 the egress proxy. A changed deny list invalidates qualification. The current
 supported operating mode is one active run; unknown runs retain that fence.
+An active/unknown operation also fences a replacement operation UUID within the
+same run. Only the exact pair of fixed database-only qualification probes can
+overlap to test cross-operation network isolation.
 
 Install the executor client package beside a separately installed supervisor and
 set `VIBEARR_EXECUTOR_URL` and `VIBEARR_EXECUTOR_TOKEN_FILE` there. The runner
@@ -187,7 +190,7 @@ PID exhaustion may temporarily prevent protected engine-exec readback. A known
 running container retains its identity/fence and exposes a wait reason until
 readback recovers. A confirmed launch gate is never opened again on a start retry.
 Result integrity failures instead become unknown and require recovery.
-Qualification also holds all32 configured PID slots occupied, checks occupancy
+Qualification also holds all 32 configured PID slots occupied, checks occupancy
 through engine-side statistics, retries the same operation, then cancels without
 raising its PID limit. It requires confirmed descendant/container termination and
 a verified export containing the pre-cancellation workspace marker.

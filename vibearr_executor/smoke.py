@@ -319,6 +319,8 @@ def main():
         for _ in range(2):
             if os.fork() == 0:
                 os.setsid()
+                if os.fork() != 0:
+                    os._exit(0)
                 while True:
                     time.sleep(1)
         Path("started.txt").write_text("descendants launched")

@@ -22,11 +22,13 @@ def save(path: Path, value: bytes) -> None:
 def redact_logs(content: bytes, secret: bytes) -> bytes:
     if not secret:
         return content
-    for count in range(min(len(secret) - 1, len(content)), 0, -1):
-        if content.endswith(secret[:count]):
-            content = content[:-count]
+    segments = content.split(secret)
+    tail = segments[-1]
+    for count in range(min(len(secret) - 1, len(tail)), 0, -1):
+        if tail.endswith(secret[:count]):
+            segments[-1] = tail[:-count]
             break
-    return content.replace(secret, b"[REDACTED]")
+    return b"[REDACTED]".join(segments)
 
 
 def redact_result(value, secret: str):
@@ -132,13 +134,6 @@ def main() -> None:
             )
         if job.get("database_url"):
             environment["DATABASE_URL"] = job["database_url"]
-        if secret:
-            path = Path("/secrets/backend")
-            path.write_bytes(secret)
-            path.chmod(0o400)
-            os.chown(path, 1000, 1000)
-            environment["VIBEARR_BACKEND_SECRET_FILE"] = str(path)
-            environment[job["profile"]["backend_secret_env"]] = secret.decode()
 
         def demote():
             os.setgroups([])
@@ -152,6 +147,14 @@ def main() -> None:
             preexec_fn=demote,
             check=True,
         )
+        if secret:
+            path = Path("/secrets/backend")
+            path.write_bytes(secret)
+            path.chmod(0o400)
+            os.chown(path, 1000, 1000)
+            environment["VIBEARR_BACKEND_SECRET_FILE"] = str(path)
+            environment[job["profile"]["backend_secret_env"]] = secret.decode()
+
         process = subprocess.Popen(
             job["profile"]["argv"],
             cwd="/work",
