@@ -392,6 +392,44 @@ class ClientTests(ServerCase):
             )
         self.assertTrue(all(method == "GET" for method, _ in self.server.calls))
 
+    def test_restart_with_absent_claim_rechecks_current_pause_over_http(self):
+        import copy
+        from coding_runner.gates import GateEvaluator
+        from coding_runner.recovery import RecoveryCoordinator, ReconciliationRequired
+        from coding_runner.test_gates import CONFIG as GATE_CONFIG, NOW
+
+        run_id = str(uuid4())
+        configuration = copy.deepcopy(GATE_CONFIG)
+        self.server.responses[f"/api/v1/runner/runs/{run_id}/"] = (404, {})
+        with Journal(self.path) as journal:
+            state = journal.load()
+            gates = GateEvaluator(journal, clock=lambda: NOW)
+            decision = gates.evaluate(configuration, state)
+            gates.prepare_claim(state, run_id, decision)
+            payload = {
+                "run_id": run_id,
+                "configuration_revision": configuration["revision"],
+            }
+            journal.prepare(state, run_id, "claim", payload)
+            configuration["global"]["paused"] = True
+            self.server.responses["/api/v1/runner/configuration/"] = (
+                200,
+                configuration,
+            )
+            with self.assertRaisesRegex(ReconciliationRequired, "processing gates"):
+                RecoveryCoordinator(self.client, journal, gates).reconcile(
+                    journal.load()
+                )
+            self.assertEqual(journal.load()["operation"]["payload"], payload)
+        self.assertEqual(
+            self.server.calls,
+            [
+                ("GET", f"/api/v1/runner/runs/{run_id}/"),
+                ("GET", "/api/v1/runner/configuration/"),
+                ("POST", "/api/v1/runner/gates/report/"),
+            ],
+        )
+
     def test_pending_claim_is_written_before_http(self):
         run_id = str(uuid4())
         self.server.responses["/api/v1/runner/runs/claim/"] = (500, {})

@@ -19,7 +19,9 @@ and gate readbacks remain read-only probes. Generic queue and `nq` APIs retain
 their existing authentication and behavior.
 
 `POST /api/v1/runner/controller/` has an empty body. Repeating the same binding is
-safe. Another volume cannot bind, recover a claim token, or mutate the run even
+safe. Binding and mutation recheck current bearer and volume proof under the
+controller lock, so revocation after HTTP authentication still fences the request.
+Another volume cannot bind, recover a claim token, or mutate the run even
 with the same runner Bearer. A first binding with existing active work is refused.
 No automatic secret replacement, heartbeat expiry, lease takeover, or requeue is
 provided. Missing local state with server-owned work requires operator recovery.
@@ -37,7 +39,10 @@ The journal retains the owned response and private claim token, original claim
 window, stage sessions, full context and plan references, validation attestation,
 PR delivery state, wait reason, active-time budget, and unfinished HTTP/process
 operations. The original window counter is charged once, including when the claim
-response is lost. Empty outcomes remain empty. Owned work is reconciled before
+response is lost. An absent claim lookup retries the original UUID and request
+only after current processing gates, including current and original account
+reserves, pass again. A blocked retry retains its original window accounting.
+Empty outcomes remain empty. Owned work is reconciled before
 any new claim. Completed results retain claim proof locally until the completion
 callback acknowledges them; branch 12 uses this to guard retention.
 

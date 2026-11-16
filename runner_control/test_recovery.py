@@ -79,6 +79,39 @@ class ControllerOwnershipTests(TestCase):
             409,
         )
 
+    def test_revoked_bearer_after_authentication_cannot_bind_volume(self):
+        from .services import lock_controller
+
+        self.client.defaults["HTTP_X_NQ_CONTROLLER_SECRET"] = self.proof
+
+        def revoke_before_binding(runner):
+            RunnerIdentity.objects.filter(pk=runner.pk).update(enabled=False)
+            lock_controller(runner)
+
+        with patch(
+            "runner_control.recovery_api.lock_controller",
+            side_effect=revoke_before_binding,
+        ):
+            response = self.post("runner_controller")
+        self.assertEqual(response.status_code, 409)
+        self.runner.refresh_from_db()
+        self.assertEqual(self.runner.controller_digest, "")
+
+    def test_volume_proof_revoked_after_authentication_cannot_claim(self):
+        from .services import RunConflict, claim_run
+
+        self.bind()
+        self.runner.refresh_from_db()
+        self.runner.controller_proven = True
+        RunnerIdentity.objects.filter(pk=self.runner.pk).update(
+            controller_digest=token_digest("b" * 64)
+        )
+        with self.assertRaises(RunConflict):
+            claim_run(runner=self.runner, run_id=self.run_id)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.status, "queued")
+        self.assertFalse(Run.objects.filter(pk=self.run_id).exists())
+
     def test_unbound_legacy_active_run_cannot_be_adopted(self):
         self.bind()
         self.claim()

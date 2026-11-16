@@ -101,8 +101,74 @@ class RecoveryTests(RecoveryFixture, unittest.TestCase):
         self.pending_claim()
         self.recovery.reconcile(self.state)
         self.assertEqual(self.state["run"]["run"]["id"], self.run_id)
-        self.assertEqual(len(self.client.calls), 1)
+        claims = [
+            call for call in self.client.calls if call[1].endswith("/runs/claim/")
+        ]
+        self.assertEqual(len(claims), 1)
         self.assertEqual(sum(self.state["gates"]["counts"].values()), 1)
+
+    def test_uncommitted_claim_is_not_replayed_when_current_controls_close(self):
+        self.pending_claim()
+        original = copy.deepcopy(self.state["operation"])
+        self.client.configuration_document["global"]["paused"] = True
+        with self.assertRaisesRegex(ReconciliationRequired, "processing gates"):
+            self.recovery.reconcile(self.state)
+        self.assertEqual(self.state["operation"], original)
+        self.assertEqual(self.state["gates"]["pending_claim"]["run_id"], self.run_id)
+        self.assertEqual(self.client.calls, [])
+        self.assertEqual(self.state["gates"]["counts"], {})
+
+    def test_uncommitted_claim_cannot_retry_outside_current_schedule(self):
+        self.pending_claim()
+        self.client.configuration_document["global"].update(
+            schedule_mode="windows", windows=[]
+        )
+        with self.assertRaisesRegex(ReconciliationRequired, "processing gates"):
+            self.recovery.reconcile(self.state)
+        self.assertIn("outside_window", self.state["gates"]["checkpoint"]["reasons"])
+        self.assertEqual(self.client.calls, [])
+
+    def test_uncommitted_claim_requires_current_and_original_account_usage(self):
+        from .gates import UsageReading, UsageWindow
+
+        self.pending_claim()
+        original_account = {"backend": "original", "credential_id": 99}
+        self.state["gates"]["pending_claim"]["accounts"] = [original_account]
+        self.client.configuration_document["global"]["reserve_enabled"] = True
+
+        class Available:
+            def read_usage(self, account, now):
+                return UsageReading(True, (UsageWindow("quota", 100, now),))
+
+        for account in CONFIG["accounts"]:
+            self.gates.adapters[(account["backend"], account["credential_id"])] = (
+                Available()
+            )
+        with self.assertRaisesRegex(ReconciliationRequired, "processing gates"):
+            self.recovery.reconcile(self.state)
+        self.assertIn("usage_missing", self.state["gates"]["checkpoint"]["reasons"])
+        self.assertEqual(self.client.calls, [])
+
+    def test_retry_gate_cannot_ignore_a_different_pending_claim(self):
+        from .journal import JournalError
+
+        self.pending_claim()
+        with self.assertRaises(JournalError):
+            self.gates.evaluate(
+                self.client.configuration(), self.state, retry_claim_id=str(uuid4())
+            )
+        self.assertEqual(self.state["operation"]["run_id"], self.run_id)
+
+    def test_paused_retry_can_resume_original_intent_and_count_once(self):
+        self.pending_claim()
+        original = copy.deepcopy(self.state["operation"])
+        self.client.configuration_document["global"]["paused"] = True
+        with self.assertRaises(ReconciliationRequired):
+            self.recovery.reconcile(self.state)
+        self.client.configuration_document["global"]["paused"] = False
+        self.recovery.reconcile(self.journal.load())
+        self.assertEqual(self.client.calls[-1][2], original["payload"])
+        self.assertEqual(sum(self.journal.load()["gates"]["counts"].values()), 1)
 
     def test_loss_after_claim_never_consumes_a_second_item(self):
         self.pending_claim()
@@ -350,6 +416,51 @@ class ProcessRecoveryTests(RecoveryFixture, unittest.TestCase):
         self.addCleanup(child.wait)
         self.addCleanup(tracker.recover)
         return tracker, child
+
+    def test_process_disappearing_during_stat_read_is_already_stopped(self):
+        from .processes import identity
+
+        with patch(
+            "coding_runner.processes.Path.read_text", side_effect=ProcessLookupError
+        ):
+            self.assertIsNone(identity(123))
+
+    def test_child_exiting_between_group_check_and_signal_is_confirmed(self):
+        import os
+        import signal
+
+        tracker, child = self.spawn()
+        signal_group = os.killpg
+
+        def exited_before_signal(pid, requested_signal):
+            signal_group(pid, signal.SIGKILL)
+            child.wait()
+            signal_group(pid, requested_signal)
+
+        with patch(
+            "coding_runner.processes.os.killpg", side_effect=exited_before_signal
+        ):
+            tracker.recover()
+        self.assertFalse(group_alive(child.pid))
+        self.assertEqual(
+            next(iter(self.state["processes"].values()))["status"], "stopped"
+        )
+
+    def test_missing_signal_target_with_unconfirmed_group_stays_fenced(self):
+        from .journal import JournalError
+
+        tracker, child = self.spawn()
+        with (
+            patch("coding_runner.processes.os.killpg", side_effect=ProcessLookupError),
+            patch("coding_runner.processes.group_alive", return_value=True),
+            self.assertRaisesRegex(JournalError, "unconfirmed"),
+        ):
+            tracker.recover()
+        self.assertEqual(
+            next(iter(self.state["processes"].values()))["status"], "running"
+        )
+        tracker.recover()
+        self.assertFalse(group_alive(child.pid))
 
     def test_restart_confirms_child_process_group_termination(self):
         _, child = self.spawn()

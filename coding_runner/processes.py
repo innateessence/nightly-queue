@@ -19,7 +19,7 @@ def identity(pid: int) -> tuple[str, int, int] | None:
     try:
         raw = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
         return raw[0], int(raw[2]), int(raw[19])
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return None
 
 
@@ -99,7 +99,14 @@ class ProcessTracker:
             )
         if not group_alive(pid):
             return
-        os.killpg(pid, signal.SIGKILL)
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            if group_alive(pid):
+                raise JournalError(
+                    "Child termination is unconfirmed; execution remains fenced."
+                ) from None
+            return
         deadline = time.monotonic() + 2
         while group_alive(pid):
             if time.monotonic() >= deadline:

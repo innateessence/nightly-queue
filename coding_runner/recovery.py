@@ -121,6 +121,27 @@ class RecoveryCoordinator:
                     raise ReconciliationRequired(
                         "Remote owned work conflicts with the pending claim."
                     ) from None
+                from .backend_registry import BackendRegistry, ScopedCredentials
+
+                configuration = self.client.configuration()
+                accounts = (
+                    [*configuration["accounts"], *pending_claim.get("accounts", [])]
+                    if pending_claim
+                    else configuration["accounts"]
+                )
+                adapters = BackendRegistry().usage_adapters(
+                    accounts, ScopedCredentials(self.client)
+                )
+                for key, adapter in adapters.items():
+                    self.gates.adapters.setdefault(key, adapter)
+                decision = self.gates.evaluate(
+                    configuration, state, checkpoint="claim", retry_claim_id=run_id
+                )
+                self.client.gate_report(decision.data())
+                if not decision.allowed:
+                    raise ReconciliationRequired(
+                        "Pending claim retry is blocked by current processing gates."
+                    ) from None
                 result = self.client.request(
                     "POST", "/api/v1/runner/runs/claim/", operation["payload"]
                 )

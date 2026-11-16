@@ -38,7 +38,11 @@ def lock_controller(runner=None):
     if runner is None:
         return
     current = RunnerIdentity.objects.get(pk=runner.pk)
-    if current.controller_digest and not getattr(runner, "controller_proven", False):
+    proof_changed = not constant_time_compare(
+        current.controller_digest, runner.controller_digest
+    )
+    proven = getattr(runner, "controller_proven", False)
+    if proof_changed or current.controller_digest and not proven:
         raise RunConflict(
             "Controller volume proof is required; operator reconciliation is required."
         )

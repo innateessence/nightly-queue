@@ -8,7 +8,7 @@ from nightly_queue.api import read_body, string_field
 
 from .api import response_data, run_response
 from .auth import runner_api_view, token_digest
-from .models import Run, RunnerController, RunnerIdentity
+from .models import Run, RunnerIdentity
 from .services import RunConflict, lock_controller, owned_run, uuid_field, verify_active
 
 
@@ -23,7 +23,7 @@ def bind_controller(request):
 
     def operation():
         with transaction.atomic():
-            RunnerController.objects.select_for_update().get_or_create(pk=1)
+            lock_controller(request.runner_identity)
             runner = RunnerIdentity.objects.select_for_update().get(
                 pk=request.runner_identity.pk
             )
