@@ -455,6 +455,9 @@ def bind_merge_intent(run, value, operation_id):
         data["pull_request"]["number"],
         ctx.digest,
     )
+    from .review_services import bind_merge_reviews
+
+    bind_merge_reviews(run, value)
     if run.evidence.filter(kind="native_merge").exists() or any(
         str(entry.operation_id) not in resolved_merge_intents(run)
         for entry in merge_intents(run)

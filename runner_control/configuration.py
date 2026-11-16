@@ -156,6 +156,13 @@ def project_configuration(project, defaults, overrides, credentials):
                 raise NativeContractError(
                     "Merge profile must identify this project's verified repository."
                 )
+            if profile["control_base"] in {
+                project.base_branch,
+                project.github_default_branch,
+            }:
+                raise NativeContractError(
+                    "Review control base must differ from the application base."
+                )
         except NativeContractError as exc:
             errors.append(
                 {

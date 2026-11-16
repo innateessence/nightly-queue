@@ -48,13 +48,15 @@ def trusted_profile(repository_id=123):
                 "role": role,
                 "context": f"ai/{role}",
                 "creator_id": 456,
-                "report_repository": "example/control",
-                "report_repository_id": 789,
+                "report_repository": "example/configured",
+                "report_repository_id": repository_id,
                 "report_prefix": "reviews/",
             }
             for role in ("independent", "root")
         ],
         "ci_timeout_seconds": 1800,
+        "review_timeout_seconds": 1200,
+        "control_base": "vibearr/reviews",
         "delete_branch": False,
     }
 
@@ -127,14 +129,16 @@ class MergeProtocolMixin(NativeProtocolMixin):
 
     def receipt(self):
         reviews = []
-        for role in ("independent", "root"):
+        profile = self.run.configuration_snapshot["effective"]["merge_profile"]
+        for configured in profile["reviews"]:
+            role = configured["role"]
             reviews.append(
                 {
                     "role": role,
                     "status_id": 20 + len(reviews),
-                    "creator_id": 456,
-                    "context": f"ai/{role}",
-                    "report_url": f"https://github.com/example/control/blob/{'a' * 40}/reviews/{role}.json",
+                    "creator_id": configured["creator_id"],
+                    "context": configured["context"],
+                    "report_url": f"https://github.com/{configured['report_repository']}/blob/{'e' * 40}/{configured['report_prefix']}{self.run.pk}/{self.workspace['commit_sha']}/{role}.json",
                     "report_digest": "a" * 64,
                     "report": {
                         "schema_version": 1,
@@ -153,10 +157,11 @@ class MergeProtocolMixin(NativeProtocolMixin):
                     },
                 }
             )
+            reviews[-1]["report_digest"] = contract.digest(reviews[-1]["report"])
         return {
             "policy": {
                 "actor_id": 456,
-                "profile_digest": contract.digest(trusted_profile()),
+                "profile_digest": contract.digest(profile),
                 "rulesets": [{"id": 10, "digest": "a" * 64}],
             },
             "checks": [
@@ -187,13 +192,16 @@ class MergeProtocolMixin(NativeProtocolMixin):
                 "workspace": self.workspace,
                 "pull_request": self.pull,
                 "stage": stage,
-                "profile": trusted_profile(),
+                "profile": self.run.configuration_snapshot["effective"][
+                    "merge_profile"
+                ],
                 "receipt": self.receipt(),
             },
         )
 
     def start_merge(self):
         self.complete_delivery()
+        self.complete_owned_reviews()
         payload = self.merge_intent()
         with patch(
             "runner_control.merge_services.provider_authorization",
@@ -201,6 +209,141 @@ class MergeProtocolMixin(NativeProtocolMixin):
         ):
             self.merge_intent_entry = self.write("native_intent", payload)
         self.intent_ids.append(str(self.merge_intent_entry.operation_id))
+
+    def review_intent(self, role):
+        manifest = {
+            **self.session.manifest,
+            "operation_id": str(uuid4()),
+            "source_digest": self.workspace_entry.payload["source_digest"],
+        }
+        session = replace(self.session, manifest=manifest)
+        data = {
+            "workspace_id": str(self.workspace_entry.operation_id),
+            "workspace": self.workspace,
+            "pull_request": self.pull,
+            "role": role,
+            "session": session.to_data(),
+            "diff_digest": "a" * 64,
+        }
+        return contract.intent_document("review", **self.common(), data=data)
+
+    def complete_review(self, role):
+        intent = self.write("native_intent", self.review_intent(role))
+        self.intent_ids.append(str(intent.operation_id))
+        session = intent.payload["data"]["session"]
+        observed = self.observed(
+            session["manifest"]["operation_id"], self.changed, self.changed
+        )
+        self.operations.append(observed)
+        report = next(
+            entry["report"]
+            for entry in self.receipt()["reviews"]
+            if entry["role"] == role
+        )
+        value = {
+            "schema_version": 1,
+            "intent_id": str(intent.operation_id),
+            "role": role,
+            "receipt": contract.receipt_summary(observed),
+            "successful": True,
+            "session_id": report["session_id"],
+            "agent_version": self.session.agent_version,
+            "usage": [],
+            "report": report,
+            "report_digest": contract.digest(report),
+        }
+        return self.write("native_review", value)
+
+    def review_publication(self, reviews):
+        prefix = f"reviews/{self.run.pk}/{self.workspace['commit_sha']}/"
+        files = []
+        paths = {}
+        for role in ("independent", "root"):
+            paths[role] = prefix + role + ".json"
+            files.append(
+                {
+                    "path": paths[role],
+                    "digest": contract.digest(reviews[role].payload["report"]),
+                }
+            )
+            files.append(
+                {
+                    "path": prefix + role + ".receipt.json",
+                    "digest": contract.digest(reviews[role].payload),
+                }
+            )
+        return {
+            "publication_id": str(uuid4()),
+            "workspace_id": str(self.workspace_entry.operation_id),
+            "workspace": self.workspace,
+            "pull_request": self.pull,
+            "review_ids": [
+                str(reviews[role].operation_id) for role in ("independent", "root")
+            ],
+            "repository_id": 123,
+            "repository": self.workspace["repository"],
+            "control_base": "vibearr/reviews",
+            "base_revision": "a" * 40,
+            "branch": f"vibearr/review-run/{self.run.pk}/{self.workspace['commit_sha'][:12]}",
+            "commit_sha": "e" * 40,
+            "files": files,
+            "report_paths": paths,
+            "stage": "push",
+            "role": None,
+        }
+
+    def complete_owned_reviews(self):
+        reviews = {role: self.complete_review(role) for role in ("independent", "root")}
+        publication = self.review_publication(reviews)
+        control_pull = {
+            "repository_id": 123,
+            "number": 19,
+            "url": "https://github.com/example/configured/pull/19",
+            "base": publication["control_base"],
+            "head": publication["branch"],
+            "head_sha": publication["commit_sha"],
+        }
+        self.review_publication_data = publication
+        self.review_facts = reviews
+        for stage, role in (
+            ("push", None),
+            ("create_pr", None),
+            ("status", "independent"),
+            ("status", "root"),
+        ):
+            data = {**publication, "stage": stage, "role": role}
+            payload = contract.intent_document(
+                "review_publication", **self.common(), data=data
+            )
+            with patch("runner_control.review_services.provider_control_base"):
+                intent = self.write("native_intent", payload)
+            self.intent_ids.append(str(intent.operation_id))
+            status = None
+            if stage == "status":
+                receipt = next(
+                    entry
+                    for entry in self.receipt()["reviews"]
+                    if entry["role"] == role
+                )
+                status = {
+                    "id": receipt["status_id"],
+                    "role": role,
+                    "context": receipt["context"],
+                    "creator_id": receipt["creator_id"],
+                    "target_url": receipt["report_url"],
+                    "state": "success",
+                }
+            value = {
+                "schema_version": 1,
+                "intent_id": str(intent.operation_id),
+                "publication_id": publication["publication_id"],
+                "stage": stage,
+                "pushed_sha": publication["commit_sha"],
+                "pull_request": None if stage == "push" else control_pull,
+                "status": status,
+            }
+            with patch("runner_control.review_services.provider_publication"):
+                self.write("native_review_publication", value)
 
     def complete_merge(self):
         self.start_merge()
@@ -559,6 +702,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
 
     def test_pending_repository_fence_blocks_another_merge(self):
         self.complete_delivery()
+        self.complete_owned_reviews()
         RepositoryMergeFence.objects.create(
             repository_id=123,
             run=self.run,
@@ -683,6 +827,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
 
     def test_merge_requires_current_provider_receipt(self):
         self.complete_delivery()
+        self.complete_owned_reviews()
         value = self.merge_intent()
         observed = copy.deepcopy(value["data"]["receipt"])
         observed["checks"][0]["run_attempt"] = 2

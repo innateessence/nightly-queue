@@ -423,7 +423,7 @@ def all_intents(run):
 
 def resolved(run):
     operations, publications = set(), set()
-    for entry in run.evidence.filter(kind="native_agent"):
+    for entry in run.evidence.filter(kind__in=["native_agent", "native_review"]):
         operations.add(entry.payload["receipt"]["operation_id"])
     for entry in run.evidence.filter(kind="native_validation"):
         operations.update(
@@ -455,8 +455,10 @@ def resolved(run):
 
 def require_prior_terminal(run, *, ready_build=None):
     from .merge_services import require_merge_terminal
+    from .review_services import require_publications_terminal
 
     require_merge_terminal(run)
+    require_publications_terminal(run)
     operations, publications = resolved(run)
     if ready_build:
         operations.add(ready_build)
@@ -599,6 +601,16 @@ def validate_intent_binding(run, value, operation_id=None):
         return
     if kind == "merge":
         bind_merge_intent(run, value, operation_id)
+        return
+    if kind == "review":
+        from .review_services import bind_review_intent
+
+        bind_review_intent(run, value)
+        return
+    if kind == "review_publication":
+        from .review_services import bind_publication_intent
+
+        bind_publication_intent(run, value)
         return
     ready_build = None
     if kind == "agent":
@@ -935,8 +947,10 @@ def validate_delivery_binding(run, value):
 
 def validate_termination_binding(run, value):
     from .merge_services import require_merge_terminal
+    from .review_services import require_publications_terminal
 
     require_merge_terminal(run)
+    require_publications_terminal(run)
     intents = {str(entry.operation_id): entry.payload for entry in all_intents(run)}
     if set(value["intent_ids"]) != set(intents):
         raise RunConflict("Termination must cover every registered native intent.")
@@ -999,7 +1013,7 @@ def validate_termination_binding(run, value):
             "Termination must cover owned dependency qualification resources."
         )
     known_receipts = {}
-    for entry in run.evidence.filter(kind="native_agent"):
+    for entry in run.evidence.filter(kind__in=["native_agent", "native_review"]):
         known_receipts[entry.payload["receipt"]["operation_id"]] = entry.payload[
             "receipt"
         ]["receipt_digest"]
@@ -1073,6 +1087,18 @@ def bind_artifact(run, claim_token, kind, value, operation_id=None):
         from .merge_services import bind_merge_terminal
 
         bind_merge_terminal(run, value)
+    elif kind == "native_review":
+        from .review_services import bind_review
+
+        bind_review(run, value)
+    elif kind == "native_review_publication":
+        from .review_services import bind_publication
+
+        bind_publication(run, value)
+    elif kind == "native_review_publication_terminal":
+        from .review_services import bind_publication_terminal
+
+        bind_publication_terminal(run, value)
     return run
 
 
