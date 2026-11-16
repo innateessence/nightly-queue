@@ -1,333 +1,203 @@
-# nightly-queue
+# vibearr
 
-Queue work for your GitHub projects. Django stores tasks and imports issues.
-A dedicated, recoverable `coding-runner` service implements context, planning,
-implementation, validation, and PR delivery through separately scoped HTTP APIs.
-Settings, runs, approvals, retention, and diagnostics are available in the private-LAN
-web UI. Normal execution remains opt-in and blocked until real controlled release
-verification passes. The current Codex API candidate is not a verified native CLI
-integration. See [operations and live qualification](docs/runner-operations.md) and
-[architecture](docs/coding-runner.md).
+A self-hosted *arr app for vibe coding with Codex, Claude Code, and OpenCode.
 
-## Run locally
+The idea is simple: put the work in GitHub issues and let a coding agent get on
+with it. Describe a feature, a bug, or a chore. vibearr handles when it runs,
+which agent does it, and where the result goes.
 
-Copy `.env.example` to an untracked `.env` and set `NQ_API_TOKEN` for API access:
+Think Sonarr or Radarr for your development backlog. Repositories are the
+projects, issues are the work, and coding agents are the workers. Open the web
+app to add something, see what's running, or find out why a task failed. Leave
+it alone when everything is working.
+
+## The workflow
+
+1. **Connect a repository.** Choose a base branch, an agent, and the commands that
+   must pass before a change can be delivered.
+2. **Add work.** Write a GitHub issue or submit a task from the queue. Give it a
+   clear outcome and any acceptance criteria the agent will need.
+3. **Let the queue run.** The worker picks up eligible work during its processing
+   window, prepares an isolated checkout, and gives the agent the issue context.
+4. **Check the result.** The agent implements the change and runs validation.
+   Failed checks get a bounded repair attempt; unresolved failures stay visible.
+5. **Deliver the change.** Passing work becomes a pull request linked to the
+   original issue. Projects configured for automatic merge can finish the job
+   once the required GitHub checks pass.
+
+Routine work should finish without approval prompts. Connecting a project sets
+the boundaries for its agents: which issues they can work on, what they can
+access, how long they can run, and how changes are delivered. Setup, investigation,
+editing, and tests happen inside those boundaries. Work that cannot proceed
+gets a useful failure reason instead of waiting for someone to approve a command.
+
+## Built for background work
+
+The queue is the center of the app. It should be easy to tell what's ready,
+what's running, and what's waiting on something else.
+
+- **Projects:** repository settings, backend and model selection, setup commands,
+  validation commands, and delivery policy.
+- **Queue:** incoming issues and manual tasks, with priorities, holds, and
+  dependencies so useful work runs first.
+- **Activity:** the current stage, progress, logs, and controls to pause or cancel.
+- **History:** previous attempts, validation results, failures, and links to the
+  commits and pull requests they produced.
+- **System:** connection health, schedules, backend limits, storage, and updates.
+
+Use processing windows to run overnight or keep it working all day. Limit active
+tasks, execution time, and retry attempts. Where a backend supplies reliable
+allowance information, a minimum remaining-usage setting can reserve capacity
+for your other work.
+
+A restart should preserve a task's progress. A lost response should not create a
+second agent session or a duplicate PR. The runner keeps durable execution state
+and reconciles external operations before continuing.
+
+## A queue that works on itself
+
+vibearr's own GitHub issue tracker is its development backlog. The intended
+loop is the same one used for any other project:
+
+```text
+Issue → Queue → Agent → Tests → Pull request → Merge
+```
+
+Each feature gets its own issue, branch, and PR. Dependencies keep later features
+from starting before their prerequisites have merged. The first goal is to make
+this loop reliable enough to build the rest of the app through the queue itself.
+Automatic updates extend it from merged code to the running installation.
+
+The [development plan](docs/autonomous-ai-queue-plan.md) lays out the implementation
+milestones: the application rename, autonomous execution, an isolated runtime,
+native agent integrations, issue selection, automatic merging, the operations UI,
+and self-updates.
+
+The [MVP release contract](docs/vibearr-mvp.md) defines the first complete loop:
+two dependent issues implemented, tested, and merged automatically, with the second
+starting from the first change. That is the starting point for building vibearr
+through its own queue.
+
+## Run with Docker Compose
+
+You'll need Docker with Compose. The web app uses port **7777** by default.
+
+Copy the environment file and build the images:
 
 ```sh
 cp .env.example .env
-# Edit .env, then start the containers:
-./run.sh --build
-docker compose exec nightly-queue python manage.py createsuperuser
+docker compose build
 ```
 
-1. Create a project on the [Projects page](http://127.0.0.1:7777/projects/)
-   with an HTTPS GitHub repository URL and optional base branch. Leave the branch
-   blank to use the repository default.
-2. Open [the queue](http://127.0.0.1:7777/) and add work with a title, optional
-   instructions, and priority.
-3. Items are ready for a runner to claim through the API, oldest first. Priority
-   does not change their order. The built-in execution workflow stays disabled
-   until controlled live qualification passes and execution is explicitly enabled.
-
-The **Autonomous** toggle on project creation and editing records whether a
-project should automatically find open issues and create a pull request for each.
-It defaults to off, including for existing projects. The project list shows the
-selected mode, and the API exposes it as the boolean `autonomous` on each project,
-including projects nested in queue item responses.
-
-Celery Beat imports GitHub issues for every autonomous project at the interval
-selected in Settings: **1h**, **4h**, **8h**, **12h**, or **24h**. The default is **1h**,
-including for existing installations. The interval applies to all autonomous projects.
-Choose an existing **GitHub Token** on the [Settings page](http://127.0.0.1:7777/settings/)
-to enable imports. The token needs Issues read access to each repository.
-The scheduler checks once a minute. The first sync runs on the next check; later
-syncs are measured from the start of the last scheduled attempt. Interval changes
-apply on the next check without restarting workers or Beat. Shortening the interval
-can make a sync due immediately; lengthening it postpones the next sync. The last
-scheduled attempt is stored in the database so restarts preserve the interval.
-Click **Sync issues now** on the queue page to import issues from every autonomous
-project immediately, without changing the scheduled timer. This uses the same task
-as scheduled imports, so repeated clicks do not duplicate existing items or requeue
-completed work. In development,
-the sync runs immediately and reports how many items were added. With asynchronous
-workers enabled, it starts the sync in the background; refresh the queue shortly
-afterward to see the imported items.
-All issues, including closed issues, appear alongside manual work in
-[the queue](http://127.0.0.1:7777/); pull requests are excluded.
-Imports fetch every page and refresh titles, bodies, and issue state without
-creating duplicates. Titles longer than 200 characters are shortened for display.
-Manual work and imported issues share one oldest-first queue. Each item shows
-its origin as Manual or GitHub issue.
-
-Only open issues on projects that still have Autonomous enabled can be claimed
-from the queue. Closed issues remain visible, and previously completed work
-is not automatically requeued if an issue reopens. Imports preserve running and
-completed items' instructions and execution history. Issue identity includes the
-project, repository, and issue number, so changing a project's repository does
-not overwrite another repository's issues. Imported issues are managed on GitHub;
-imported items cannot be removed from the queue page.
-
-Missing credentials or an unavailable encryption key skip imports. API failures
-are logged by project ID and retried on the next scheduled run; other projects
-continue importing. Clearing the GitHub selection pauses imports. The GitLab API
-credential selector accepts existing GitLab tokens for future integrations;
-repository URLs and issue imports currently support GitHub only. Creating pull
-requests is implemented in the release-gated `coding-runner` service.
-
-The queue, project, credential, and settings pages have no login requirement.
-This is a single-user app for a private LAN.
-API access requires
-`Authorization: Bearer <NQ_API_TOKEN>`; an unset token disables the API. Use HTTPS
-for API access over a network.
-
-PostgreSQL 17 stores data in the `postgres-data` Docker volume. Its port stays
-internal to Docker. `docker compose down` keeps the data; `down --volumes` deletes it.
-The database, user, and password default to `nightly_queue`. Override them with
-`POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` in `.env`.
-Database credentials initialize an empty volume; changing `.env` does not change an existing database password.
-
-Back up PostgreSQL with:
-
-```sh
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > backup.sql
-```
-
-## Repository credentials
-
-GitHub and GitLab tokens, SSH private keys, and other secrets are stored encrypted
-in PostgreSQL. Generate
-an encryption key once after building the app image:
+Generate a credential encryption key:
 
 ```sh
 docker compose run --rm --no-deps nightly-queue python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 ```
 
-Set `NQ_CREDENTIAL_KEY` to that value in your untracked `.env`, then recreate the
-app and Celery worker containers with `./run.sh --build`. For a native setup,
-export the variable and run `python manage.py migrate`. There is no default encryption key; credential
-creation and decryption fail if it is missing or invalid. Existing projects keep
-working without one until you add credentials.
+Set these values in `.env` before starting:
 
-Open the [Credentials page](http://127.0.0.1:7777/credentials/) from the main
-navigation to add credentials and see saved names and types. No account or login
-is required. You can also manage credentials in
-[Django admin](http://127.0.0.1:7777/admin/).
-Enter a **Name**, select a **Provider** (**GitHub** or **GitLab**), then choose a
-**Type** (**Token**, **SSH**, or **Secret (other)**) and paste the secret. SSH keys can
-use OpenSSH or PEM format; supply the passphrase if the key is encrypted. To
-associate it with a repository, select it in the optional **Credential** field
-when creating or editing a project on the Projects page. You can also assign it
-in admin.
-Multiple projects can share a credential. A credential cannot be deleted while
-projects or API settings reference it.
+| Variable | Purpose |
+| --- | --- |
+| `NQ_API_TOKEN` | A random token for the queue API and `nq` CLI |
+| `POSTGRES_PASSWORD` | The application database password |
+| `NQ_CREDENTIAL_KEY` | The generated key for encrypting saved credentials |
 
-Saved secrets are never filled back into forms. Use admin to edit credentials;
-leave the secret blank to keep it or paste a new value to replace it. Replacing an SSH key also
-requires its passphrase again, if encrypted. The credential type cannot be changed
-after creation. Project forms show saved credential names only, and existing APIs
-do not expose credentials.
-
-Back up the encryption key separately from PostgreSQL and keep it out of Git.
-Losing or replacing it makes saved credentials unreadable. Database exports
-contain ciphertext, but names, providers, and credential types remain readable. Secrets and
-SSH passphrases use [Fernet authenticated encryption](https://cryptography.io/en/stable/fernet/).
-Use HTTPS when submitting credentials over a network.
-
-The scheduled issue importer uses the GitHub token selected in Settings. The project
-credential remains a separate repository association. Runners do not retrieve
-these credentials through the API; there is no credential-decryption HTTP endpoint.
-Trusted server code can explicitly call `project.credential.get_secret()` to obtain a dictionary
-with `secret` and `passphrase`. Do not log or serialize that result into queue
-responses.
-
-Existing credentials are migrated to the GitHub provider: GitHub tokens become
-Token credentials and SSH private keys become SSH credentials. The migration
-preserves encrypted values and project associations without needing the
-encryption key. GitLab is available for credential storage; project repository
-URLs still support GitHub only.
-
-## Move existing SQLite data
-
-Stop any task runners and app writes first. Keep a backup of `db.sqlite3`.
-After setting up `.env`, export the current schema's data and import into an empty PostgreSQL database:
+Start the app:
 
 ```sh
-docker compose stop nightly-queue celery-worker celery-beat
-mkdir -p .cache
-docker compose run --rm --no-deps -T nightly-queue python manage.py dumpdata \
-  --settings nightly_queue.sqlite_settings --natural-foreign --natural-primary \
-  --exclude contenttypes --exclude auth.permission --exclude sessions > .cache/sqlite-export.json
 ./run.sh --build
-docker compose exec nightly-queue python manage.py loaddata .cache/sqlite-export.json
 ```
 
-The export opens SQLite read-only. Verify projects and queue items before resuming task runners.
+Open [localhost:7777](http://127.0.0.1:7777/), add a project with its HTTPS GitHub
+repository URL, and save a GitHub token under Credentials. Select the issue-import
+token in Settings and enable **Autonomous** on the project to discover its issues.
+You can also add tasks directly from the queue.
 
-## Use the CLI
+The web app and issue importer start with the default Compose services. Execution
+runs in a separate `coding-runner` service. Follow the [runner setup and operations
+guide](docs/runner-operations.md) for its identity, credentials, and deployment
+requirements. Starting the web app alone does not start a coding agent.
 
-The CLI needs Python 3.10+ and no Django installation:
+For Django admin access, create an account:
+
+```sh
+docker compose exec nightly-queue python manage.py createsuperuser
+```
+
+This is a single-user app for a private network. The browser UI has no login
+requirement; admin access and bearer-authenticated APIs have separate credentials.
+Keep the UI on your LAN or behind an authenticated proxy. Use HTTPS when sending
+credentials over a network.
+
+## Submit work from the terminal
+
+`nq` is a small HTTP client with no Django dependency. It needs Python 3.10 or newer.
 
 ```sh
 python -m pip install .
 export NQ_URL='http://127.0.0.1:7777'
-export NQ_API_TOKEN='the-same-token-as-the-server'
+export NQ_API_TOKEN='your-queue-api-token'
+
 nq projects
 nq add --project 12 "Add CSV export" \
-  --instructions "Include active filters." --priority normal
+  --instructions "Include the active filters and column headings." \
+  --priority normal
 ```
 
-Use an existing project ID from `nq projects`. Successful submissions print the
-item ID; errors exit nonzero. `NQ_URL` defaults to `http://127.0.0.1:8000`.
-Use `python -m nq` to run without installing. Submissions are never retried automatically.
+Use a project ID from `nq projects`. Successful submissions print the new item ID;
+errors exit nonzero. You can also run it with `python -m nq` from the repository.
 
-## Coding runner architecture
+## How it fits together
 
-The release-gated `coding-runner` service implements:
+Django owns the queue, settings, credentials, and run history. Celery and Beat
+discover GitHub issues. The independent runner claims work over HTTP and owns
+agent processes, task workspaces, validation, and Git delivery. PostgreSQL stores
+application data; Valkey supports the background task services.
 
-1. Claim a task and read the current GitHub issue and all comments, including every
-   page of the discussion. Manual tasks use their title and instructions.
-2. Research the issue against the repository and relevant sources, then save an
-   implementation plan with acceptance criteria and validation steps.
-3. Hand the plan and source context to the code runner, which creates or reuses the
-   task branch and implements the solution.
-4. Test the branch, inspect the diff, and record validation results.
-5. After required checks pass, push the branch and create or reuse a PR linking the
-   original issue, then report the actual PR URL to the queue.
+The runner has its own image and persistent state volume. It does not need direct
+database access or a mount of the running application's source. Agents work in
+task environments, with supervisor credentials and production data kept outside
+their reach. GitHub issue text and repository content describe the task; they
+cannot grant new permissions.
 
-Django owns queue state, saved plans, run visibility, and all runner settings in
-the web UI. The Coding runner section includes processing days/time ranges and timezone, a
-global minimum remaining-usage percentage, execution limits, research/planning
-and implementation backends/models, credential selections, and retention. Project
-pages provide explicit inherit/replace/clear overrides plus setup and validation commands. Celery
-Beat and its worker continue to own scheduled issue discovery. Issue sync and
-coding execution have separate schedules. The Celery greeting task remains a demo.
-
-Processing is gated by both the allowed schedule and the global usage
-reserve. For example, **40% minimum remaining usage** allows queue work only while
-more than 40% of each participating backend account's allowance remains. At 40% or
-less, processing stops at a safe checkpoint across all projects, with no new
-claims or model work. The UI shows remaining usage and the blocking reason;
-missing or unsupported usage readings block processing when enforcement is enabled.
-An in-flight call may cross the threshold before it can pause. Processing resumes
-when usage is above the reserve and the schedule permits it. See the
-[schedule and usage policy](docs/coding-runner.md#processing-schedule-and-global-usage-reserve)
-for account/window handling and recovery.
-
-The runner uses its scoped control HTTP API at `http://nightly-queue:8000` on the
-Compose network, with its own workspace and secret configuration. It does not
-connect directly to PostgreSQL or mount the live application's source directory.
-Runner credentials are managed through the web UI and selected separately
-from the issue-import token. Scoped secret delivery requires selected credentials, current ownership, and explicit preflight grants; ordinary queue responses contain no secrets. Queue
-connectivity/authentication, encryption keys, and container/volume wiring remain
-deployment configuration. Commands arriving as untrusted issue or research data
-require user confirmation before execution, surfaced through the web UI.
-
-Runner settings, immutable context/plan handoff, approvals, isolated workspaces,
-backend proposal mediation, validation, delivery, fenced recovery, and retention
-are implemented. See [operations](docs/runner-operations.md) for bootstrap, upgrades,
-permissions, backup, diagnostics, cleanup, and controlled live qualification.
-The configured hardened production container currently cannot create the required
-sandbox namespaces in this environment; live model authentication/integration also
-needs a designated authorized test repository and paid backend calls. No live
-release was qualified. Portable CI success does not change that status.
-
-## Issue discovery operations
-
-Beat stores its schedule in `/tmp/celerybeat-schedule` inside its container;
-recreating the container resets Beat's minute check timer. The import interval and
-last scheduled attempt remain in the database.
-Run one Beat instance. After updating an existing installation, apply migrations
-and restart the worker and Beat so they load the new task and schedule:
-
-```sh
-docker compose exec nightly-queue python manage.py migrate
-docker compose up -d --force-recreate celery-worker celery-beat
-```
-
-The worker receives `NQ_CREDENTIAL_KEY` through Compose and must use the same key
-as the web app. Beat runs with `DJANGO_DEBUG=False` so it sends tasks to the worker
-instead of executing them eagerly without the credential key.
-No API token is passed as a Celery task argument or returned in
-its result.
-
-## Runner API
-
-All API paths below start with `/api/v1/` and require the bearer token.
-POST bodies must be JSON with `Content-Type: application/json`.
-
-| Method and path | Body | Response |
-| --- | --- | --- |
-| `GET /projects/` | — | `{"projects": [...]}` |
-| `POST /items/` | `{"project_id": 12, "title": "Add export", "instructions": "CSV", "priority": "normal"}` | HTTP 201, `{"item": {...}}`; instructions and priority are optional |
-| `POST /items/claim/` | `{"execution_ref": "runner:<run-id>"}` or `{}` | `{"item": {...}}` or `{"item": null}` |
-| `POST /items/123/finish/` | `{"claim_token": "<UUID from claim>", "status": "succeeded", "result_url": "https://github.com/owner/repo/pull/1"}` | Updated item |
-
-Claims select the oldest eligible item across manual work and imported issues.
-No queue selection is needed. Item responses include `source` (`manual` or
-`github`), `issue_number`, `issue_repository`, and `issue_state` (empty/null for
-manual work). Both sources use the same claim tokens, finish endpoint, and
-recovery rules. Closed issues and imports from projects with Autonomous disabled
-remain visible but cannot be claimed. Existing `/auto/` bookmarks redirect to the
-main queue. The merge migration preserves item IDs, issue metadata, and execution
-history.
-
-An explicitly enabled and qualified runner will:
-
-1. Run only when enabled, within the configured processing schedule, and above the
-   global remaining-usage reserve when that control is enabled.
-2. Claim an item with a unique runner execution ID. Wait for the polling interval
-   when `item` is `null`.
-3. Prepare the workspace using the returned **top-level** `repository_url` and
-   `base_branch`, and retain `branch_name` (`nq/<item-id>`) for implementation.
-   A blank base branch means the remote default. These checkout settings stay
-   fixed across retries; the nested project reflects current settings.
-4. Fetch the full issue discussion for GitHub tasks, research the problem, and save
-   an implementation plan. Pass inputs as data, without interpolating them into
-   shell commands. Claim responses do not contain issue comments or a plan.
-5. Hand the plan to the code runner to create or reuse the task branch and implement
-   the solution. Validate the branch; after required checks pass, commit, push, and
-   create or reuse a pull request linking the original issue when applicable.
-6. Finish with the returned `claim_token` and status `succeeded` plus the actual PR
-   URL in `result_url`, or `failed` with an `error_summary`.
-7. Repeat while the schedule, global usage reserve, and configured task limit allow
-   it. Recheck gates before new stages or model work and preserve paused progress.
-
-Claims are atomic. Only the current token can finish a running item. Invalid
-input returns 400, wrong tokens 401, missing items 404, wrong methods 405, and
-stale claims or repeated completion 409.
-
-Runner-owned interrupted work keeps its claim and private journal. Restart the same
-owner and volume to reconcile before advancing. A delivered PR with pending
-completion reporting resumes reporting without a second PR. For a missing volume
-or unknown external outcome, stop the old supervisor and children and inspect the
-saved evidence; do not assume lease expiry grants ownership. Admin requeue fences
-the obsolete run and must follow operator reconciliation. See the detailed
-[recovery procedure](docs/runner-operations.md#history-controls-and-recovery).
+| Directory | Responsibility |
+| --- | --- |
+| `work_queue/` | Queue models, shared submission and claim services, UI, and API |
+| `projects/` | Repository configuration |
+| `credentials/` | Encrypted secrets and settings views |
+| `runner_control/` | Runner APIs, configuration, run records, and operator views |
+| `coding_runner/` | Independent supervisor, backends, workspaces, recovery, and delivery |
+| `nq/` | Standalone command-line client |
+| `nightly_queue/` | Django and Celery configuration |
 
 ## Development
 
-- `projects/`: project models, validation, admin, and API.
-- `credentials/`: encrypted repository credentials and admin forms.
-- `work_queue/`: queue models, services, UI, API, and recovery.
-- `nightly_queue/`: Django/Celery configuration and shared API helpers.
-- `nq/`: standalone standard-library CLI.
+Use Python **3.12** for the application. Implement each feature on its own branch
+and include tests and migrations with the code that needs them. The
+[development plan](docs/autonomous-ai-queue-plan.md) defines branch dependencies
+and acceptance criteria for the autonomous workflow.
 
-Add migrations and tests to the app that owns the model. Implement each new
-feature in its own branch.
+Install dependencies for native development:
 
-UI previews with sample data: [Queue](docs/screenshots/queue-desktop.png),
-[Settings](docs/screenshots/settings-desktop.png),
-[mobile queue](docs/screenshots/queue-mobile.png), and
-[mobile Settings](docs/screenshots/settings-mobile.png).
+```sh
+python -m pip install -r requirements.txt
+```
 
-The app uses Python 3.12. Run checks inside the app container with
-`docker compose exec nightly-queue <command>`. For a native Python setup, install
-`requirements.txt` and set `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
-`POSTGRES_HOST`, and `POSTGRES_PORT` for a reachable PostgreSQL server.
+Configure a reachable PostgreSQL server with `POSTGRES_DB`, `POSTGRES_USER`,
+`POSTGRES_PASSWORD`, `POSTGRES_HOST`, and `POSTGRES_PORT`, then run:
+
+```sh
+python manage.py migrate
+python manage.py runserver
+```
+
+Run checks locally, or prefix application commands with
+`docker compose exec nightly-queue` to use the app container:
 
 ```sh
 python manage.py test
-python -m unittest nq.test_cli  # CLI tests without Django
+python -m unittest nq.test_cli
 python manage.py makemigrations --check --dry-run
 python manage.py check
 black --check .
@@ -335,11 +205,31 @@ ruff check .
 mypy . --config-file mypy.ini
 ```
 
-`bash test.sh` runs the Docker-based checks. CI runs the same script for non-draft
-pull requests; see [the workflow](.github/workflows/test.yml).
+`bash test.sh` builds the Compose services and runs the Docker checks used by CI.
+The independent runner has its own verification entry point:
 
-The optional release-gated runner supervisor is documented in [runner service setup](docs/runner-service.md). Execution remains disabled pending the controlled release checks.
+```sh
+python -m coding_runner.verify
+python -m coding_runner.verify --boundary
+```
 
-Processing schedule, allowance adapter, durable counter, and gate evidence contracts are documented in [runner execution gates](docs/runner-execution-gates.md). Live execution remains disabled.
+Boundary checks must pass on the intended execution host. Portable tests alone
+do not establish that an agent environment works in deployment.
 
-OpenCode provider API and optional local Ollama setup: [runner integration](docs/runner-opencode-ollama.md). Native OpenCode CLI execution remains unsupported and controlled release verification is required.
+## Keeping your data
+
+PostgreSQL data lives in the `postgres-data` volume. `docker compose down` keeps
+it; adding `--volumes` removes it. Runner state lives in `runner-data` and must be
+preserved to recover unfinished work.
+
+Back up the database:
+
+```sh
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > backup.sql
+```
+
+Keep `.env` and tokens out of Git. Back up `NQ_CREDENTIAL_KEY` separately from the
+database: losing the key makes saved credentials unreadable. Stop the runner
+before backing up its state, and keep database and runner backups consistent.
+See the [operations guide](docs/runner-operations.md) for recovery and retention,
+or the [SQLite migration procedure](docs/sqlite-migration.md) for older installs.
