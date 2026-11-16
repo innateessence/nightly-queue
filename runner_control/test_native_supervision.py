@@ -1,5 +1,7 @@
 from dataclasses import replace
 import json
+import shutil
+from unittest import skipUnless
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
@@ -46,6 +48,10 @@ class APIBridge:
         return self.request("GET", f"/api/v1/runner/runs/{identity}/")
 
 
+@skipUnless(
+    shutil.which("git"),
+    "Native supervisor integration requires the runner Git boundary",
+)
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
 class NativeSupervisionTests(NativeProtocolMixin, TestCase):
     def setUp(self):

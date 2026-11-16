@@ -1,0 +1,812 @@
+{
+  "attempt_history": [
+    {
+      "outcome": "canceled",
+      "publication": null,
+      "reason": "Explicit operator retry after genuine agent completion; protected termination confirmed before requeue.",
+      "run_id": "6a16f1de-5db4-4f71-8f6c-0438715338c0"
+    },
+    {
+      "operation_id": "0e8d6975-bacf-4f48-971e-244afb262416",
+      "outcome": "failed",
+      "publication": null,
+      "reason": "Own executor service exited143 during validation. On restart the author supplied root profiles.json (11) instead of original executor/profiles.json (21), changing qualification binding. Supervisor safely rejected validation and completed failed without publication. Original cause of initial earlier driver stop unavailable because child stderr was not retained.",
+      "run_id": "6fbc4d38-60ac-41bd-ba55-e1528e350e13",
+      "session_id": "01a1e50a-6edf-7f31-9652-0baf8e0118f4",
+      "supervisor_revisions": [
+        "07fab78",
+        "729f70f",
+        "uncommitted clone fix during final diagnostic only; no model replacement"
+      ]
+    },
+    {
+      "operation_id": "01c6bf11-d19c-476a-8d60-2f8e7f92fe7d",
+      "outcome": "delivered",
+      "publication": "https://github.com/innateessence/nightly-queue/pull/104",
+      "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+      "session_id": "01a1e51b-2843-78e1-af02-cb7d4278ffcb",
+      "supervisor_revision": "24386a2d11df53e159be0b3e09e54658c31c7370"
+    }
+  ],
+  "captured_delivery_sha256": "46c4e00f47678fc759b0efdd54825e2638745181de7ec4e51cd9c255078ed16a",
+  "executor_source_digest": "bb447de81c9a7956daf800981033c0325949e316126c81ac8d975bf7c4c74b6f",
+  "result": {
+    "completed_at": "2026-11-16T16:16:03.873697+00:00",
+    "delivery": {
+      "configuration_revision": "a8339c7eda17aae282cc31b4d27ec0cba69f30691b659d777fcd6daa67585142",
+      "context": {
+        "digest": "b3c05135f3a00b65e6fca67d081b4b4f85079d0a391d7cae8f3ae4bd11bb360d",
+        "id": "a1b06aa9-221f-426d-825e-85de1ebafeed"
+      },
+      "delivery": {
+        "checks": [],
+        "issue_completion": null,
+        "merge": null,
+        "mode": "pull_request",
+        "pull_request": {
+          "base": "main",
+          "head": "vibearr/issue-99",
+          "head_sha": "a44468bf797fd3d0dba0b7e39378ac9df4abf878",
+          "number": 104,
+          "repository_id": 1353963957,
+          "url": "https://github.com/innateessence/nightly-queue/pull/104"
+        },
+        "pushed_sha": "a44468bf797fd3d0dba0b7e39378ac9df4abf878"
+      },
+      "execution_kind": "native",
+      "operation_id": "46fd3aee-8bad-4780-aa2c-b2778567fe27",
+      "policy_digest": "d0552be7169b3fee353cd904ff66a7c9ae8dd09e92594e9227e94ba720612ffd",
+      "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+      "runner_id": 1,
+      "runtime": {
+        "agent_version": "0.169.0",
+        "image_digest": "sha256:ef056d326350ef92e29f109f1d7528f9c419c1182d2518314a9b145291f79888",
+        "profile_id": "codex-session-v1",
+        "session_id": "01a1e51b-2843-78e1-af02-cb7d4278ffcb"
+      },
+      "schema_version": 2,
+      "validation": {
+        "checks": [
+          {
+            "exit_code": 0,
+            "finished_at": "2026-11-16T16:09:35.504940+00:00",
+            "id": "black",
+            "log_digest": "f893978b000c64c302c31244e301f18212b766a55fa5ada6dda8998266543e26",
+            "log_reference": "executor:ec83eaef-73d7-5e50-8b2c-0908281b5b51:logs",
+            "operation_id": "ec83eaef-73d7-5e50-8b2c-0908281b5b51",
+            "started_at": "2026-11-16T16:09:31.030030+00:00",
+            "timed_out": false
+          },
+          {
+            "exit_code": 0,
+            "finished_at": "2026-11-16T16:09:42.488700+00:00",
+            "id": "ruff",
+            "log_digest": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+            "log_reference": "executor:2e5e9829-429e-53fb-8665-94897e2727a7:logs",
+            "operation_id": "2e5e9829-429e-53fb-8665-94897e2727a7",
+            "started_at": "2026-11-16T16:09:42.407660+00:00",
+            "timed_out": false
+          },
+          {
+            "exit_code": 0,
+            "finished_at": "2026-11-16T16:10:00.504143+00:00",
+            "id": "mypy",
+            "log_digest": "17315dc5882ffe93b13d23467668c876e9498b224677249bcb6c57aa77384959",
+            "log_reference": "executor:ec2a45e9-46b6-5684-984d-7ab2880fd007:logs",
+            "operation_id": "ec2a45e9-46b6-5684-984d-7ab2880fd007",
+            "started_at": "2026-11-16T16:09:54.887644+00:00",
+            "timed_out": false
+          },
+          {
+            "exit_code": 0,
+            "finished_at": "2026-11-16T16:10:13.456703+00:00",
+            "id": "migrations",
+            "log_digest": "0bafc7a86dd69a20626b8612ae672026fe11aef644c2fa543ac9c05d8b7d8405",
+            "log_reference": "executor:c97dc97c-2b99-556c-af52-ab901ef9f875:logs",
+            "operation_id": "c97dc97c-2b99-556c-af52-ab901ef9f875",
+            "started_at": "2026-11-16T16:10:12.675915+00:00",
+            "timed_out": false
+          },
+          {
+            "exit_code": 0,
+            "finished_at": "2026-11-16T16:10:23.407187+00:00",
+            "id": "system",
+            "log_digest": "1e3e63f221bde88816c4a4ef7367691607b20cc1d194028a02ec9ae0586cf9b1",
+            "log_reference": "executor:4a9f1a27-f9c6-559f-b8a1-e077d735334a:logs",
+            "operation_id": "4a9f1a27-f9c6-559f-b8a1-e077d735334a",
+            "started_at": "2026-11-16T16:10:23.037156+00:00",
+            "timed_out": false
+          },
+          {
+            "exit_code": 0,
+            "finished_at": "2026-11-16T16:12:42.933560+00:00",
+            "id": "django",
+            "log_digest": "9f723bcf995ec28d80c8b1a0bd8fba4a3053919a7485534695c6d202312f0553",
+            "log_reference": "executor:5522318b-76c7-55b8-8f1a-a829fdd26e71:logs",
+            "operation_id": "5522318b-76c7-55b8-8f1a-a829fdd26e71",
+            "started_at": "2026-11-16T16:10:33.635103+00:00",
+            "timed_out": false
+          },
+          {
+            "exit_code": 0,
+            "finished_at": "2026-11-16T16:14:08.082821+00:00",
+            "id": "cli",
+            "log_digest": "893fb91c90edf35d5fae65b387ad8e9bedc154d87e1e76d11567b18d1ca3f20f",
+            "log_reference": "executor:f0d0ba0b-46ea-584a-b635-73c8db266677:logs",
+            "operation_id": "f0d0ba0b-46ea-584a-b635-73c8db266677",
+            "started_at": "2026-11-16T16:12:53.874872+00:00",
+            "timed_out": false
+          },
+          {
+            "exit_code": 0,
+            "finished_at": "2026-11-16T16:14:48.581800+00:00",
+            "id": "runner",
+            "log_digest": "65a2f3f41927cbfef4b0edf56b356ca6a784f9b969e4761646e0479409cedf53",
+            "log_reference": "executor:c06554a2-01bf-5147-93cf-3727428e99cb:logs",
+            "operation_id": "c06554a2-01bf-5147-93cf-3727428e99cb",
+            "started_at": "2026-11-16T16:14:16.803548+00:00",
+            "timed_out": false
+          },
+          {
+            "exit_code": 0,
+            "finished_at": "2026-11-16T16:15:36.969616+00:00",
+            "id": "git-acceptance",
+            "log_digest": "84b0c5edb81fb2efc990e35ef1b0b6c82e33001c86a572c292edb2771c9138d2",
+            "log_reference": "executor:f9ef5927-d848-5307-9f8a-52283c1d988f:logs",
+            "operation_id": "f9ef5927-d848-5307-9f8a-52283c1d988f",
+            "started_at": "2026-11-16T16:14:55.213894+00:00",
+            "timed_out": false
+          }
+        ],
+        "image_digest": "sha256:624110a15c30119a4eb13c3b4b3980d6c8be9caa47fd3dfa6f6ec349706d92dd",
+        "profile_digest": "ac11921f292d987e1959b0f0e01d1cf560d37c9d5972a000fd4fea8d71aa666e",
+        "profile_id": "vibearr-python312-v1",
+        "tree_sha": "268c088c788109c9daebef22cc887c7324b9ab8b"
+      },
+      "workspace": {
+        "base_branch": "main",
+        "base_revision": "c56dfc756c8f157043cd87128fdc6f891081abc8",
+        "branch": "vibearr/issue-99",
+        "commit_sha": "a44468bf797fd3d0dba0b7e39378ac9df4abf878",
+        "repository": "innateessence/nightly-queue",
+        "repository_id": 1353963957,
+        "tree_sha": "268c088c788109c9daebef22cc887c7324b9ab8b"
+      }
+    },
+    "finish_digest": "65583dad5cec222a323518d510afc16a9ca7013bf2227b8f6076e25b7568cd81",
+    "issue_number": 99,
+    "project_id": 1,
+    "reporting_acknowledged": true,
+    "restarts": {
+      "agent-completed": {
+        "generation": 83,
+        "observed_at": "2026-11-16T16:09:21.614057+00:00",
+        "pid": 2734
+      },
+      "pr-verified": {
+        "generation": 166,
+        "observed_at": "2026-11-16T16:15:56.654390+00:00",
+        "pid": 79838
+      },
+      "pushed": {
+        "generation": 165,
+        "observed_at": "2026-11-16T16:15:47.963984+00:00",
+        "pid": 77887
+      },
+      "reporting-pending": {
+        "generation": 167,
+        "observed_at": "2026-11-16T16:16:03.579178+00:00",
+        "pid": 81751
+      }
+    },
+    "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+    "schema_version": 1,
+    "supervisor_generations": 169
+  },
+  "schema_version": 1,
+  "supervisor_revision": "24386a2d11df53e159be0b3e09e54658c31c7370",
+  "termination": {
+    "builds": [],
+    "intent_ids": [
+      "9df32b64-aa68-4a5d-900a-0968f8a09323",
+      "d9a42644-073e-4c7d-8d21-bc25e3fffc7e",
+      "e61ef55d-6dbc-4b8b-987a-a347abc5a953",
+      "f7353f78-be16-4b2d-bb50-2fe12534c79d"
+    ],
+    "local_processes": [
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "5fe3f379-7fbb-4097-a823-aea37cddc8d3",
+        "pid": 31,
+        "returncode": 0,
+        "start": 21025263,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "8e406faa-5bdf-4a2c-b6d6-efd338d674bd",
+        "pid": 38,
+        "returncode": 0,
+        "start": 21025275,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "61bed425-fcbc-4689-9fee-b30bb3d72f9d",
+        "pid": 45,
+        "returncode": 0,
+        "start": 21025285,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "320ecc92-511f-4a8f-ac05-4264c1749445",
+        "pid": 52,
+        "returncode": 0,
+        "start": 21025295,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "398df65e-da1d-484f-a91b-288d3f5026d4",
+        "pid": 82,
+        "returncode": 0,
+        "start": 21025383,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "e917ac5f-204f-4a8e-9e27-da4ac9d50454",
+        "pid": 89,
+        "returncode": 0,
+        "start": 21025394,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "985eb104-5753-4ad7-b133-1fc57f303b72",
+        "pid": 96,
+        "returncode": 1,
+        "start": 21025403,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "825311f8-b633-40c7-9493-7d027a9e4c64",
+        "pid": 103,
+        "returncode": 0,
+        "start": 21025414,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "23f8af79-766a-4192-94e0-8d45548964dd",
+        "pid": 110,
+        "returncode": 0,
+        "start": 21025426,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "6de7ae16-fd6d-4f74-b538-1c83461786e6",
+        "pid": 117,
+        "returncode": 0,
+        "start": 21025438,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "a01f5c5a-7565-4014-9dbc-e251aebfcaa0",
+        "pid": 125,
+        "returncode": 0,
+        "start": 21025486,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "f9d610f5-0f9a-4c61-8f26-fd4ee1c18f03",
+        "pid": 132,
+        "returncode": 0,
+        "start": 21025496,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "63bd62d3-eecf-4241-b292-767438211b50",
+        "pid": 1057,
+        "returncode": 0,
+        "start": 21025594,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "49bcd3c9-25e9-4076-b85e-302ffcaa9db0",
+        "pid": 1075,
+        "returncode": 0,
+        "start": 21025668,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "ad3833ab-7f7d-4ba3-841d-aff60d23edcb",
+        "pid": 2756,
+        "returncode": 0,
+        "start": 21050326,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "4e02022a-6fb0-413a-bd8e-54977a357c6c",
+        "pid": 2763,
+        "returncode": 0,
+        "start": 21050338,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "77d3c64d-c942-42c3-b3db-01b268a96148",
+        "pid": 2770,
+        "returncode": 0,
+        "start": 21050349,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "3bde703a-1546-4e08-bc67-200d9c531a65",
+        "pid": 2777,
+        "returncode": 0,
+        "start": 21050360,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "a77d99a1-9eb4-467d-941b-17e6bdf0a5ac",
+        "pid": 2784,
+        "returncode": 0,
+        "start": 21050371,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "75e428df-fada-4cbf-a5e7-cca76483c496",
+        "pid": 2794,
+        "returncode": 0,
+        "start": 21050383,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "3e62b1bd-eb3c-4d7c-a028-8443f956c58d",
+        "pid": 2801,
+        "returncode": 0,
+        "start": 21050394,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "ec096265-e562-453e-8433-b8d856ae6b42",
+        "pid": 77904,
+        "returncode": 0,
+        "start": 21088154,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "5f090c2a-6463-4c38-8e69-4f67d3824e97",
+        "pid": 78828,
+        "returncode": 0,
+        "start": 21088253,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "53886dc6-15d0-434b-905b-49782c48fd56",
+        "pid": 78837,
+        "returncode": 0,
+        "start": 21088300,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "81c24cb8-4f8d-4b34-a312-0306b7d9867c",
+        "pid": 78846,
+        "returncode": 0,
+        "start": 21088320,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "d1bb3534-8d2a-4ccc-9d01-b94ee920b569",
+        "pid": 78862,
+        "returncode": 0,
+        "start": 21088509,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "a331d803-d5da-43ad-9830-eb4f1af77761",
+        "pid": 79786,
+        "returncode": 0,
+        "start": 21088611,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "9b8598f6-1475-443a-ab92-05011c364509",
+        "pid": 79794,
+        "returncode": 0,
+        "start": 21088654,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "fedd74b6-36ff-44f8-9876-199aabc73e90",
+        "pid": 79801,
+        "returncode": 0,
+        "start": 21088666,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "a0cb9b7f-2e18-48f0-bbf1-724fc74a5f97",
+        "pid": 79812,
+        "returncode": 0,
+        "start": 21088700,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "0e41f175-b250-4fe7-8898-2dce6d370afb",
+        "pid": 79829,
+        "returncode": 0,
+        "start": 21088852,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "7587ba2e-5812-4664-b5c4-85d3d5443ebc",
+        "pid": 79855,
+        "returncode": 0,
+        "start": 21089086,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "383f9f52-536e-4f81-8d15-49e410118c0a",
+        "pid": 80779,
+        "returncode": 0,
+        "start": 21089182,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "d213c1cd-bb63-46fa-8762-ab10d4269356",
+        "pid": 80788,
+        "returncode": 0,
+        "start": 21089226,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "d4c96e94-899e-4f3d-970b-b1c9a0f30b82",
+        "pid": 80795,
+        "returncode": 0,
+        "start": 21089237,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "4f52f379-6d85-460e-9f06-b6d44c18c2c8",
+        "pid": 80813,
+        "returncode": 0,
+        "start": 21089455,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "9980f5f6-4756-40f1-b80f-b34423041985",
+        "pid": 81737,
+        "returncode": 0,
+        "start": 21089552,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "bcf80aac-f2a6-42bd-b66f-02f37c1edd4a",
+        "pid": 81745,
+        "returncode": 0,
+        "start": 21089597,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "2c18d64f-8125-4a37-b3ef-ddea47fa98df",
+        "pid": 81768,
+        "returncode": 0,
+        "start": 21089972,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "54cf876e-d621-40b4-bb6b-6454bb4d4002",
+        "pid": 82692,
+        "returncode": 0,
+        "start": 21090069,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "45741ddf-e649-407d-83e6-a74146012416",
+        "pid": 82701,
+        "returncode": 0,
+        "start": 21090115,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "4f1f640f-6aee-4c1c-9dd9-5d3dbded8faf",
+        "pid": 82709,
+        "returncode": 0,
+        "start": 21090128,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "7ed5197c-fc75-4f79-b3ae-4c6d9eba540f",
+        "pid": 82721,
+        "returncode": 0,
+        "start": 21090210,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "294c533f-9a9f-4d1a-b2c8-98c5be96adad",
+        "pid": 83645,
+        "returncode": 0,
+        "start": 21090306,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "284f17fe-38e6-4b72-b1a7-4b8613e905f5",
+        "pid": 83652,
+        "returncode": 0,
+        "start": 21090370,
+        "status": "stopped"
+      },
+      {
+        "boot_id": "6a3fb43c-ecfe-4ffe-8461-3a12afa14da2",
+        "operation_id": "259052f6-6c1f-48ee-aa95-e6aadd172192",
+        "pid": 83653,
+        "returncode": 0,
+        "start": 21090371,
+        "status": "stopped"
+      }
+    ],
+    "operations": [
+      {
+        "canceled": false,
+        "container_id": "c9b4fc54fbb5e776c4d65627f3d4e785bc08324755a9d03edc52f4ae81c063e4",
+        "descendants_terminated": true,
+        "ended_at": 1794845357.2921207,
+        "error": false,
+        "exit_code": 0,
+        "export_digest": "5c578fa1699c6e604714b094bf641a925c8269633c7eb35d47dbf0d765f9a66e",
+        "inventory_digest": "d1ed634997f3bdca64a6777a58ca05c9b71ffa9754da6b596fb7dc12ca07a17e",
+        "log_digest": "fd24d1fb23472530f9940886b4f4603db407cb28ae53aadc2e9a0338df647bbd",
+        "log_truncated": false,
+        "operation_id": "01c6bf11-d19c-476a-8d60-2f8e7f92fe7d",
+        "receipt_digest": "bfd9db9d345428a158b6a4f395cd292719398cde65f41792127f81489c4a3328",
+        "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+        "source_digest": "cec10049d70b588de628dc7010074598d35498a2079c91f3f0b4a98c7d018ce1",
+        "started_at": 1794845124.6030843,
+        "state": "exited",
+        "timed_out": false
+      },
+      {
+        "canceled": false,
+        "container_id": "f2cc9725c417d55a91f7a923b8d7b872eaa9bb326807ec13edca91f796e73eef",
+        "descendants_terminated": true,
+        "ended_at": 1794845382.4887004,
+        "error": false,
+        "exit_code": 0,
+        "export_digest": "5c578fa1699c6e604714b094bf641a925c8269633c7eb35d47dbf0d765f9a66e",
+        "inventory_digest": "1b735aa3e29d1bcabb274afcac8655e7f8925377dd63959f7788be91c5c2e126",
+        "log_digest": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+        "log_truncated": false,
+        "operation_id": "2e5e9829-429e-53fb-8665-94897e2727a7",
+        "receipt_digest": "15f0d22da95100b611e7b28961b1033a444cb13729f203da28a428b9be9a2ffd",
+        "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+        "source_digest": "5c578fa1699c6e604714b094bf641a925c8269633c7eb35d47dbf0d765f9a66e",
+        "started_at": 1794845382.40766,
+        "state": "exited",
+        "timed_out": false
+      },
+      {
+        "canceled": false,
+        "container_id": "60e1150689dc232f97d64a00ac6bd52387cfd63df44852e2e2f19efedd1d706a",
+        "descendants_terminated": true,
+        "ended_at": 1794845423.407187,
+        "error": false,
+        "exit_code": 0,
+        "export_digest": "6492ff52854731e23ee74c671b2c9f63ec7025cb6456f182365381ac468bbd79",
+        "inventory_digest": "12cfaefdbb23c0d7903ab0c232e9deda21f8e7e9eddfa3b8d169d719f3893480",
+        "log_digest": "1e3e63f221bde88816c4a4ef7367691607b20cc1d194028a02ec9ae0586cf9b1",
+        "log_truncated": false,
+        "operation_id": "4a9f1a27-f9c6-559f-b8a1-e077d735334a",
+        "receipt_digest": "de7c135e7cbeeba32139069e0d98e371adaae1c680dc89df75cd5891766f8bfa",
+        "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+        "source_digest": "5c578fa1699c6e604714b094bf641a925c8269633c7eb35d47dbf0d765f9a66e",
+        "started_at": 1794845423.0371563,
+        "state": "exited",
+        "timed_out": false
+      },
+      {
+        "canceled": false,
+        "container_id": "98aecbec4d3d062d503e5995f7dbf88d90140727a4e18716fa4aedf9d2e2c30a",
+        "descendants_terminated": true,
+        "ended_at": 1794845562.93356,
+        "error": false,
+        "exit_code": 0,
+        "export_digest": "3fc37d8822d40d645eedaa25a07ca786eea88857bb298da95f2b71f67b6f0b4b",
+        "inventory_digest": "f66f55d3dcd52d726f64551e8d3b278a86e4dfbf75b46144f12f85ddf48f5b26",
+        "log_digest": "9f723bcf995ec28d80c8b1a0bd8fba4a3053919a7485534695c6d202312f0553",
+        "log_truncated": false,
+        "operation_id": "5522318b-76c7-55b8-8f1a-a829fdd26e71",
+        "receipt_digest": "5d2f40743b6cc7a13a1bbf8debd8d458c2604f593438a943a0a82dff6de0c19c",
+        "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+        "source_digest": "5c578fa1699c6e604714b094bf641a925c8269633c7eb35d47dbf0d765f9a66e",
+        "started_at": 1794845433.6351025,
+        "state": "exited",
+        "timed_out": false
+      },
+      {
+        "canceled": false,
+        "container_id": "472f39de31951a900888f5bcec69109efb641c4d0a6331ad2a83df3fea17187c",
+        "descendants_terminated": true,
+        "ended_at": 1794845688.5818002,
+        "error": false,
+        "exit_code": 0,
+        "export_digest": "50aaf79732a1b4d61e404d32387a8e66e87051b1bd4f9c5d4af67474684f0380",
+        "inventory_digest": "f392c997578c0f256af8ad305e77a05ceb99ba0fbabf9752c7646db6b154764d",
+        "log_digest": "65a2f3f41927cbfef4b0edf56b356ca6a784f9b969e4761646e0479409cedf53",
+        "log_truncated": false,
+        "operation_id": "c06554a2-01bf-5147-93cf-3727428e99cb",
+        "receipt_digest": "2ccf4daba3ed7e14980fa752bfd50f2fc713c55314835207c7f9335912e51280",
+        "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+        "source_digest": "5c578fa1699c6e604714b094bf641a925c8269633c7eb35d47dbf0d765f9a66e",
+        "started_at": 1794845656.8035479,
+        "state": "exited",
+        "timed_out": false
+      },
+      {
+        "canceled": false,
+        "container_id": "8fcf6d718f19384f8d8f0979badb678b002dd593d14128f1a1af1afc2c32c15c",
+        "descendants_terminated": true,
+        "ended_at": 1794845413.4567027,
+        "error": false,
+        "exit_code": 0,
+        "export_digest": "39fa9f3ee1e34007a0e0f721104dfe97837b4f45bfc80be2d77b2f507e069b53",
+        "inventory_digest": "33ee166cc4451b5694e44c87e593ce7da1dd17e13c65fd677ef9ff91460319fe",
+        "log_digest": "0bafc7a86dd69a20626b8612ae672026fe11aef644c2fa543ac9c05d8b7d8405",
+        "log_truncated": false,
+        "operation_id": "c97dc97c-2b99-556c-af52-ab901ef9f875",
+        "receipt_digest": "bec1790fd43b7bc97cb92f6a744019a57a46bdd55e9077bd394ca26d5f42d29b",
+        "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+        "source_digest": "5c578fa1699c6e604714b094bf641a925c8269633c7eb35d47dbf0d765f9a66e",
+        "started_at": 1794845412.6759148,
+        "state": "exited",
+        "timed_out": false
+      },
+      {
+        "canceled": false,
+        "container_id": "3f8dbd3f7a264634a05195a19939a43a2ebbec064247c8a65aaf6b0133ff94ce",
+        "descendants_terminated": true,
+        "ended_at": 1794845400.5041435,
+        "error": false,
+        "exit_code": 0,
+        "export_digest": "2f131f2e07672904c73cc405d168b8ed742a03aa1b0424ae25d6a8fd7fae43be",
+        "inventory_digest": "c0f3de0239a9e27094d893dd18cb0d7e92bb6b70059b4b72e1b6b5dbcdd7b4c9",
+        "log_digest": "17315dc5882ffe93b13d23467668c876e9498b224677249bcb6c57aa77384959",
+        "log_truncated": false,
+        "operation_id": "ec2a45e9-46b6-5684-984d-7ab2880fd007",
+        "receipt_digest": "af27d1504748d77e7d839f11b5a5e79905427b42f72154151a80826498ec32f5",
+        "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+        "source_digest": "5c578fa1699c6e604714b094bf641a925c8269633c7eb35d47dbf0d765f9a66e",
+        "started_at": 1794845394.887644,
+        "state": "exited",
+        "timed_out": false
+      },
+      {
+        "canceled": false,
+        "container_id": "fa446d376176f19c0f97d701295a6738c526ab4d07fc81c1c24f5255bdc6824a",
+        "descendants_terminated": true,
+        "ended_at": 1794845375.5049403,
+        "error": false,
+        "exit_code": 0,
+        "export_digest": "5c578fa1699c6e604714b094bf641a925c8269633c7eb35d47dbf0d765f9a66e",
+        "inventory_digest": "1b735aa3e29d1bcabb274afcac8655e7f8925377dd63959f7788be91c5c2e126",
+        "log_digest": "f893978b000c64c302c31244e301f18212b766a55fa5ada6dda8998266543e26",
+        "log_truncated": false,
+        "operation_id": "ec83eaef-73d7-5e50-8b2c-0908281b5b51",
+        "receipt_digest": "28bb34ff246df852d47d9c12a4b869e7da3fee5814f73b397213b520945e519e",
+        "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+        "source_digest": "5c578fa1699c6e604714b094bf641a925c8269633c7eb35d47dbf0d765f9a66e",
+        "started_at": 1794845371.0300295,
+        "state": "exited",
+        "timed_out": false
+      },
+      {
+        "canceled": false,
+        "container_id": "8d544bb361b0395594bc2c644ba4ea83c16d1d446ebf42441f0634def5b85f91",
+        "descendants_terminated": true,
+        "ended_at": 1794845648.082821,
+        "error": false,
+        "exit_code": 0,
+        "export_digest": "a7081c6c93dc58c8b00fd5afda587412b858dad1b9542f28e3119fe18313ee5d",
+        "inventory_digest": "95c00c27eeab203c257c6006698ab0018092563e54f2eadcb238d37d9853c621",
+        "log_digest": "893fb91c90edf35d5fae65b387ad8e9bedc154d87e1e76d11567b18d1ca3f20f",
+        "log_truncated": false,
+        "operation_id": "f0d0ba0b-46ea-584a-b635-73c8db266677",
+        "receipt_digest": "b67fdad97642dd159fdfdda433a8c0d86dbe0b747ce89edad6ba1ce3eecd696e",
+        "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+        "source_digest": "5c578fa1699c6e604714b094bf641a925c8269633c7eb35d47dbf0d765f9a66e",
+        "started_at": 1794845573.874872,
+        "state": "exited",
+        "timed_out": false
+      },
+      {
+        "canceled": false,
+        "container_id": "9b7d30422ccbf038b886c5cfbb2b2004e1f70f3e026b73706808e5cdfe5dbf39",
+        "descendants_terminated": true,
+        "ended_at": 1794845736.969616,
+        "error": false,
+        "exit_code": 0,
+        "export_digest": "62e3434fbf74750f66f592afffcb6448fcba33cdb0ce13fbef88b88ee661bf85",
+        "inventory_digest": "7098e9957816de8da47a8fabdab0d2c840c68b319d8d452205491f62c15d36c2",
+        "log_digest": "84b0c5edb81fb2efc990e35ef1b0b6c82e33001c86a572c292edb2771c9138d2",
+        "log_truncated": false,
+        "operation_id": "f9ef5927-d848-5307-9f8a-52283c1d988f",
+        "receipt_digest": "6c36247c99bc830e093bc0f88ffc481565341bc28ea83bdcb5be0afcc323b8da",
+        "run_id": "d913fa25-5e89-4725-8d24-b381d95d51fa",
+        "source_digest": "5c578fa1699c6e604714b094bf641a925c8269633c7eb35d47dbf0d765f9a66e",
+        "started_at": 1794845695.2138937,
+        "state": "exited",
+        "timed_out": false
+      }
+    ],
+    "publications": [
+      {
+        "intent_id": "e61ef55d-6dbc-4b8b-987a-a347abc5a953",
+        "publication_id": "617b3b55-891c-41a8-abf3-793fc3f10ad7",
+        "pull_request": {
+          "base": "main",
+          "head": "vibearr/issue-99",
+          "head_sha": "a44468bf797fd3d0dba0b7e39378ac9df4abf878",
+          "number": 104,
+          "repository_id": 1353963957,
+          "url": "https://github.com/innateessence/nightly-queue/pull/104"
+        },
+        "pushed_sha": "a44468bf797fd3d0dba0b7e39378ac9df4abf878",
+        "stage": "push",
+        "state": "known_pr"
+      },
+      {
+        "intent_id": "d9a42644-073e-4c7d-8d21-bc25e3fffc7e",
+        "publication_id": "617b3b55-891c-41a8-abf3-793fc3f10ad7",
+        "pull_request": {
+          "base": "main",
+          "head": "vibearr/issue-99",
+          "head_sha": "a44468bf797fd3d0dba0b7e39378ac9df4abf878",
+          "number": 104,
+          "repository_id": 1353963957,
+          "url": "https://github.com/innateessence/nightly-queue/pull/104"
+        },
+        "pushed_sha": "a44468bf797fd3d0dba0b7e39378ac9df4abf878",
+        "stage": "create_pr",
+        "state": "known_pr"
+      }
+    ],
+    "schema_version": 1
+  }
+}
