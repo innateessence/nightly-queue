@@ -412,6 +412,7 @@ class DependencyBuilds:
             self.runtime.docker.run(
                 "image",
                 "ls",
+                "--all",
                 "--no-trunc",
                 "--quiet",
                 "--filter",

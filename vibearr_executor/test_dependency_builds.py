@@ -366,6 +366,8 @@ class AssemblyEngine:
         if arguments[:2] == ("image", "inspect"):
             return json.dumps([self.images[arguments[2]]]).encode()
         if arguments[:2] == ("image", "ls"):
+            if "--all" not in arguments:
+                return b""
             return "\n".join(
                 image for image in self.images if image != self.parent
             ).encode()
