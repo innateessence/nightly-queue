@@ -310,7 +310,7 @@ def source_wait_reason(item):
     )
     if not complete or item.github_repository_id != project.github_repository_id:
         return "Waiting for complete GitHub source context."
-    if project.sync_error:
+    if project.sync_error and item.status != QueueItem.Status.RUNNING:
         return "Waiting for successful GitHub reconciliation."
     permitted = project.permitted_author_ids or [project.github_owner_id]
     if item.author_id not in permitted:
