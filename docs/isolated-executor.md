@@ -285,9 +285,29 @@ missing images revoke readiness; a boolean setting or historical proof cannot
 restore it. Unqualified execution is restricted to the exact installed fixed smoke
 recipes needed for automated qualification. They do not emulate a model session.
 
+The binding's `denied_ips` contains every configured deny address and currently
+assigned global host IPv4 address. Non-global destinations are categorically denied
+by the proxy, so discovering/removing private bridge gateways does not change
+authorization. Each proxy still receives the full current host/configured deny set;
+direct task traffic remains restricted to its own proxy/database by the firewall.
+Configured deny changes and public host-address additions/removals revoke readiness.
+This source change invalidates prior proofs: rebuild/pin worker images, install the
+matching executor and rerun host qualification before ordinary work resumes.
+
 The PR `Executor boundary / Qualify OCI executor` check runs actual Docker probes
 on Linux and uploads their report. The manually dispatched deployment workflow runs
 the same verifier directly on the executor host, never nested in the supervisor.
+CI also registers a credential-free ordinary validation recipe before qualification,
+then launches it with a disposable database. This recipe has no smoke exemption.
+`python -m vibearr_executor.network_probe` checks readiness and the exact binding
+while its network/database exist, after restarting the control service with the same
+task container, and after cancellation/export. Its separate evidence records host
+IPv4 snapshots to distinguish rootful bridge topology changes from task failures.
+The initial diagnostic-only PR87 CI run passed all eleven smoke checks, then failed
+this ordinary-operation assertion: creating the private network added only gateway
+`172.18.0.1` to discovered host addresses and revoked the previous binding. The
+binding now records the stable authorization inputs described above; the same strict
+ordinary lifecycle check remains mandatory on rootful CI and rootless hosts.
 The checks exercise hostile source/imports and forged receipts, selected-secret
 isolation, credential-free package installation, model HTTPS reachability without
 auth, offline validation, real ENOSPC/PID/OOM/CPU enforcement, restart-stable launch,

@@ -130,6 +130,15 @@ class Runtime:
     def current_denied_ips(self) -> tuple[str, ...]:
         return tuple(sorted(set(self.configured_ips) | self.host_addresses()))
 
+    def authorization_denied_ips(self) -> tuple[str, ...]:
+        # Non-global destinations are always denied, including ephemeral bridge gateways.
+        public_hosts = {
+            address
+            for address in self.host_addresses()
+            if ipaddress.IPv4Address(address).is_global
+        }
+        return tuple(sorted(set(self.configured_ips) | public_hosts))
+
     def path(self, operation_id: str) -> Path:
         return self.operations / identifier(operation_id)
 
