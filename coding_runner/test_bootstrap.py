@@ -181,6 +181,16 @@ class BacklogTests(unittest.TestCase):
 
 
 class AcceptanceTests(unittest.TestCase):
+    def test_protected_epoch_receipt_time_matches_server_iso_time(self):
+        epoch = 1794852047.8716285
+        iso = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
+        self.assertEqual(
+            self_acceptance.timestamp(epoch), self_acceptance.timestamp(iso)
+        )
+        for invalid in (True, None, float("nan"), float("inf"), -1):
+            with self.subTest(value=invalid), self.assertRaises(ValueError):
+                self_acceptance.timestamp(invalid)
+
     def test_missing_execute_flag_never_constructs_api_client(self):
         with (
             patch("sys.argv", ["self_acceptance"]),

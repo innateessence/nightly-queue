@@ -2,6 +2,7 @@
 
 import argparse
 from datetime import datetime, timezone
+import math
 import json
 from pathlib import Path
 from uuid import UUID
@@ -101,6 +102,12 @@ def evidence_entries(queue, run_id):
 
 
 def timestamp(value):
+    if type(value) in {int, float} and math.isfinite(value) and value >= 0:
+        return datetime.fromtimestamp(value, timezone.utc)
+    if not isinstance(value, str):
+        raise ValueError(
+            "Acceptance timestamps must be finite epoch seconds or timezone-aware ISO text."
+        )
     parsed = datetime.fromisoformat(value)
     if parsed.utcoffset() is None:
         raise ValueError("Acceptance timestamps must be timezone-aware.")
