@@ -1,0 +1,399 @@
+import importlib.util
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import Mock, patch
+from uuid import uuid4
+
+from vibearr_runner.bootstrap_backlog import (
+    OWNER_ID,
+    REPOSITORY_ID,
+    discover,
+    export_plan,
+    issue_body,
+    publish,
+)
+from vibearr_runner.bootstrap_files import private_json
+from vibearr_runner.delivery import DeliveryError, DeliveryUnknown
+from vibearr_runner import self_acceptance
+
+
+def seed():
+    features = []
+    for index in range(16):
+        features.append(
+            {
+                "feature": f"{index:02}",
+                "title": f"Feature{index}",
+                "branch": f"feat/{index}",
+                "depends_on": [f"{index - 1:02}"] if index else [],
+                "priority": "normal",
+                "criteria": "Make the source improvement and test it.",
+            }
+        )
+    return {"features": features}
+
+
+class BacklogTests(unittest.TestCase):
+    def issue(self, feature, number, author=OWNER_ID):
+        return {
+            "number": number,
+            "user": {"id": author},
+            "body": f"<!-- vibearr-plan-feature: {feature} -->",
+        }
+
+    def github(self, issues):
+        github = Mock()
+        github.repository.return_value = (
+            {
+                "repository_id": REPOSITORY_ID,
+                "repository": "innateessence/nightly-queue",
+                "owner_id": OWNER_ID,
+            },
+            {},
+        )
+        github.request.side_effect = lambda method, path, payload=None: issues
+        return github
+
+    def test_export_reads_all_sections_and_translates_priority(self):
+        plan = ""
+        for index in range(16):
+            plan += f"| {index:02} | P0 | `feat/{index}` | — | Result |\n"
+        for index in range(16):
+            plan += (
+                f"### {index:02} — Feature{index}\n\nAcceptance: real source change.\n"
+            )
+        value = export_plan(plan)
+        self.assertEqual(len(value["features"]), 16)
+        self.assertEqual(value["features"][0]["priority"], "high")
+        self.assertIn("Acceptance:", value["features"][0]["criteria"])
+
+    def test_dependency_links_use_provider_issue_numbers(self):
+        body = issue_body(seed()["features"][1], {"00": 60})
+        self.assertIn("Depends on: #60", body)
+        self.assertIn("Branch: feat/1", body)
+        self.assertIn("<!-- vibearr-plan-feature: 01 -->", body)
+
+    def test_foreign_marker_does_not_authorize_an_issue(self):
+        numbers = discover(seed()["features"], [self.issue("00", 60, author=999)])
+        self.assertEqual(numbers, {})
+
+    def test_duplicate_owner_markers_are_rejected(self):
+        with self.assertRaises(DeliveryError):
+            discover(seed()["features"], [self.issue("00", 60), self.issue("00", 99)])
+
+    def test_existing_all_feature_issues_are_adopted_without_mutations(self):
+        github = self.github(
+            [self.issue(f"{index:02}", 60 + index) for index in range(16)]
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            result = publish(seed(), github, Path(temporary) / "publication")
+        self.assertEqual(result["issues"]["06"], 66)
+        self.assertTrue(
+            all(call.args[0] == "GET" for call in github.request.call_args_list)
+        )
+
+    def test_lost_create_response_never_starts_another_create(self):
+        github = self.github([])
+        posts = []
+
+        def request(method, path, payload=None):
+            if method == "GET":
+                return []
+            posts.append(payload)
+            raise DeliveryUnknown("lost issue create response")
+
+        github.request.side_effect = request
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "publication"
+            with self.assertRaises(DeliveryUnknown):
+                publish(seed(), github, directory)
+            with self.assertRaises(DeliveryUnknown):
+                publish(seed(), github, directory)
+        self.assertEqual(len(posts), 1)
+
+    def test_lost_create_is_reconciled_by_owner_marker(self):
+        issues = []
+        github = self.github(issues)
+        posts = []
+
+        def request(method, path, payload=None):
+            if method == "GET":
+                return issues
+            posts.append(payload)
+            issue = {"number": 60, "user": {"id": OWNER_ID}, "body": payload["body"]}
+            issues.append(issue)
+            raise DeliveryUnknown("lost response")
+
+        github.request.side_effect = request
+        one = {"features": [seed()["features"][0]]}
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "publication"
+            with self.assertRaises(DeliveryUnknown):
+                publish(one, github, directory)
+            result = publish(one, github, directory)
+        self.assertEqual(result["issues"], {"00": 60})
+        self.assertEqual(len(posts), 1)
+
+    def test_known_rejected_issue_create_can_retry_after_permission_fix(self):
+        github = self.github([])
+        posts = []
+
+        def request(method, path, payload=None):
+            if method == "GET":
+                return []
+            posts.append(payload)
+            if len(posts) == 1:
+                raise DeliveryError("GitHub delivery returned HTTP403.")
+            return {"number": 60, "user": {"id": OWNER_ID}, "body": payload["body"]}
+
+        github.request.side_effect = request
+        one = {"features": [seed()["features"][0]]}
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "publication"
+            with self.assertRaises(DeliveryError):
+                publish(one, github, directory)
+            result = publish(one, github, directory)
+        self.assertEqual(result["issues"], {"00": 60})
+        self.assertEqual(len(posts), 2)
+
+    def test_issue_scan_paginates_before_adoption(self):
+        first = [{"pull_request": {}, "number": index} for index in range(100)]
+        github = self.github([])
+        github.request.side_effect = [first, [self.issue("00", 160)]]
+        with tempfile.TemporaryDirectory() as temporary:
+            result = publish(
+                {"features": [seed()["features"][0]]},
+                github,
+                Path(temporary) / "publication",
+            )
+        self.assertEqual(result["issues"], {"00": 160})
+        self.assertIn("page=2", github.request.call_args_list[1].args[1])
+
+
+class AcceptanceTests(unittest.TestCase):
+    def test_missing_execute_flag_never_constructs_api_client(self):
+        with (
+            patch("sys.argv", ["self_acceptance"]),
+            patch.object(self_acceptance, "client") as client,
+        ):
+            with self.assertRaises(SystemExit):
+                self_acceptance.main()
+        client.assert_not_called()
+
+    def test_scenarios_keep_merge_ui_work_separate_from_cli_work(self):
+        scenarios = self_acceptance.scenario_tasks()
+        self.assertEqual(scenarios["delivery"]["order"][0], "version-regression")
+        self.assertEqual(scenarios["delivery"]["repair_limit"], 0)
+        self.assertIn("status-filter", scenarios["merge"]["tasks"][0]["body"])
+        self.assertNotIn("Add a queue status filter", repr(scenarios["delivery"]))
+        self.assertFalse(scenarios["merge"]["available"])
+
+    def test_evidence_history_fetches_all_pages(self):
+        queue = Mock()
+        queue.request.side_effect = [
+            {"evidence": [{"id": 1}], "has_more": True, "next_after": 1},
+            {"evidence": [{"id": 2}], "has_more": False, "next_after": None},
+        ]
+        result = self_acceptance.evidence_entries(queue, str(uuid4()))
+        self.assertEqual(result, [{"id": 1}, {"id": 2}])
+        self.assertEqual(queue.request.call_args.kwargs["query"], {"after": 1})
+
+    def test_evidence_nonadvancing_cursor_is_rejected(self):
+        queue = Mock()
+        queue.request.return_value = {
+            "evidence": [{"id": 1}],
+            "has_more": True,
+            "next_after": 0,
+        }
+        with self.assertRaisesRegex(ValueError, "cursor"):
+            self_acceptance.evidence_entries(queue, str(uuid4()))
+
+    def test_restart_receipt_requires_same_agent_container(self):
+        record = {
+            "run_id": "run",
+            "agent": {"receipt": {"operation_id": "agent", "container_id": "original"}},
+            "delivery": {"validation": {"checks": [{"operation_id": "validation"}]}},
+        }
+        operation = {
+            "operation_id": "agent",
+            "container_id": "original",
+            "run_id": "run",
+            "state": "running",
+            "phase": "agent",
+            "pid": 1,
+        }
+        other = {**operation, "pid": 2, "container_id": "replacement"}
+        receipt = {"executor_observations": {"agent": [operation, other]}}
+        with self.assertRaisesRegex(ValueError, "container identity"):
+            self_acceptance.restart_evidence(record, receipt)
+
+    def test_restart_requires_real_validation_observation(self):
+        record = {
+            "run_id": "run",
+            "agent": {"receipt": {"operation_id": "agent", "container_id": "original"}},
+            "delivery": {"validation": {"checks": [{"operation_id": "validation"}]}},
+        }
+        operation = {
+            "operation_id": "agent",
+            "container_id": "original",
+            "run_id": "run",
+            "state": "running",
+            "phase": "agent",
+            "pid": 1,
+        }
+        receipt = {
+            "executor_observations": {"agent": [operation, {**operation, "pid": 2}]}
+        }
+        with self.assertRaisesRegex(ValueError, "validation across"):
+            self_acceptance.restart_evidence(record, receipt)
+
+    def test_private_operator_file_rejects_world_readable_secret_and_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "operator.json"
+            path.write_text("{}")
+            path.chmod(0o644)
+            with self.assertRaises(ValueError):
+                private_json(path)
+            path.chmod(0o600)
+            link = Path(temporary) / "link"
+            link.symlink_to(path)
+            with self.assertRaises(OSError):
+                private_json(link)
+
+
+@unittest.skipUnless(
+    importlib.util.find_spec("vibearr_executor"),
+    "Install the native-runtime extra for real native receipt parsing",
+)
+class NativeAcceptanceEvidenceTests(unittest.TestCase):
+    def test_explicit_validation_profile_does_not_require_an_environment_fallback(self):
+        from vibearr_executor import QUALIFICATION_VERSION
+        from vibearr_executor.validation_profile import ValidationProfile
+        from vibearr_runner.native_codex import codex_profile
+        from vibearr_runner.native_runtime import runtime_diagnostics
+        from vibearr_runner.policy import default_execution_policy
+
+        validation = ValidationProfile(
+            "sha256:" + "a" * 64, "sha256:" + "b" * 64, "c" * 64
+        )
+        profiles = [
+            codex_profile("sha256:" + "d" * 64, "token"),
+            *validation.executor_profiles(),
+        ]
+        executor = Mock()
+        executor.capabilities.return_value = {
+            "schema_version": 1,
+            "protocol_version": 1,
+            "qualification_version": QUALIFICATION_VERSION,
+            "runtime": "docker-oci-v1",
+            "qualified": True,
+            "accepting_work": True,
+            "binding_digest": "e" * 64,
+            "profiles": [
+                {**value.data(), "profile_digest": value.digest} for value in profiles
+            ],
+        }
+        policy = default_execution_policy()
+        policy.update(
+            runtime_profile="codex-token-v1", validation_profile=validation.profile_id
+        )
+        with patch.dict("os.environ", {"VIBEARR_VALIDATION_PROFILE_FILE": ""}):
+            result = runtime_diagnostics(
+                policy, executor, validation_profile=validation
+            )
+        self.assertTrue(result["runtime_ready"], result["reason"])
+
+    def test_profile_selection_adds_all_checks_without_agent_package_egress(self):
+        from vibearr_executor.validation_profile import ValidationProfile
+        from vibearr_runner.bootstrap_profiles import profiles
+
+        validation = ValidationProfile(
+            "sha256:" + "a" * 64, "sha256:" + "b" * 64, "c" * 64
+        )
+        values = profiles("sha256:" + "d" * 64, validation, "token")
+        self.assertEqual(len(values), 11)
+        agent = next(value for value in values if value["phase"] == "agent")
+        self.assertEqual(agent["network_hosts"], ["api.openai.com"])
+        self.assertEqual(agent["database_image"], validation.database_image)
+        checks = [value for value in values if value["phase"] == "validation"]
+        self.assertEqual(len(checks), 9)
+        self.assertTrue(
+            all(
+                not value["backend_secret_env"] and not value["network_hosts"]
+                for value in checks
+            )
+        )
+
+    def test_existing_profile_choice_cannot_be_replaced(self):
+        from vibearr_executor.validation_profile import ValidationProfile
+        from vibearr_runner.bootstrap_profiles import profiles
+
+        validation = ValidationProfile(
+            "sha256:" + "a" * 64, "sha256:" + "b" * 64, "c" * 64
+        )
+        original = profiles("sha256:" + "d" * 64, validation, "token")
+        with self.assertRaisesRegex(ValueError, "differs"):
+            profiles("sha256:" + "e" * 64, validation, "token", original)
+
+    def test_private_profile_writer_is_idempotent_and_preserves_other_choices(self):
+        from vibearr_runner.bootstrap_profiles import save_new
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "profiles.json"
+            self.assertTrue(save_new(path, [{"profile_id": "selected"}]))
+            original = path.stat().st_mtime_ns
+            self.assertFalse(save_new(path, [{"profile_id": "selected"}]))
+            self.assertEqual(path.stat().st_mtime_ns, original)
+            self.assertEqual(path.stat().st_mode & 0o077, 0)
+            with self.assertRaisesRegex(ValueError, "never overwrites"):
+                save_new(path, [{"profile_id": "different"}])
+
+    def test_non_native_run_cannot_claim_acceptance(self):
+        queue = Mock()
+        queue.reconcile.return_value = {
+            "run": {
+                "state": "completed",
+                "native_outcome": "delivered",
+                "result_status": "succeeded",
+                "configuration_snapshot": {"execution_kind": "legacy"},
+            },
+            "item": {"project": {"id": 1}, "issue_number": 10},
+        }
+        with self.assertRaisesRegex(ValueError, "actual native lifecycle"):
+            self_acceptance.collect_run(queue, Mock(), str(uuid4()), 1, 10)
+
+    def test_approval_record_prevents_native_acceptance(self):
+        queue = Mock()
+        queue.reconcile.return_value = {
+            "run": {
+                "state": "completed",
+                "native_outcome": "delivered",
+                "result_status": "succeeded",
+                "configuration_snapshot": {"execution_kind": "native"},
+            },
+            "item": {"project": {"id": 1}, "issue_number": 10},
+        }
+        queue.request.return_value = {
+            "approvals": [{"consumed_at": "2026-11-16T00:00:00+00:00"}]
+        }
+        with self.assertRaisesRegex(ValueError, "legacy approvals"):
+            self_acceptance.collect_run(queue, Mock(), str(uuid4()), 1, 10)
+
+    def test_claimed_success_without_native_evidence_is_rejected(self):
+        queue = Mock()
+        queue.reconcile.return_value = {
+            "run": {
+                "state": "completed",
+                "native_outcome": "delivered",
+                "result_status": "succeeded",
+                "configuration_snapshot": {"execution_kind": "native"},
+            },
+            "item": {"project": {"id": 1}, "issue_number": 10},
+        }
+        queue.request.side_effect = [
+            {"approvals": []},
+            {"evidence": [], "has_more": False},
+        ]
+        with self.assertRaisesRegex(ValueError, "genuine successful native"):
+            self_acceptance.collect_run(queue, Mock(), str(uuid4()), 1, 10)

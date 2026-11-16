@@ -1,0 +1,168 @@
+{
+  "features": [
+    {
+      "branch": "feat/vibearr-rename",
+      "criteria": "- Use **vibearr** throughout the web UI, page titles, navigation, app metadata,\n  documentation, screenshots, examples, and release artifacts. The name reflects\n  an *arr style application for vibe coding. README branding starts on this\n  planning branch; functional names change in this feature.\n- Rename the CLI command and distribution, Django project/configuration modules,\n  runner package/distribution where applicable, container services and images,\n  default database names, environment variables, and application data paths.\n  Define a single naming map in the PR so install, development, CI, and deployment\n  instructions agree. Keep migration import paths working and persisted labels\n  stable where changing them would strand existing data.\n- Provide a documented transition from `nq`, `NQ_*`, and existing deployment names:\n  retain CLI/configuration aliases for a defined migration period, give new names\n  precedence, and report conflicting configuration. Keep existing tokens and the\n  encryption key valid; renaming must not reset authentication or credentials.\n- Preserve PostgreSQL and runner volumes explicitly during the Compose rename.\n  Changing a service, Compose project, or default database name must not create\n  an apparently empty installation. Migrate protected runner paths with ownership\n  and active-run reconciliation intact; never start a second controller against\n  copied state. Update backup, restore, and rollback instructions.\n- Track a GitHub repository rename separately from local naming. Update canonical\n  URLs, badges, issue templates, package links, and bootstrap defaults when that\n  rename is authorized. Existing issue, PR, repository, and delivery identities\n  must reconcile across redirects without importing duplicate work.\n- Acceptance: a fresh vibearr installation and an upgrade with existing queue\n  items, encrypted credentials, run history, and runner state both work. New and\n  compatibility CLI/configuration names are tested. CI, package installation,\n  Compose wiring, backup/restore, and all internal documentation links pass.",
+      "depends_on": [],
+      "feature": "00",
+      "priority": "normal",
+      "title": "vibearr 00: Rename the application to vibearr"
+    },
+    {
+      "branch": "feat/autonomous-execution-policy",
+      "criteria": "- Replace mandatory per-command browser decisions with a versioned project policy\n  that grants workspace execution and defines network, resource, and delivery\n  limits. A project-level execution enable switch is configuration, not a recurring\n  approval workflow. Existing disabled projects stay disabled during migration.\n- Update `AGENTS.md`'s rule requiring confirmation for all untrusted-source\n  execution to describe bounded autonomous execution and rejection of permission\n  changes embedded in task data. Update the architecture and operations docs in\n  the same PR. The current rule remains in effect until that change lands.\n- Define the native execution policy and version 2 delivery evidence contract\n  described in the MVP. Remove native configuration's `command_approval` and\n  mandatory separate research-stage capability requirements. Ordinary setup,\n  implementation, and validation use that policy rather than a per-command broker.\n  Keep legacy proposal execution disabled; do not refactor every old proposal loop\n  before implementing native sessions. Do not manufacture approval records.\n- Migrate pending approval waits to an explicit stopped/needs-retry outcome;\n  preserve historical decisions. Existing approved actions must not silently run\n  after an upgrade. Hide creation/decision controls for autonomous projects.\n- Acceptance: configuration/API contract tests distinguish native policy from\n  legacy approvals; forbidden capabilities fail without opening an inbox; stale\n  claims and changed policy cannot authorize execution; upgrades preserve history\n  and stop pending legacy actions. Actual native dispatch is proven in 02\u201304.",
+      "depends_on": [],
+      "feature": "01",
+      "priority": "high",
+      "title": "vibearr 01: Autonomous execution policy"
+    },
+    {
+      "branch": "feat/isolated-agent-runtime",
+      "criteria": "- Implement the MVP's fixed OCI executor service using Docker on a dedicated\n  Linux runner host. Do not require nested bubblewrap. Prove Git, Python 3.12,\n  dependency installation, resource limits, restart-stable container identity, and\n  full descendant termination on the actual target host. Pin the task image;\n  branch 03 adds the native agent binary and verifies its runtime requirements.\n- Keep the web app and supervisor outside agent workspaces. Do not expose the\n  production checkout, application database, encryption key, Docker socket,\n  unrelated tasks, or supervisor journal to agent processes. Give agents their own\n  disposable Git metadata and import file changes into a separate trusted checkout;\n  publishing remains supervisor-owned. Only the trusted executor has engine access.\n- Separate dependency setup from credentialed model traffic. Define enforceable\n  egress and private-network restrictions and explicitly test the chosen model\n  auth mechanism. Native tools cannot inherit unrestricted supervisor secrets.\n  A model credential available to a CLI may be exposed to that CLI's tools unless\n  an actual broker isolates it; document and verify this boundary.\n- Replace the old approval-bound release path with automated, versioned runtime\n  qualification: real boundary tests, pinned-image provenance, auth diagnostics,\n  and revocation on material runtime changes. Keep failure diagnostics actionable;\n  a readiness switch alone cannot bypass a failed environment.\n- Acceptance: actual image/host tests prove allowed writes and installs, denied\n  access to host/control-plane files and networks, resource limits, cancellation\n  of all descendants, and recovery after restart. The explicit deployment boundary\n  verifier must test the selected runtime, not a retired namespace assumption.",
+      "depends_on": [
+        "01"
+      ],
+      "feature": "02",
+      "priority": "high",
+      "title": "vibearr 02: Isolated native agent runtime"
+    },
+    {
+      "branch": "feat/native-codex-runner",
+      "criteria": "- Add a separate native-session backend contract: prepare, start, stream events,\n  inspect outcome, cancel, and reconcile/resume when supported. Keep legacy API\n  proposals explicitly distinct while callers migrate.\n- Pin and invoke the actual Codex CLI in noninteractive mode using argument\n  arrays and prompt files/stdin. Verify exact flags against that pinned version;\n  disable interactive approval prompts within the task boundary. Do not build\n  another general shell/edit agent loop on top of raw model API calls.\n- Normalize progress, errors, session identity, changed files, and available usage\n  into existing run artifacts. Check usable authentication without assuming an\n  interactive login, API key, and subscription session are interchangeable.\n- Support dedicated Codex API-key authentication first. Subscription sessions are\n  an additional capability, not a bootstrap prerequisite. Use a clean per-run\n  configuration and no inherited plugins/MCP connections; capability diagnostics\n  must work before a production run has qualified, without circular release gates.\n- Acceptance: fixture processes test parsing, output limits, missing auth, hangs,\n  and signals; a real bounded task edits a temporary repository, runs a test,\n  exits without prompts, and records its genuine session/result. Interrupt and\n  restart without duplicating an unknown remote invocation.",
+      "depends_on": [
+        "02"
+      ],
+      "feature": "03",
+      "priority": "high",
+      "title": "vibearr 03: Native Codex adapter"
+    },
+    {
+      "branch": "feat/isolated-project-validation",
+      "criteria": "- Build the trusted validation manifest and pinned Python 3.12/Git test image for\n  this repository before the delivery lifecycle depends on it. Use a fresh\n  PostgreSQL sidecar and run-specific credentials, volumes, and network. The\n  executor launches resources; candidate code receives no engine socket.\n- Cover formatting/lint/types, migration/system checks, Django tests, CLI tests,\n  portable runner tests, and Git acceptance. Run real boundary qualification on\n  the executor host. Select commands from the configured immutable profile, not\n  candidate-edited scripts. Dependency changes rebuild a candidate image in an\n  isolated executor build phase; production dependencies never change in place.\n- Emit profile/image/tree digests, required command IDs, actual outcomes, and log\n  references for version 2 delivery evidence. Run checks without model/GitHub\n  credentials. Clean up only run-owned disposable resources after recording results.\n- Add `.github/workflows/vibearr-validation.yml` with workflow `Vibearr validation`\n  and job `Validate candidate`, using the same trusted profile. Keep the current\n  `Run test.sh` check until its full coverage is deliberately consolidated later.\n- Acceptance: a known passing candidate passes, a deliberate failing test fails,\n  candidate edits cannot silently skip required checks, repeated runs have no DB\n  state leakage, and the live app/database/runner are unaffected. CI runs the same\n  profile; demonstrate the whole path without any native agent or paid model call.",
+      "depends_on": [
+        "02"
+      ],
+      "feature": "15",
+      "priority": "high",
+      "title": "vibearr 15: Isolated project validation"
+    },
+    {
+      "branch": "feat/unattended-issue-to-pr",
+      "criteria": "- Add a native lifecycle path: claim \u2192 fresh issue/context \u2192 isolated checkout \u2192\n  agent session \u2192 validation \u2192 push/PR \u2192 report. Keep lightweight plan artifacts\n  and acceptance criteria; do not require a separate research model invocation\n  for every straightforward task.\n- Reuse frozen checkout settings, run fencing, scoped credentials, operation\n  journals, existing Git delivery, redaction, schedules, and retention. Native\n  agent output must not skip independent configured validation or diff inspection.\n- Implement version 2 delivery validation on both supervisor and server, including\n  `runner_control/delivery.py`. Bind the tested tree, configured validation profile,\n  native session, pushed head, and PR identity; preserve legacy historical readback.\n  The current validator's consumed-approval/plan-handoff requirements do not apply\n  to native sessions. Reject incomplete, mixed-version, or agent-attested evidence.\n- Implement at most two repair attempts per run for failed validation initially.\n  Retry transient transport errors with bounded backoff; reconcile ambiguous\n  paid calls, process execution, push, and PR creation before doing anything again.\n- Distinguish failed, canceled, delivered, and no-change outcomes. In the MVP,\n  no-change work fails with an explanation; it never invents a commit or PR.\n- Add the minimum missing visibility to existing run pages: stage, age/heartbeat,\n  wait reason, repair count, validation outcome, and PR/merge links. Pause/cancel\n  and explicit retry are usable without waiting for the later dashboard feature.\n- Acceptance: a real issue produces one branch and one PR without command/plan\n  approval; a failed check prevents successful delivery; restart after claim,\n  agent completion, push, PR creation, and finish reporting creates no duplicates.\n  Pause/cancel and usage/schedule waits preserve ownership and useful diagnostics.",
+      "depends_on": [
+        "03",
+        "15"
+      ],
+      "feature": "04",
+      "priority": "high",
+      "title": "vibearr 04: Unattended issue to PR"
+    },
+    {
+      "branch": "feat/github-work-selection",
+      "criteria": "- Extend imported metadata with stable repository/issue identity, author, labels,\n  upstream update time, and dependencies. Keep import and claim decisions in\n  shared services. Poll on a configurable short interval with rate-limit handling;\n  retain scheduled reconciliation even if webhooks are added later.\n- Apply project-configured author filtering to automatically admit owner issues.\n  Exclude closed issues, PRs, held work, existing deliveries, and unmet dependencies.\n  Before starting, refetch issue state and record an immutable context revision.\n  Later edits do not silently mutate an active run's instructions.\n- Use GitHub repository/user IDs as stable identity, a 60-second default polling\n  interval, conditional requests, a per-project sync lock, and rate-limit backoff.\n  Define label/dependency/branch syntax, initial backlog cutoff/backfill, and\n  fresh-read failure behavior as in the MVP.\n- Order high/normal/low priority, then creation time and ID; define explicit label\n  mapping for imported issues. Detect missing/cyclic dependencies and display the\n  reason. A prerequisite is fulfilled by recorded merge evidence, not simply by\n  having a PR or an issue that somebody closed without completing the work.\n- Before feature 07, reconcile manually merged prerequisite PRs so dependent work\n  can proceed. Closed-unmerged PRs stop with a visible reason. No automatic requeue\n  on reopen; an explicit retry creates a new attempt and preserves delivery history.\n- Apply source eligibility consistently to UI counts and generic/runner claims.\n  The built-in runner also filters valid native configuration; generic clients\n  retain manual-task compatibility. Skip invalid runner project configuration\n  rather than starving valid work; preserve genuinely global execution gates.\n- Acceptance: author and hold filters, pagination, priority ties, stale updates,\n  cycles, repository changes, duplicate imports, concurrent claims, and manual\n  tasks all have explicit tests. Ineligible backlog entries cannot starve ready work.",
+      "depends_on": [
+        "01"
+      ],
+      "feature": "05",
+      "priority": "high",
+      "title": "vibearr 05: Actionable GitHub backlog"
+    },
+    {
+      "branch": "feat/self-development-bootstrap",
+      "criteria": "- Add an idempotent bootstrap command and short setup guide for\n  `innateessence/nightly-queue`. Configure its base branch, permitted owner,\n  Codex connection, one active worker, execution schedule, and test profile.\n  Retain separate issue-import and delivery credentials and show missing setup\n  in one diagnostic view. Never overwrite existing secrets or project choices.\n- Convert feature sections in this plan into one issue each, with the proposed\n  branch, prerequisites translated to real issue links, acceptance criteria, and\n  test expectations. Use a stable plan feature key to avoid duplicate issues.\n  During implementation, publish only with the user's authorization to write to\n  GitHub; this planning change publishes nothing.\n- Select feature 15's existing validation profile during bootstrap. Do not defer\n  isolated testing until this branch or launch the live-stack `test.sh` from agents.\n- Add a repeatable acceptance driver/report for the MVP's two dependent issues,\n  deliberate validation failure, restart points, and exact-head checks. This branch\n  proves discovery/execution/delivery; 07 extends the same driver to real merges.\n  Seed tools mark already merged prerequisites complete, so bootstrapping never\n  waits for the queue to implement its own missing execution prerequisites.\n- Acceptance: an owner-created issue for a small real improvement is discovered,\n  implemented, tested, and delivered without intervention; a second independent\n  issue runs next. Restart the service during one run and reconcile correctly.\n  Measure issue-to-start and issue-to-PR times and record failures honestly.",
+      "depends_on": [
+        "04",
+        "05"
+      ],
+      "feature": "06",
+      "priority": "high",
+      "title": "vibearr 06: Bootstrap this repository as its own customer"
+    },
+    {
+      "branch": "feat/automatic-pr-merge",
+      "criteria": "- Add a project delivery mode: PR delivery or automatic merge. Enable automatic\n  merge for this repository after required checks are configured. Do not add a\n  human review requirement to the autonomous path; configure GitHub repository\n  rules consistently rather than attempting to bypass required reviews.\n- Keep the run active through remote CI and merge in automatic-merge mode, using\n  its existing claim for scoped secret delivery. Finish only after verified merge\n  and idempotent completion reporting. PR-only mode still finishes at delivery.\n  Include both outcomes in native evidence; do not overload a PR URL as merge proof.\n- Track remote check runs and required status contexts for the exact PR head.\n  Merge only the expected repository/base/head with all required checks passing;\n  missing, pending, failed, or stale results are not success. Serialize merges\n  per repository and revalidate after base changes with bounded repair attempts.\n- Bootstrap must detect the current empty required-check list and require a\n  nonempty configured set with producer/workflow identities. Use an expected-head\n  SHA guard and squash merge; the app's own merge loop does not require GitHub's\n  separate auto-merge setting. Bound CI waits and share repair limits across local\n  tests, remote tests, and changed-base repairs.\n- Verify that the delivery actor has no ruleset bypass; explicitly address the\n  current admin-role bypass during initial setup rather than treating an owner's\n  token as permission to ignore branch rules.\n- Use verified merge identity to complete the issue, remove the branch according\n  to policy, and unlock dependents. Use retry-safe status comments with a stable\n  run marker. A delivered-but-unmerged run remains visible and reconcilable.\n- Acceptance: head changes invalidate old checks; permission errors, conflicts,\n  required reviews, and lost merge responses produce accurate states; retries do\n  not merge a different commit, close unrelated issues, or duplicate comments.\n- Release acceptance: the real two-issue scenario merges both changes without\n  human gates; the second starts from a base containing the first merge. Every\n  required evidence row in the MVP release contract passes before calling it ready.",
+      "depends_on": [
+        "06"
+      ],
+      "feature": "07",
+      "priority": "high",
+      "title": "vibearr 07: Automatic merge and issue completion"
+    },
+    {
+      "branch": "feat/native-claude-runner",
+      "criteria": "- Implement the native session contract using pinned Claude Code programmatic\n  execution, documented event output, explicit noninteractive tool permissions,\n  per-run authentication, cancellation, and session recovery where supported.\n- Reuse runtime, budgets, validation, and delivery; do not translate Claude Code\n  into the existing Messages API proposal adapter. Choose backends per project\n  or task with a frozen selection and visible configuration.\n- Acceptance: pass the common adapter conformance suite and real issue-to-PR,\n  cancellation, missing-auth, and restart scenarios. Match genuine usage units;\n  unsupported allowance reporting cannot masquerade as a remaining percentage.",
+      "depends_on": [
+        "06"
+      ],
+      "feature": "08",
+      "priority": "normal",
+      "title": "vibearr 08: Native Claude Code adapter"
+    },
+    {
+      "branch": "feat/native-opencode-runner",
+      "criteria": "- Run pinned OpenCode programmatically in a per-run session/server environment;\n  isolate its state and tools from unrelated projects. Configure permissions to\n  finish or fail without interactive questions. Support one proven provider first;\n  optional Ollama follows the same contract when available.\n- Reuse the native session interface and common checks. Preserve configured\n  backend choice on recovery; automatic provider switching is not a shortcut\n  around exhausted allowances or a failed run.\n- Acceptance: the common conformance suite and a real issue-to-PR run pass;\n  provider/model errors and server reconnection cannot reuse another run's session.",
+      "depends_on": [
+        "06"
+      ],
+      "feature": "09",
+      "priority": "normal",
+      "title": "vibearr 09: Native OpenCode adapter"
+    },
+    {
+      "branch": "feat/arr-queue-dashboard",
+      "criteria": "- Evolve existing Django templates and static assets: Queue for ready/held work,\n  Activity for stages and bounded live logs, History for attempts and PR/merge\n  outcomes, and System for connections, disk, health, and next processing window.\n- Make connection setup, project policy, backend selection, schedules, and default\n  validation commands understandable in the web app. Surface why work is waiting\n  and offer pause, cancel, retry, priority, and hold controls. Remove approval inbox\n  navigation after the migration; errors link to diagnostics instead.\n- Acceptance: screenshots and browser tests demonstrate configuration \u2192 queued\n  issue \u2192 activity \u2192 tested PR/merge. All views escape task/log content, redact\n  secrets, and enforce existing CSRF protection on mutations.",
+      "depends_on": [
+        "06"
+      ],
+      "feature": "10",
+      "priority": "normal",
+      "title": "vibearr 10: *arr style operations UI"
+    },
+    {
+      "branch": "feat/github-work-authoring",
+      "criteria": "- For GitHub-backed projects, let the queue form create an issue and import it\n  immediately. Use a durable operation key and reconcile ambiguous create results;\n  retain local manual tasks for projects that do not use GitHub as their backlog.\n- Allow agents to propose follow-up issues through a supervisor-owned API with\n  repository binding, deduplication, parent run, and a small per-run limit.\n  Configure whether agent-authored follow-ups execute automatically; cap recursion\n  depth and total generated work so self-development cannot create endless chores.\n- Acceptance: retries and sync do not duplicate issues; generated issues respect\n  project policy and budgets; external comments cannot redirect publication to\n  another repository or turn a failed task into an unbounded work generator.",
+      "depends_on": [
+        "06"
+      ],
+      "feature": "11",
+      "priority": "normal",
+      "title": "vibearr 11: GitHub work authoring and bounded follow-ups"
+    },
+    {
+      "branch": "feat/automatic-self-updates",
+      "criteria": "- Publish versioned application and runner images from merged commits. A separate\n  narrowly configured deployment component, outside agent workspaces, pulls a\n  selected release channel. Do not give agents the production Docker socket.\n- Drain active work, back up database and runner state, apply compatible migrations,\n  replace services, and run health checks. Record deployed commit/image identity.\n  Failed health checks restore the prior compatible deployment; irreversible schema\n  changes require a documented restore path and cannot promise automatic rollback.\n- Acceptance: a merged self-improvement becomes the running version automatically;\n  in-flight tasks survive the drain/restart; a failed upgrade recovers without\n  launching a second controller or mixing incompatible server/runner versions.",
+      "depends_on": [
+        "07"
+      ],
+      "feature": "12",
+      "priority": "low",
+      "title": "vibearr 12: Automatic self-updates"
+    },
+    {
+      "branch": "feat/parallel-project-workers",
+      "criteria": "- Add configured worker capacity across repositories and shared backend-account\n  budgets. Retain one active implementation and serialized delivery per repository\n  initially; add same-repository concurrency only with explicit branch/base logic.\n- Acceptance: concurrent claims cannot duplicate work, one noisy project cannot\n  starve others, shared usage limits apply across workers, and orphaned processes\n  cannot acquire replacement ownership simply by timing out.",
+      "depends_on": [
+        "07"
+      ],
+      "feature": "13",
+      "priority": "low",
+      "title": "vibearr 13: Bounded concurrency"
+    },
+    {
+      "branch": "refactor/retire-legacy-approval-stack",
+      "criteria": "- Remove unused approval creation/decision APIs, inbox templates, obsolete broker\n  paths, and proposal-only provider workers after the native adapters are proven.\n  Preserve necessary historical records through a deliberate archive/schema\n  migration; do not edit already-applied migrations to erase old approvals.\n- Consolidate architecture and operations documentation around the implemented\n  lifecycle. Remove obsolete release evidence dependencies without removing\n  working boundary tests, authentication, ownership fencing, or recovery journals.\n- Acceptance: existing data upgrades, historical runs remain readable, ordinary\n  APIs and `nq` remain compatible, and no live code references a human approval wait.",
+      "depends_on": [
+        "07",
+        "08",
+        "09"
+      ],
+      "feature": "14",
+      "priority": "low",
+      "title": "vibearr 14: Retire legacy approval and proposal infrastructure"
+    }
+  ],
+  "owner_id": 17239750,
+  "repository": "innateessence/nightly-queue",
+  "repository_id": 1353963957,
+  "schema_version": 1
+}

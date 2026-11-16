@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Any, Callable, NoReturn
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 
@@ -73,9 +73,16 @@ class Client:
         *,
         timeout: float | None = None,
         checkpoint: Callable[[], bool] | None = None,
+        query: dict[str, str | int] | None = None,
     ) -> dict[str, Any]:
         if not path.startswith("/api/v1/runner/") or "?" in path or "#" in path:
             raise ValueError("Use a runner API path.")
+        if query:
+            if method != "GET":
+                raise ValueError(
+                    "Query parameters are supported only for read requests."
+                )
+            path += "?" + urlencode(query)
         body = (
             None if payload is None else json.dumps(payload, allow_nan=False).encode()
         )

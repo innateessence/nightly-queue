@@ -9,6 +9,29 @@ from vibearr_runner import queue_acceptance
 
 
 class QueueAcceptanceTests(unittest.TestCase):
+    def test_interrupted_cycle_keeps_bounded_private_redacted_diagnostics(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            with patch.dict(
+                "os.environ",
+                {"VIBEARR_RUNNER_API_TOKEN": "sensitive-test-runner-token"},
+            ):
+                queue_acceptance.preserve_interruption(
+                    directory,
+                    "cycle output",
+                    "x" * 70000 + " sensitive-test-runner-token",
+                    1,
+                )
+            path = directory / "queue-acceptance-last-interruption.json"
+            record = json.loads(path.read_text())
+            self.assertNotIn("sensitive-test-runner-token", path.read_text())
+            self.assertLessEqual(len(record["stderr"]), 65536)
+            self.assertIn("[redacted]", record["stderr"])
+            self.assertEqual(path.stat().st_mode & 0o077, 0)
+            self.assertIn("original operations", record["resume"])
+
     def test_missing_explicit_execution_flag_never_constructs_a_queue_client(self):
         arguments = [
             "queue_acceptance",

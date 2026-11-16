@@ -21,6 +21,32 @@ from .recovery import ReconciliationRequired
 WAYPOINTS = {"agent-completed", "pushed", "pr-verified", "reporting-pending"}
 
 
+def preserve_interruption(directory, stdout, stderr, returncode):
+    def bounded(value):
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="replace")
+        value = value or ""
+        for key, secret in os.environ.items():
+            sensitive = any(
+                part in key.upper() for part in ("TOKEN", "PASSWORD", "SECRET", "KEY")
+            )
+            if sensitive and len(secret) >= 8:
+                value = value.replace(secret, "[redacted]")
+        return value[-65536:]
+
+    record = {
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+        "returncode": returncode,
+        "stdout": bounded(stdout),
+        "stderr": bounded(stderr),
+        "resume": "Keep the same private journal and reconcile the original operations.",
+    }
+    atomic_bytes(
+        directory / "queue-acceptance-last-interruption.json",
+        json.dumps(record, sort_keys=True).encode(),
+    )
+
+
 def client():
     return Client(
         getenv("NQ_URL", "http://vibearr:8000"),
@@ -29,7 +55,7 @@ def client():
     )
 
 
-def summary(state, result):
+def summary(state, result, observations=None):
     owned = state.get("run") or {}
     run = owned.get("run", {})
     item = owned.get("item") or {}
@@ -52,6 +78,7 @@ def summary(state, result):
         "project_id": item.get("project", {}).get("id"),
         "waypoint": waypoint,
         "completion_receipts": state.get("completion_receipts", [])[-1:],
+        "executor_observations": observations or [],
     }
 
 
@@ -95,12 +122,53 @@ def cycle_once(directory, project_id, issue_number):
                 state, ownership_lost=not isinstance(exc, ReconciliationRequired)
             )
             raise
-        return summary(state, result)
+        observations = []
+        native = state.get("native", {})
+        session = native.get("agent", {}).get("session")
+        validation = native.get("validation", {}).get("session")
+        manifests = [session["manifest"]] if session else []
+        if validation:
+            manifests.extend(entry["manifest"] for entry in validation["operations"])
+        if manifests:
+            from vibearr_executor.client import Client as ExecutorClient
+
+            executor = ExecutorClient.from_environment()
+            for manifest in manifests:
+                observed = executor.status(manifest["operation_id"])
+                if observed.get("state") != "running":
+                    continue
+                observations.append(
+                    {
+                        "operation_id": manifest["operation_id"],
+                        "run_id": manifest["run_id"],
+                        "container_id": observed.get("container_id"),
+                        "state": observed["state"],
+                        "phase": manifest["phase"],
+                        "pid": os.getpid(),
+                        "observed_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+        return summary(state, result, observations)
 
 
-def run_acceptance(directory, project_id, issue_number, evidence, max_seconds):
+def run_acceptance(
+    directory,
+    project_id,
+    issue_number,
+    evidence,
+    max_seconds,
+    *,
+    progress_name="queue-acceptance.json",
+    expected_outcome="delivered",
+):
+    if Path(progress_name).name != progress_name or not progress_name.endswith(".json"):
+        raise ValueError(
+            "Acceptance progress must be a JSON filename beneath its private state directory."
+        )
+    if expected_outcome not in {"delivered", "failed"}:
+        raise ValueError("Choose delivered or failed acceptance outcome.")
     with Journal(directory):
-        progress_file = directory / "queue-acceptance.json"
+        progress_file = directory / progress_name
         saved = (
             json.loads(progress_file.read_text())
             if progress_file.exists()
@@ -136,19 +204,45 @@ def run_acceptance(directory, project_id, issue_number, evidence, max_seconds):
         saved["run_id"],
         saved["generations"],
     )
+    executor_observations = saved.get("executor_observations", {})
     while time.monotonic() < deadline:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=max(1, deadline - time.monotonic()),
-        )
-        if result.returncode:
-            raise RuntimeError(
-                "Acceptance supervisor cycle failed; preserve its private journal and inspect the scoped configuration."
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=max(1, deadline - time.monotonic()),
             )
-        progress = json.loads(result.stdout)
+        except subprocess.TimeoutExpired as exc:
+            preserve_interruption(directory, exc.stdout, exc.stderr, None)
+            raise RuntimeError(
+                "Acceptance cycle timed out; retain private interruption diagnostics and resume the same journal."
+            ) from None
+        if result.returncode:
+            preserve_interruption(
+                directory, result.stdout, result.stderr, result.returncode
+            )
+            raise RuntimeError(
+                "Acceptance supervisor cycle was interrupted; inspect private interruption diagnostics and resume the same journal."
+            )
+        try:
+            progress = json.loads(result.stdout)
+        except ValueError:
+            preserve_interruption(
+                directory, result.stdout, result.stderr, result.returncode
+            )
+            raise RuntimeError(
+                "Acceptance cycle readback was invalid; reconcile the same private journal."
+            ) from None
         generations += 1
+        for operation in progress.get("executor_observations", []):
+            previous = executor_observations.setdefault(operation["operation_id"], [])
+            if previous and operation["container_id"] != previous[0]["container_id"]:
+                raise RuntimeError(
+                    "Supervisor restart replaced the original running operation container."
+                )
+            if len(previous) < 2:
+                previous.append(operation)
         if progress.get("run_id"):
             if run_id not in {None, progress["run_id"]}:
                 raise RuntimeError(
@@ -168,7 +262,12 @@ def run_acceptance(directory, project_id, issue_number, evidence, max_seconds):
                 ),
                 flush=True,
             )
-        saved.update(run_id=run_id, observed=observed, generations=generations)
+        saved.update(
+            run_id=run_id,
+            observed=observed,
+            generations=generations,
+            executor_observations=executor_observations,
+        )
         atomic_bytes(progress_file, json.dumps(saved, sort_keys=True).encode())
         if progress["result"] == "completed":
             return evidence_document(
@@ -179,6 +278,8 @@ def run_acceptance(directory, project_id, issue_number, evidence, max_seconds):
                 observed,
                 generations,
                 evidence,
+                expected_outcome=expected_outcome,
+                executor_observations=executor_observations,
             )
         time.sleep(0.1 if progress["result"] in {"continue", "claimed", "saved"} else 2)
     raise RuntimeError(
@@ -187,9 +288,19 @@ def run_acceptance(directory, project_id, issue_number, evidence, max_seconds):
 
 
 def evidence_document(
-    directory, run_id, project_id, issue_number, observed, generations, evidence
+    directory,
+    run_id,
+    project_id,
+    issue_number,
+    observed,
+    generations,
+    evidence,
+    *,
+    expected_outcome="delivered",
+    executor_observations=None,
 ):
-    if run_id is None or set(observed) != WAYPOINTS:
+    required = WAYPOINTS if expected_outcome == "delivered" else {"agent-completed"}
+    if run_id is None or not required <= set(observed):
         raise RuntimeError(
             "Acceptance did not observe every required restart checkpoint."
         )
@@ -199,10 +310,11 @@ def evidence_document(
     queue.controller_secret = state["controller_secret"]
     response = queue.reconcile(run_id)
     run, item = response["run"], response["item"]
+    expected_status = "succeeded" if expected_outcome == "delivered" else "failed"
     if (
         run["state"] != "completed"
-        or run["result_status"] != "succeeded"
-        or run.get("native_outcome") != "delivered"
+        or run["result_status"] != expected_status
+        or run.get("native_outcome") != expected_outcome
     ):
         raise RuntimeError("Acceptance did not finish with verified native delivery.")
     if item["project"]["id"] != project_id or item["issue_number"] != issue_number:
@@ -215,7 +327,7 @@ def evidence_document(
         ),
         None,
     )
-    if delivery is None:
+    if expected_outcome == "delivered" and delivery is None:
         raise RuntimeError(
             "Acceptance completion lacks historical version2 delivery readback."
         )
@@ -228,6 +340,8 @@ def evidence_document(
         "restarts": observed,
         "finish_digest": run["finish_digest"],
         "delivery": delivery,
+        "outcome": expected_outcome,
+        "executor_observations": executor_observations or {},
         "completed_at": run["finished_at"],
         "reporting_acknowledged": any(
             value["run_id"] == run_id for value in state.get("completion_receipts", [])

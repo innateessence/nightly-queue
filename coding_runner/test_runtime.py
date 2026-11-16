@@ -74,6 +74,23 @@ class ServerCase(TestCase):
 
 
 class ClientTests(ServerCase):
+    def test_evidence_cursor_is_encoded_for_authenticated_read(self):
+        path = f"/api/v1/runner/runs/{uuid4()}/evidence/"
+        self.server.responses[path + "?after=12"] = (
+            200,
+            {"evidence": [], "has_more": False},
+        )
+        response = self.client.request("GET", path, query={"after": 12})
+        self.assertFalse(response["has_more"])
+        self.assertEqual(self.server.calls, [("GET", path + "?after=12")])
+
+    def test_query_parameters_cannot_change_a_mutation_endpoint(self):
+        with self.assertRaises(ValueError):
+            self.client.request(
+                "POST", "/api/v1/runner/runs/claim/", query={"after": 12}
+            )
+        self.assertEqual(self.server.calls, [])
+
     def test_local_stop_bounds_inflight_http_mutation_and_preserves_lock(self):
         stopped = threading.Event()
         self.server.release_mutation = threading.Event()
