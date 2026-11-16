@@ -39,7 +39,7 @@ def lock_controller(runner=None):
     controller.save(update_fields=["generation"])
     if runner is None:
         return
-    current = RunnerIdentity.objects.get(pk=runner.pk)
+    current = RunnerIdentity.objects.select_for_update().get(pk=runner.pk)
     proof_changed = not constant_time_compare(
         current.controller_digest, runner.controller_digest
     )

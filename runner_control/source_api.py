@@ -36,16 +36,17 @@ def refresh_source(request, run_id):
             ]
         try:
             snapshot = refresh_issue_for_launch(
-                item_id=run.item_id, claim_token=claim_token, token=token
+                item_id=run.item_id,
+                claim_token=claim_token,
+                token=token,
+                runner=request.runner_identity,
+                run_id=run_id,
             )
         except GitHubAPIError:
             return JsonResponse(
                 {"error": "Fresh GitHub context is unavailable; wait before launch."},
                 status=503,
             )
-        with transaction.atomic():
-            lock_controller(request.runner_identity)
-            verify_active(owned_run(request.runner_identity, run_id), claim_token)
         return JsonResponse({"source_snapshot": snapshot})
 
     return run_response(operation)

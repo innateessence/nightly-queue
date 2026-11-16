@@ -42,6 +42,17 @@ def source_issue(number=1, **changes):
     return issue
 
 
+def source_repository(**changes):
+    values = dict(
+        repository_id=99,
+        owner_id=42,
+        repository_url="https://github.com/example/repo.git",
+        default_branch="main",
+    )
+    values.update(changes)
+    return values
+
+
 def selected_project(**changes):
     values = dict(
         name="Selected",
@@ -49,6 +60,7 @@ def selected_project(**changes):
         autonomous=True,
         github_repository_id=99,
         github_owner_id=42,
+        github_default_branch="main",
         base_branch="main",
     )
     values.update(changes)
@@ -57,6 +69,11 @@ def selected_project(**changes):
 
 class WorkSelectionTests(TestCase):
     def setUp(self):
+        repository = patch(
+            "work_queue.github.repository_metadata", return_value=source_repository()
+        )
+        repository.start()
+        self.addCleanup(repository.stop)
         comments = patch("work_queue.github.issue_comments", return_value=[])
         comments.start()
         self.addCleanup(comments.stop)
@@ -176,9 +193,10 @@ class WorkSelectionTests(TestCase):
         self.issue(body="Branch: main")
         self.assertIsNone(claim_next())
 
-    def test_branch_collision_prevents_claim(self):
-        self.issue(body="Branch: feat/shared")
+    def test_branch_collision_prevents_second_claim(self):
+        first = self.issue(body="Branch: feat/shared")
         self.issue(2, body="Branch: feat/shared")
+        self.assertEqual(claim_next().pk, first.pk)
         self.assertIsNone(claim_next())
 
     def test_fallbacks_are_distinct_for_manual_and_imported_work(self):
@@ -308,8 +326,159 @@ class WorkSelectionTests(TestCase):
         self.assertEqual(claimed.issue_revision, "b" * 64)
         self.assertEqual(claimed.source_snapshot["revision"], original["revision"])
 
+    def test_foreign_directive_cannot_reserve_owner_fallback(self):
+        self.issue(1, author_id=1337, body="Branch: vibearr/issue-100")
+        owner = self.issue(100)
+        self.assertEqual(claim_next().pk, owner.pk)
+        self.assertIsNone(claim_next())
+
+    def test_held_directive_cannot_reserve_another_issue_branch(self):
+        self.issue(1, labels=["vibearr:hold"], body="Branch: feat/owner")
+        owner = self.issue(100, body="Branch: feat/owner")
+        self.assertEqual(claim_next().pk, owner.pk)
+
+    def test_unclaimed_directive_cannot_reserve_manual_branch(self):
+        manual = enqueue_item(project=self.project, title="Manual")
+        self.issue(author_id=1337, body=f"Branch: vibearr/manual-{manual.pk}")
+        self.assertEqual(claim_next().pk, manual.pk)
+
+    def test_explicit_alternate_base_also_protects_remote_default(self):
+        self.project.base_branch = "release"
+        self.project.save()
+        item = self.issue(body="Branch: main")
+        self.assertIn("base branch", source_wait_reason(item))
+        self.assertIsNone(claim_next())
+
+    def test_fresh_default_change_blocks_already_claimed_task_branch(self):
+        self.project.base_branch = "release"
+        self.project.save()
+        original = source_issue(body="Branch: feat/candidate")
+        import_issue(project=self.project, **original)
+        claimed = claim_next()
+        with (
+            patch(
+                "work_queue.github.repository_metadata",
+                return_value=source_repository(default_branch="feat/candidate"),
+            ),
+            patch("work_queue.github.read_issue", return_value=original),
+        ):
+            with self.assertRaisesMessage(ValidationError, "base branch"):
+                refresh_issue_for_launch(
+                    item_id=claimed.pk, claim_token=claimed.claim_token, token="test"
+                )
+        claimed.refresh_from_db()
+        self.project.refresh_from_db()
+        self.assertEqual(claimed.base_branch, "release")
+        self.assertEqual(claimed.branch_name, "feat/candidate")
+        self.assertEqual(self.project.github_default_branch, "feat/candidate")
+        self.assertNotIn("comments", claimed.source_snapshot)
+
+    def test_fresh_owner_transfer_revokes_default_former_owner(self):
+        original = source_issue()
+        import_issue(project=self.project, **original)
+        claimed = claim_next()
+        with (
+            patch(
+                "work_queue.github.repository_metadata",
+                return_value=source_repository(owner_id=777),
+            ),
+            patch("work_queue.github.read_issue", return_value=original),
+        ):
+            with self.assertRaisesMessage(ValidationError, "author is not permitted"):
+                refresh_issue_for_launch(
+                    item_id=claimed.pk, claim_token=claimed.claim_token, token="test"
+                )
+        self.project.refresh_from_db()
+        claimed.refresh_from_db()
+        self.assertEqual(self.project.github_owner_id, 777)
+        self.assertNotIn("comments", claimed.source_snapshot)
+
+    def test_transfer_preserves_explicit_author_permission(self):
+        self.project.permitted_author_ids = [42]
+        self.project.save()
+        original = source_issue()
+        import_issue(project=self.project, **original)
+        claimed = claim_next()
+        with (
+            patch(
+                "work_queue.github.repository_metadata",
+                return_value=source_repository(owner_id=777),
+            ),
+            patch("work_queue.github.read_issue", return_value=original),
+        ):
+            snapshot = refresh_issue_for_launch(
+                item_id=claimed.pk, claim_token=claimed.claim_token, token="test"
+            )
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.github_owner_id, 777)
+        self.assertEqual(snapshot["metadata"]["author_id"], 42)
+
+    def test_source_refresh_fences_project_reassignment_during_fetch(self):
+        original = source_issue()
+        import_issue(project=self.project, **original)
+        claimed = claim_next()
+        replacement = selected_project(name="Replacement")
+        expected = {}
+
+        def provider(project, number, token, **kwargs):
+            QueueItem.objects.filter(pk=claimed.pk).update(project=replacement)
+            expected.update(QueueItem.objects.values().get(pk=claimed.pk))
+            return {**original, "state": "closed", "revision": "c" * 64}
+
+        with patch("work_queue.github.read_issue", side_effect=provider):
+            with self.assertRaisesMessage(ValidationError, "Project changed"):
+                refresh_issue_for_launch(
+                    item_id=claimed.pk, claim_token=claimed.claim_token, token="test"
+                )
+        self.assertEqual(QueueItem.objects.values().get(pk=claimed.pk), expected)
+
 
 class SourceMetadataTests(TestCase):
     def test_incomplete_provider_metadata_is_rejected(self):
         with self.assertRaises(GitHubAPIError):
             issue_data({"number": 1, "title": "Issue", "body": "", "state": "open"})
+
+
+class FreshRepositoryAuthorityTests(TestCase):
+    def test_real_repository_response_transfer_is_applied_before_permission(self):
+        project = selected_project()
+        now = timezone.now().isoformat()
+        raw = dict(
+            number=1,
+            id=1001,
+            title="Owner work",
+            body="Acceptance: pass",
+            state="open",
+            user={"id": 42, "login": "former-owner"},
+            labels=[],
+            created_at=now,
+            updated_at=now,
+        )
+        import_issue(project=project, **issue_data(raw))
+        claimed = claim_next()
+        repository = dict(
+            id=99,
+            owner={"id": 777},
+            html_url="https://github.com/new-owner/repo",
+            default_branch="trunk",
+        )
+
+        def provider(path, token, etag=""):
+            if path == "/repositories/99":
+                return repository, {}
+            if "/comments?" in path:
+                return [], {}
+            self.assertEqual(path, "/repos/new-owner/repo/issues/1")
+            return raw, {}
+
+        with patch("work_queue.github.github_read", side_effect=provider):
+            with self.assertRaisesMessage(ValidationError, "author is not permitted"):
+                refresh_issue_for_launch(
+                    item_id=claimed.pk, claim_token=claimed.claim_token, token="test"
+                )
+        project.refresh_from_db()
+        self.assertEqual(project.github_owner_id, 777)
+        self.assertEqual(project.github_default_branch, "trunk")
+        self.assertEqual(
+            project.repository_url, "https://github.com/new-owner/repo.git"
+        )

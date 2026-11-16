@@ -38,6 +38,18 @@ class Project(models.Model):
     class Meta:
         ordering = ["name", "pk"]
 
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        if "repository_url" in field_names:
+            instance._loaded_repository_url = instance.repository_url
+        return instance
+
+    def refresh_from_db(self, using=None, fields=None):
+        super().refresh_from_db(using=using, fields=fields)
+        if fields is None or "repository_url" in fields:
+            self._loaded_repository_url = self.repository_url
+
     def clean(self):
         super().clean()
         if not self.name or not self.name.strip():
@@ -49,6 +61,7 @@ class Project(models.Model):
             previous
             and previous.github_repository_id
             and previous.repository_url != self.repository_url
+            and self.repository_url != getattr(self, "_loaded_repository_url", None)
         ):
             raise ValidationError(
                 {
@@ -66,30 +79,44 @@ class Project(models.Model):
             )
 
     def save(self, *args, **kwargs):
-        self.full_clean()
         from runner_control.settings_models import RunnerSettings
 
         with transaction.atomic():
             RunnerSettings.objects.get_or_create(pk=1)
-            list(RunnerSettings.objects.select_for_update().filter(pk=1))
-            previous = Project.objects.filter(pk=self.pk).first()
-            if (
-                previous
-                and previous.github_repository_id
-                and previous.repository_url != self.repository_url
-            ):
-                raise ValidationError(
-                    {
-                        "repository_url": "A synchronized repository is identified by GitHub ID. Create another project to select a different repository."
-                    }
+            RunnerSettings.objects.select_for_update().get(pk=1)
+            previous = Project.objects.select_for_update().filter(pk=self.pk).first()
+            if previous:
+                unchanged_url = self.repository_url == getattr(
+                    self, "_loaded_repository_url", None
                 )
+                if unchanged_url:
+                    self.repository_url = previous.repository_url
+                for field in self._meta.concrete_fields:
+                    managed = field.name.startswith(
+                        ("github_", "sync_")
+                    ) or field.name in {"enabled_at", "created_at"}
+                    if managed:
+                        setattr(self, field.name, getattr(previous, field.name))
+                if (
+                    previous.github_repository_id
+                    and previous.repository_url
+                    != normalize_repository_url(self.repository_url)
+                ):
+                    raise ValidationError(
+                        {
+                            "repository_url": "A synchronized repository is identified by GitHub ID. Create another project to select a different repository."
+                        }
+                    )
+            self.full_clean()
             if self.autonomous and not self.enabled_at:
                 self.enabled_at = timezone.now()
                 if kwargs.get("update_fields") is not None:
                     kwargs["update_fields"] = set(kwargs["update_fields"]) | {
                         "enabled_at"
                     }
-            return super().save(*args, **kwargs)
+            result = super().save(*args, **kwargs)
+            self._loaded_repository_url = self.repository_url
+            return result
 
     def __str__(self):
         return f"{self.name} (#{self.pk})"

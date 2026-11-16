@@ -73,6 +73,13 @@ def import_auto_issues(scheduled=False):
             with transaction.atomic():
                 current = Project.objects.select_for_update().get(pk=project.pk)
                 if (
+                    current.repository_url != project.repository_url
+                    or current.github_repository_id != project.github_repository_id
+                ):
+                    raise GitHubAPIError(
+                        "Project repository configuration changed during synchronization."
+                    )
+                if (
                     current.sync_lock_token != lock
                     or not current.sync_lock_until
                     or current.sync_lock_until <= timezone.now()

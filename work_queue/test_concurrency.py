@@ -5,7 +5,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from django.db import connection, connections
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, override_settings
 
 from credentials.models import APISettings
 from projects.models import Project
@@ -57,8 +57,9 @@ class ClaimConcurrencyTests(TransactionTestCase):
         self.assertCountEqual(claimed_ids, [self.item.pk, second.pk])
 
     def test_competing_workers_claim_manual_and_imported_items(self):
-        self.project.github_repository_id = 99
-        self.project.github_owner_id = 42
+        Project.objects.filter(pk=self.project.pk).update(
+            github_repository_id=99, github_owner_id=42
+        )
         self.project.base_branch = "main"
         self.project.autonomous = True
         self.project.save()
@@ -119,27 +120,31 @@ class ImportConcurrencyTests(TransactionTestCase):
         self.assertEqual(QueueItem.objects.count(), 1)
 
 
+@override_settings(NQ_CREDENTIAL_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
 class SourceClaimConcurrencyTests(TransactionTestCase):
     def setUp(self):
         from credentials.models import Credential
         from runner_control.auth import token_digest
         from runner_control.models import RunnerIdentity
         from runner_control.settings_models import RunnerSettings
-        from .test_selection import selected_project
+        from .test_selection import selected_project, source_repository
+        from unittest.mock import patch
 
         self.project = selected_project()
+        metadata = patch(
+            "work_queue.github.repository_metadata", return_value=source_repository()
+        )
+        metadata.start()
+        self.addCleanup(metadata.stop)
         backend = Credential.objects.create(
             name="Backend",
             provider="codex",
             kind="token",
             encrypted_payload="controlled-fixture",
         )
-        github = Credential.objects.create(
-            name="GitHub",
-            provider="github",
-            kind="token",
-            encrypted_payload="controlled-fixture",
-        )
+        github = Credential(name="GitHub", provider="github", kind="token")
+        github.set_secret("controlled-github-token")
+        github.save()
         settings = RunnerSettings.objects.get(pk=1)
         settings.enabled = True
         settings.implementation_backend = "codex"
@@ -218,7 +223,7 @@ class SourceClaimConcurrencyTests(TransactionTestCase):
         fetched = Event()
         requeued = Event()
 
-        def provider(project, number, token):
+        def provider(project, number, token, **kwargs):
             fetched.set()
             self.assertTrue(requeued.wait(5))
             return source_issue()
@@ -320,7 +325,11 @@ class SourceClaimConcurrencyTests(TransactionTestCase):
             patch("work_queue.github.read_issue", return_value=original),
         ):
             refresh_issue_for_launch(
-                item_id=first.item_id, claim_token=first.item.claim_token, token="test"
+                item_id=first.item_id,
+                claim_token=first.item.claim_token,
+                token="test",
+                runner=self.runner,
+                run_id=first.pk,
             )
         first.refresh_from_db()
         saved = first.source_snapshot
@@ -333,7 +342,11 @@ class SourceClaimConcurrencyTests(TransactionTestCase):
             patch("work_queue.github.read_issue", return_value=original),
         ):
             refresh_issue_for_launch(
-                item_id=first.item_id, claim_token=first.item.claim_token, token="test"
+                item_id=first.item_id,
+                claim_token=first.item.claim_token,
+                token="test",
+                runner=self.runner,
+                run_id=first.pk,
             )
         changed_comments.assert_not_called()
         first.refresh_from_db()
@@ -392,7 +405,7 @@ class SourceClaimConcurrencyTests(TransactionTestCase):
         fetched = Event()
         newer_saved = Event()
 
-        def provider(project, number, token):
+        def provider(project, number, token, **kwargs):
             fetched.set()
             self.assertTrue(newer_saved.wait(5))
             return original
@@ -436,3 +449,155 @@ class SourceClaimConcurrencyTests(TransactionTestCase):
         self.item.refresh_from_db()
         self.assertEqual(self.item.issue_revision, "b" * 64)
         self.assertEqual(self.item.source_snapshot["revision"], original["revision"])
+
+    def test_revoked_refresh_cannot_change_second_attempt_metadata_or_history(self):
+        import uuid
+        from threading import Event
+        from unittest.mock import patch
+        from runner_control.configuration import configuration_document
+        from runner_control.models import Run
+        from runner_control.services import RunConflict, claim_run
+        from .services import refresh_issue_for_launch, requeue_items
+
+        revision = configuration_document()["revision"]
+        first = claim_run(
+            runner=self.runner, run_id=uuid.uuid4(), configuration_revision=revision
+        )
+        fetched = Event()
+        reclaimed = Event()
+        expected = {}
+        closed = source_issue(
+            state="closed",
+            revision="c" * 64,
+            body="Revoked response",
+            labels=["vibearr:hold"],
+        )
+
+        def provider(project, number, token, **kwargs):
+            fetched.set()
+            self.assertTrue(reclaimed.wait(5))
+            return closed
+
+        def refresh():
+            try:
+                self.bounded_connection()
+                with self.assertRaises(RunConflict):
+                    refresh_issue_for_launch(
+                        item_id=first.item_id,
+                        claim_token=first.item.claim_token,
+                        token="test",
+                        runner=self.runner,
+                        run_id=first.pk,
+                    )
+            finally:
+                connections.close_all()
+
+        def retry():
+            try:
+                self.bounded_connection()
+                self.assertTrue(fetched.wait(5))
+                requeue_items(QueueItem.objects.filter(pk=self.item.pk))
+                second = claim_run(
+                    runner=self.runner,
+                    run_id=uuid.uuid4(),
+                    configuration_revision=revision,
+                )
+                expected["item"] = QueueItem.objects.values().get(pk=second.item_id)
+                expected["first"] = Run.objects.values().get(pk=first.pk)
+                expected["second"] = Run.objects.values().get(pk=second.pk)
+                expected["project"] = Project.objects.values().get(pk=self.project.pk)
+                expected["second_id"] = second.pk
+                reclaimed.set()
+            finally:
+                connections.close_all()
+
+        with (
+            patch(
+                "work_queue.github.issue_comments",
+                return_value=[{"body": "Revoked discussion"}],
+            ),
+            patch("work_queue.github.read_issue", side_effect=provider),
+        ):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                refreshing = pool.submit(refresh)
+                retrying = pool.submit(retry)
+                refreshing.result(timeout=10)
+                retrying.result(timeout=10)
+        self.assertEqual(
+            QueueItem.objects.values().get(pk=self.item.pk), expected["item"]
+        )
+        self.assertEqual(Run.objects.values().get(pk=first.pk), expected["first"])
+        self.assertEqual(
+            Run.objects.values().get(pk=expected["second_id"]), expected["second"]
+        )
+        self.assertEqual(
+            Project.objects.values().get(pk=self.project.pk), expected["project"]
+        )
+
+
+class ProjectSyncEditConcurrencyTests(TransactionTestCase):
+    def test_sync_metadata_survives_concurrent_stale_form_save(self):
+        import uuid
+        from threading import Event
+        from django.db import transaction
+        from django.utils import timezone
+        from projects.forms import ProjectForm
+        from runner_control.settings_models import RunnerSettings
+
+        project = Project.objects.create(
+            name="Original", repository_url="https://github.com/example/repo"
+        )
+        synced = Event()
+        settings_locked = Event()
+        metadata = dict(
+            github_repository_id=99,
+            github_owner_id=42,
+            github_default_branch="trunk",
+            sync_lock_token=uuid.uuid4(),
+            sync_lock_until=timezone.now() + timedelta(minutes=10),
+            sync_etags={"1": {"etag": "fresh"}},
+        )
+
+        def synchronize():
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET statement_timeout = '3s'")
+                with transaction.atomic():
+                    Project.objects.select_for_update().get(pk=project.pk)
+                    Project.objects.filter(pk=project.pk).update(**metadata)
+                    synced.set()
+                    self.assertTrue(settings_locked.wait(5))
+            finally:
+                connections.close_all()
+
+        def edit():
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET statement_timeout = '3s'")
+                self.assertTrue(synced.wait(5))
+                form = ProjectForm(
+                    dict(
+                        name="Edited",
+                        repository_url=project.repository_url,
+                        base_branch="",
+                        permitted_author_ids="[]",
+                    ),
+                    instance=project,
+                )
+                self.assertTrue(form.is_valid(), form.errors)
+                with transaction.atomic():
+                    RunnerSettings.objects.select_for_update().get(pk=1)
+                    settings_locked.set()
+                    form.save()
+            finally:
+                connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            syncing = pool.submit(synchronize)
+            editing = pool.submit(edit)
+            syncing.result(timeout=10)
+            editing.result(timeout=10)
+        project.refresh_from_db()
+        self.assertEqual(project.name, "Edited")
+        for key, value in metadata.items():
+            self.assertEqual(getattr(project, key), value)

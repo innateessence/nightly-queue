@@ -219,23 +219,17 @@ def branch_wait_reason(item):
     except ValidationError:
         return "Invalid work branch."
     project = item.project
-    if (
-        branch == (project.base_branch or project.github_default_branch)
-        or branch == "HEAD"
-    ):
+    if branch in {project.base_branch, project.github_default_branch, "HEAD"}:
         return "Requested branch is the repository base branch."
     if item.source == QueueItem.Source.GITHUB and branch.startswith("vibearr/manual-"):
         return "Requested branch collides with the reserved manual work namespace."
-    others = QueueItem.objects.filter(project=project).exclude(pk=item.pk)
-    for other in others:
-        other_branch = work_branch(other)
-        invalid_manual_branch = (
-            other.source == QueueItem.Source.GITHUB
-            and not other.branch_name
-            and other_branch.startswith("vibearr/manual-")
-        )
-        if not invalid_manual_branch and branch == other_branch:
-            return "Requested branch collides with another work item."
+    others = (
+        QueueItem.objects.filter(project=project)
+        .exclude(pk=item.pk)
+        .exclude(branch_name="")
+    )
+    if others.filter(branch_name=branch).exists():
+        return "Requested branch collides with another work item."
     return ""
 
 
@@ -485,63 +479,142 @@ def requeue_items(items):
     )
 
 
-def refresh_issue_for_launch(*, item_id, claim_token, token):
-    """Fresh provider authorization for feature 04; transport errors always block launch."""
-    from .github import GitHubAPIError, issue_comments, read_issue
+def refresh_issue_for_launch(*, item_id, claim_token, token, runner=None, run_id=None):
+    """Fetch without locks; apply only while the original owner is still valid."""
+    from .github import GitHubAPIError, issue_comments, read_issue, repository_metadata
+    from runner_control.models import Run
+    from runner_control.services import owned_run, verify_active
 
     item = QueueItem.objects.select_related("project").get(pk=item_id)
+    verify_source_claim(item, claim_token)
+    owner = Run.objects.filter(item=item, state=Run.State.ACTIVE).first()
+    if owner and (runner is None or run_id != owner.pk):
+        raise ValidationError(
+            "Owned source refresh requires its runner and run identity."
+        )
+    if runner is not None:
+        verify_active(owned_run(runner, run_id), claim_token)
+    repository = None
+    comments = None
+    fresh = None
+    if item.source == QueueItem.Source.GITHUB:
+        repository = repository_metadata(
+            item.project.repository_url, token, item.github_repository_id
+        )
+        if "comments" not in item.source_snapshot:
+            comments = issue_comments(
+                item.project, item.issue_number, token, repository=repository
+            )
+        fresh = read_issue(
+            item.project, item.issue_number, token, repository=repository
+        )
+        repository = repository_metadata(
+            item.project.repository_url, token, item.github_repository_id
+        )
+        if (
+            fresh["number"] != item.issue_number
+            or fresh["issue_id"] != item.github_issue_id
+        ):
+            raise GitHubAPIError("Issue identity changed; launch is blocked.")
+    return _apply_source_refresh(
+        project_id=item.project_id,
+        item_id=item_id,
+        claim_token=claim_token,
+        repository=repository,
+        fresh=fresh,
+        comments=comments,
+        runner=runner,
+        run_id=run_id,
+    )
+
+
+def verify_source_claim(item, claim_token):
     if item.status != QueueItem.Status.RUNNING or str(item.claim_token) != str(
         claim_token
     ):
         raise ValidationError("Item is not running under this claim.")
-    if item.source == QueueItem.Source.MANUAL:
-        return item.source_snapshot
-    comments = None
-    if "comments" not in item.source_snapshot:
-        comments = issue_comments(item.project, item.issue_number, token)
-    fresh = read_issue(item.project, item.issue_number, token)
-    if (
-        fresh["number"] != item.issue_number
-        or fresh["issue_id"] != item.github_issue_id
-    ):
-        raise GitHubAPIError("Issue identity changed; launch is blocked.")
-    import_issue(
-        project=item.project,
-        repository_id=item.github_repository_id,
-        expected_revision=item.source_snapshot.get("revision"),
-        **fresh,
-    )
+
+
+def _apply_source_refresh(
+    *, project_id, item_id, claim_token, repository, fresh, comments, runner, run_id
+):
+    from runner_control.auth import token_digest
+    from runner_control.models import Run
+    from runner_control.services import lock_controller, owned_run, verify_active
+
+    reason = ""
     with transaction.atomic():
-        Project.objects.select_for_update().get(pk=item.project_id)
-        item = (
-            QueueItem.objects.select_for_update()
-            .select_related("project")
-            .get(pk=item_id)
-        )
-        if item.status != QueueItem.Status.RUNNING or str(item.claim_token) != str(
-            claim_token
+        lock_controller(runner)
+        if runner is not None:
+            run = owned_run(runner, run_id)
+            verify_active(run, claim_token)
+            if run.item_id != item_id:
+                raise ValidationError("Run does not own this source item.")
+            if run.item.source == QueueItem.Source.GITHUB:
+                from runner_control.secrets import secret_document
+
+                selection = dict(
+                    scope="run",
+                    run_id=str(run_id),
+                    claim_token=str(claim_token),
+                    purpose="issue",
+                )
+                secret_document(selection, runner)
+        project = Project.objects.select_for_update().get(pk=project_id)
+        item = QueueItem.objects.select_for_update().get(pk=item_id)
+        if item.project_id != project_id:
+            raise ValidationError("Project changed during source refresh.")
+        item.project = project
+        verify_source_claim(item, claim_token)
+        owner = Run.objects.filter(item=item, state=Run.State.ACTIVE).first()
+        if owner and (runner is None or run_id != owner.pk):
+            raise ValidationError(
+                "Owned source refresh requires its runner and run identity."
+            )
+        if runner is not None:
+            verify_active(owned_run(runner, run_id), claim_token)
+        if item.source == QueueItem.Source.MANUAL:
+            return item.source_snapshot
+        if (
+            not repository
+            or repository["repository_id"] != item.github_repository_id
+            or repository["repository_id"] != project.github_repository_id
         ):
-            raise ValidationError("Item is not running under this claim.")
+            raise ValidationError("Repository identity changed; launch is blocked.")
+        import_issue(
+            project=project,
+            repository_id=item.github_repository_id,
+            expected_revision=item.source_snapshot.get("revision"),
+            **fresh,
+        )
+        Project.objects.filter(pk=project.pk).update(
+            github_owner_id=repository["owner_id"],
+            github_default_branch=repository["default_branch"],
+            repository_url=repository["repository_url"],
+        )
+        project.refresh_from_db()
+        item.refresh_from_db()
+        item.project = project
         reason = source_wait_reason(item)
-        if reason:
-            raise ValidationError(reason)
         if fresh["revision"] != item.source_snapshot.get(
             "revision"
         ) or item.issue_revision != item.source_snapshot.get("revision"):
-            raise ValidationError(
-                "Issue instructions changed after claim; retry explicitly with refreshed context."
+            reason = (
+                reason
+                or "Issue instructions changed after claim; retry explicitly with refreshed context."
             )
-        if comments is not None and "comments" not in item.source_snapshot:
-            item.source_snapshot["comments"] = comments
-            item.save(update_fields=["source_snapshot"])
-        from runner_control.auth import token_digest
-        from runner_control.models import Run
-
-        Run.objects.filter(
-            item=item,
-            state=Run.State.ACTIVE,
-            claim_digest=token_digest(str(claim_token)),
-        ).exclude(source_snapshot__has_key="comments").update(
-            source_snapshot=item.source_snapshot
-        )
-        return item.source_snapshot
+        if not reason:
+            if comments is not None and "comments" not in item.source_snapshot:
+                item.source_snapshot["comments"] = comments
+                item.save(update_fields=["source_snapshot"])
+            Run.objects.filter(
+                item=item,
+                state=Run.State.ACTIVE,
+                claim_digest=token_digest(str(claim_token)),
+            ).exclude(source_snapshot__has_key="comments").update(
+                source_snapshot=item.source_snapshot
+            )
+        snapshot = item.source_snapshot
+    if reason:
+        raise ValidationError(reason)
+    return snapshot

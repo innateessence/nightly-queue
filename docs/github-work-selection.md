@@ -83,8 +83,8 @@ A 503 means fresh context is unavailable and launch must wait; 400 reports chang
 source/eligibility; 409 reports ownership/cancellation conflict. Changes between
 claim and initial launch require an explicit retry. Feature 04 must call this
 before launching an agent and honor cancellation at later checkpoints. The Python
-service is `refresh_issue_for_launch(item_id, claim_token, token)` with keyword
-arguments. API failures never authorize launch using stale data. Base SHA, model,
+service is `refresh_issue_for_launch(item_id, claim_token, token, runner=None, run_id=None)` with keyword
+arguments. Owned runs must supply their runner and run ID. The HTTP request shape is unchanged. API failures never authorize launch using stale data. Base SHA, model,
 validation profile, and effective policy belong in feature 04's immutable run
 context alongside this source snapshot.
 
@@ -117,9 +117,11 @@ repository default. Synchronization updates `github_default_branch` separately;
 new claims freeze the current effective branch, while retries retain their
 original checkout branch. Source-policy revisions include the discovered default.
 
-Lock ordering is controller (for owned transitions), settings/credentials (when
-needed), projects by ID, queue items by ID, then run updates. Import and fresh
-source refresh only take project/item locks and never acquire settings afterward.
+Lock ordering is controller and runner identity (for owned transitions),
+settings/credentials (when needed), projects by ID, queue items by ID, then run
+updates. Source refresh fetches without locks, then rechecks its original runner,
+controller proof, run, credential selection, and claim before applying anything.
+Import only takes project/item locks and never acquires settings afterward.
 Requeue takes project/item locks before updating runs to avoid an inversion with
 source cancellation. Real PostgreSQL tests overlap imports with runner claims
 and provider refresh with requeue under bounded statement timeouts.
@@ -140,3 +142,22 @@ Collision checks include both explicit and inferred branches for every source;
 a conflicting imported directive cannot take a manual fallback or starve the
 remaining queue. Oversized dependency numerals become visible selection errors,
 and malformed foreign issue data cannot abort later project imports.
+
+
+Fresh repository metadata participates in launch authorization. Owner transfers
+update the saved owner ID before checking the default author policy; explicitly
+configured author IDs keep their intended meaning. Both the configured base and
+the current remote default are protected task branch names, including when those
+branches differ. Frozen checkout settings are retained; a new default that equals
+the task branch blocks launch.
+
+Only a successfully claimed, frozen branch reserves its name. Unclaimed issue
+directives, including foreign or held issues, cannot reserve other work's names.
+Competing admitted issues for the same branch are resolved by the normal atomic
+claim order; the losing candidate then waits for the branch collision.
+
+Normal project edits lock the current project after settings and retain all
+server-owned GitHub identity, default-branch, enablement, and synchronization fields.
+A stale name/form save cannot erase a synchronization result or permit repointing
+a bound repository. Synchronization also fences a changed configured repository
+before binding the response to work.

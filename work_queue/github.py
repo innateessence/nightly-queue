@@ -199,10 +199,10 @@ def issue_data(issue):
     return result
 
 
-def read_issue(project, number, token):
+def read_issue(project, number, token, *, repository=None):
     if not project.github_repository_id:
         raise GitHubAPIError("Repository identity has not been synchronized.")
-    repository = repository_metadata(
+    repository = repository or repository_metadata(
         project.repository_url, token, project.github_repository_id
     )
     if repository["repository_id"] != project.github_repository_id:
@@ -214,8 +214,8 @@ def read_issue(project, number, token):
     return issue_data(data)
 
 
-def issue_comments(project, number, token):
-    repository = repository_metadata(
+def issue_comments(project, number, token, *, repository=None):
+    repository = repository or repository_metadata(
         project.repository_url, token, project.github_repository_id
     )
     if repository["repository_id"] != project.github_repository_id:
