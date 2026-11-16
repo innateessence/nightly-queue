@@ -940,6 +940,7 @@ class Runtime:
                 "instance_id": self.instance,
                 "operation_id": operation_id,
                 "run_id": record["manifest"]["run_id"],
+                "manifest_digest": digest(canonical(record["manifest"])),
                 "state": observed["state"],
                 "resources_terminated": observed["state"] == "exited"
                 and observed.get("descendants_terminated") is True,

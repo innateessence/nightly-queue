@@ -142,7 +142,11 @@ class Handler(BaseHTTPRequestHandler):
         operation_id, action = parts[3:]
         if action == "secret" and set(data) == {"secret"}:
             return runtime.supply_secret(operation_id, data["secret"])
-        if action in {"start", "status", "stop", "pause", "resume"} and not data:
+        if (
+            action
+            in {"start", "status", "stop", "pause", "resume", "termination_receipt"}
+            and not data
+        ):
             return getattr(runtime, action)(operation_id)
         if action == "purge" and set(data) == {"run_id", "resources"}:
             return runtime.purge(operation_id, data["run_id"], data["resources"])
