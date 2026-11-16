@@ -9,7 +9,12 @@ from django.db import transaction
 
 from credentials.models import Credential
 from vibearr_runner import native_contract as contract
-from vibearr_runner.merge_contract import merge_profile, merge_receipt, review_report
+from vibearr_runner.merge_contract import (
+    completion_marker,
+    merge_profile,
+    merge_receipt,
+    review_report,
+)
 from vibearr_runner.merge_github import (
     MergeGitHub,
     MergeRepair,
@@ -321,6 +326,8 @@ def bind_revision_intent(run, value):
     if policy.delivery_mode != "merge":
         raise RunConflict("Publication revisions require automatic merge mode.")
     data = value["data"]
+    if hasattr(run, "delivery_recovery") and data["reason"] != "base_update":
+        raise RunConflict("Delivery-only recovery permits only a clean base update.")
     previous = workspace_entry(run, data["workspace_id"])
     revised = dict(value, attempt=previous.payload["attempt"])
     publication_binding(run, revised)
@@ -543,7 +550,7 @@ def bind_completion(run, value):
     number, identity = source_issue(run)
     if (value["issue_number"], value["issue_id"]) != (number, identity) or value[
         "marker"
-    ] != f"<!-- vibearr-run:{run.pk}:complete -->":
+    ] != completion_marker(run.pk, 1 if hasattr(run, "delivery_recovery") else None):
         raise RunConflict(
             "Completion must target this frozen source issue and run marker."
         )

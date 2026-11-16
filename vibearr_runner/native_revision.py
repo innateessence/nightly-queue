@@ -15,6 +15,10 @@ class NativeRevision:
         self.host, self.native = host, host.native
 
     def prepare(self, reason, detail):
+        if reason != "base_update" and self.native.get("delivery_recovery_generation"):
+            raise DeliveryError(
+                "Delivery-only recovery cannot run a model repair: " + detail
+            )
         if self.native["attempt"] >= min(2, self.host.policy.repair_limit):
             raise DeliveryError(
                 "Remote CI/base repair exhausted the shared repair allowance: " + detail
@@ -169,6 +173,8 @@ class NativeRevision:
         self.native["publication_base"] = base
         for key in ("validation", "dependency", "commit", "merge"):
             self.native.pop(key, None)
+        self.native.pop("deadline:validation_timeout_seconds", None)
+        self.native.pop("ci_deadline", None)
         self.native["phase"] = "validation"
         record["activated"] = True
         self.activate_candidate()

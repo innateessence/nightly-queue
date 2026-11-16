@@ -270,3 +270,8 @@ def review_report(value, *, role, run_id, context_digest, workspace, pull_number
             raise NativeContractError("Review has unresolved P2 or higher findings.")
         text(finding["description"], 2000)
     return copied(value)
+
+
+def completion_marker(run_id, generation=None):
+    suffix = f":delivery-recovery:{generation}" if generation else ""
+    return f"<!-- vibearr-run:{run_id}{suffix}:complete -->"

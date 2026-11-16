@@ -5,7 +5,7 @@ import time
 from uuid import uuid4
 
 from .delivery import DeliveryError, DeliveryUnknown, DeliveryRejected
-from .merge_contract import merge_profile
+from .merge_contract import completion_marker, merge_profile
 from .merge_github import (
     MergeGitHub,
     MergeRepair,
@@ -298,7 +298,9 @@ class NativeMerge:
             return self.finalize()
         github = self.client(completion=True)
         number, issue_id, issue = self.issue(github)
-        marker = f"<!-- vibearr-run:{self.host.run_id}:complete -->"
+        marker = completion_marker(
+            self.host.run_id, self.native.get("delivery_recovery_generation")
+        )
         comments = github.pages(
             f"/repos/{self.workspace['repository']}/issues/{number}/comments"
         )

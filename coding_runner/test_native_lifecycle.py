@@ -352,6 +352,45 @@ class NativeLifecycleTests(unittest.TestCase):
             self.host, executor=self.executor, validation_profile=self.profile
         )
 
+    def test_recovered_server_run_cannot_fall_back_to_new_context_or_agent(self):
+        self.state["run"]["run"]["delivery_recovery"] = {"generation": 1}
+        with self.assertRaisesRegex(
+            ReconciliationRequired, "original-workspace resume"
+        ):
+            self.engine().step(self.state)
+        self.assertNotIn("native", self.state)
+        self.assertEqual(self.executor.started, [])
+
+    def test_recovery_step_refreshes_source_without_backend_grant_or_diagnostics(self):
+        self.advance("delivery")
+        self.state["run"]["run"]["delivery_recovery"] = {"generation": 1}
+        self.state["native"]["delivery_recovery_generation"] = 1
+        self.state["native"]["source_checked_at"] = 0
+        engine = self.engine()
+        original = engine.secret
+
+        def grant(purpose, **options):
+            self.assertNotEqual(purpose, "implementation")
+            return original(purpose, **options)
+
+        started = list(self.executor.started)
+        with (
+            patch.object(engine, "secret", side_effect=grant),
+            patch.object(
+                engine.registry, "create", side_effect=AssertionError("backend access")
+            ),
+            patch(
+                "vibearr_runner.native_delivery.NativeDelivery.step",
+                return_value="wait",
+            ),
+            patch.object(
+                engine, "refresh_source", wraps=engine.refresh_source
+            ) as fresh,
+        ):
+            self.assertEqual(engine.step(self.state), "wait")
+        fresh.assert_called_once_with("continuation")
+        self.assertEqual(self.executor.started, started)
+
     def superseded_source(self):
         original = self.queue.request
 

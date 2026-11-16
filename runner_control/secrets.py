@@ -82,6 +82,8 @@ def selected_reference(data, runner, document):
         allow_cancellation=reconciliation or completion,
     )
     purpose = string_field(data, "purpose", max_length=30)
+    if hasattr(run, "delivery_recovery") and purpose not in {"issue", "repository"}:
+        unavailable("Delivery-only recovery cannot obtain coding credentials.")
     if completion:
         from .merge_services import completion_authority
 

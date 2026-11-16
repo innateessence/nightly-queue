@@ -200,7 +200,23 @@ def collect_merge_run(queue, github, *, run_id, project_id, issue_number, screen
         or issue.get("state") != "closed"
     ):
         raise ValueError("Provider did not complete the original frozen source issue.")
-    marker = f"<!-- vibearr-run:{run_id}:complete -->"
+    from .merge_contract import completion_marker
+
+    recovery = run.get("delivery_recovery")
+    if recovery:
+        prior = recovery.get("archive", {})
+        if (
+            recovery.get("generation") != 1
+            or prior.get("result_status") != "failed"
+            or prior.get("native_outcome") != "failed"
+            or not prior.get("reporting_acknowledged_at")
+            or not prior.get("finish_digest")
+            or prior["finish_digest"] == run["finish_digest"]
+        ):
+            raise ValueError(
+                "Delivery recovery lacks its immutable prior failure and positive acknowledgement."
+            )
+    marker = completion_marker(run_id, recovery["generation"] if recovery else None)
     comments = provider.pages(
         f"/repos/{workspace['repository']}/issues/{issue_number}/comments"
     )
@@ -347,6 +363,14 @@ def collect_merge_scenario(
     runtime_restarts = [
         restart_evidence(value, receipts[value["run_id"]]) for value in records
     ]
+    if any(
+        record.get("delivery_recovery")
+        != receipts[record["run_id"]].get("delivery_recovery")
+        for record in records
+    ):
+        raise ValueError(
+            "Delivery recovery audit differs from the captured completion receipt."
+        )
     return {
         "schema_version": 1,
         "scenario": "merge",

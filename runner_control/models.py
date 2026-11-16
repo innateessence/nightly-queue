@@ -152,5 +152,31 @@ class ActionApproval(models.Model):
 from .settings_models import ProjectRunnerSettings, RunnerSettings  # noqa: F401, E402
 from .gate_models import RunnerGateEvidence  # noqa: F401, E402
 from .plan_models import ContextSnapshot, PlanVersion  # noqa: F401, E402
+from .plan_models import ImmutableQuerySet  # noqa: E402
 from .operations_models import ReleaseQualification, RunRetention  # noqa: F401, E402
 from .operations_models import RunnerHealth  # noqa: F401, E402
+
+
+class NativeDeliveryRecovery(models.Model):
+    objects = ImmutableQuerySet.as_manager()
+    run = models.OneToOneField(
+        Run, on_delete=models.PROTECT, related_name="delivery_recovery"
+    )
+    operation_id = models.UUIDField(unique=True, editable=False)
+    request = models.JSONField(editable=False)
+    archive = models.JSONField(editable=False)
+    resume = models.JSONField(editable=False)
+    claim_token = models.UUIDField(editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            from django.core.exceptions import ValidationError
+
+            raise ValidationError("Delivery recovery history is immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        from django.core.exceptions import ValidationError
+
+        raise ValidationError("Delivery recovery history is immutable.")

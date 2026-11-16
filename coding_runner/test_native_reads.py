@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from vibearr_runner.delivery import (
     DeliveryError,
     DeliveryReadUnavailable,
+    DeliveryRejected,
     DeliveryUnknown,
     SupervisorGit,
 )
@@ -46,6 +47,28 @@ class NativeReadTests(unittest.TestCase):
                 read(self.host, "repository", operation)
         with patch("vibearr_runner.native_reads.time.time", return_value=101):
             self.assertEqual(read(self.host, "repository", operation), {"id": 17})
+        self.assertEqual(self.host.native["transport_reads"], {})
+
+    def test_expected_not_found_does_not_exhaust_later_policy_polls(self):
+        operation = Mock(side_effect=DeliveryRejected(404))
+        for _ in range(5):
+            restarted = SimpleNamespace(native=self.host.native, save=Mock())
+            with self.assertRaises(DeliveryRejected) as caught:
+                read(restarted, "classic protection", operation)
+            self.assertEqual(caught.exception.status, 404)
+            self.assertEqual(self.host.native["transport_reads"], {})
+        self.assertEqual(operation.call_count, 5)
+
+    def test_definitive_response_clears_prior_transport_failures(self):
+        operation = Mock(
+            side_effect=[DeliveryReadUnavailable("DNS"), DeliveryRejected(404)]
+        )
+        with patch("vibearr_runner.native_reads.time.time", return_value=100):
+            with self.assertRaises(NativeReadWait):
+                read(self.host, "classic protection", operation)
+        with patch("vibearr_runner.native_reads.time.time", return_value=101):
+            with self.assertRaises(DeliveryRejected):
+                read(self.host, "classic protection", operation)
         self.assertEqual(self.host.native["transport_reads"], {})
 
     def test_rate_limit_headers_delay_the_next_attempt(self):
