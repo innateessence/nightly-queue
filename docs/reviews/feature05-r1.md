@@ -41,7 +41,7 @@ constraint as their collision response.
 ## P2: explicit retry destroys the previous attempt's source snapshot
 
 Location: `work_queue/services.py:429–434`, `:304–310`; related
-`runner_control/services.py:123–133` and `runner_control/models.py:44–46`.
+`runner_control/services.py:119–128` and `runner_control/models.py:44–46`.
 
 The new source snapshot exists only on `QueueItem`, shared by every `Run` for that
 item. `requeue_items()` clears that snapshot and replaces the title/body with the
@@ -93,7 +93,7 @@ regression overlapping the newer import with the older in-flight fresh read.
 ## P2: an oversized dependency number aborts all issue synchronization
 
 Location: `work_queue/services.py:45–57`; uncaught exception in
-`work_queue/tasks.py:124`.
+`work_queue/tasks.py:117`.
 
 The dependency regex accepts arbitrarily many decimal digits. Conversion to
 `int` happens before the `2**63` bound. Python 3.12 rejects a decimal numeral
