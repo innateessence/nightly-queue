@@ -1,0 +1,244 @@
+from dataclasses import replace
+import json
+import shutil
+from unittest import skipUnless
+from unittest.mock import patch
+
+from django.core.exceptions import ValidationError
+from django.test import TestCase, override_settings
+from django.urls import reverse
+
+from coding_runner.test_native_delivery import GitHub, Transport
+from coding_runner import test_native_lifecycle as lifecycle_fixture
+from credentials.test_models import TEST_KEY
+from vibearr_runner.client import (
+    APIError,
+    AmbiguousRequest,
+    ConflictError,
+    NotFoundError,
+)
+from vibearr_runner.native_delivery import NativeDelivery
+from vibearr_runner.delivery import SupervisorGit
+from vibearr_runner import processes
+from vibearr_runner.native_lifecycle import NativeLifecycle
+from vibearr_runner.recovery import ReconciliationRequired
+from vibearr_runner.workspaces import git
+
+from .api import response_data
+from .test_native_protocol import NativeProtocolMixin
+
+
+class APIBridge:
+    def __init__(self, client):
+        self.client = client
+
+    def request(self, method, path, payload=None):
+        response = self.client.generic(
+            method,
+            path,
+            data=json.dumps(payload) if payload else "",
+            content_type="application/json",
+        )
+        if response.status_code != 200:
+            error = {404: NotFoundError, 409: ConflictError}.get(
+                response.status_code, APIError
+            )
+            raise error(str(response.json()))
+        return response.json()
+
+    def reconcile(self, identity):
+        return self.request("GET", f"/api/v1/runner/runs/{identity}/")
+
+
+@skipUnless(
+    shutil.which("git"),
+    "Native supervisor integration requires the runner Git boundary",
+)
+@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+class NativeSupervisionTests(NativeProtocolMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.supervision_run_id = str(self.run.pk)
+        lifecycle_fixture.NativeLifecycleTests.setUp(self)
+        branch = self.item.branch_name
+        git(["branch", "-m", branch], self.workspace.checkout)
+        self.workspace = replace(
+            self.workspace,
+            repository_url=self.item.repository_url,
+            branch_name=branch,
+            requested_base_branch=self.item.base_branch,
+            resolved_base_branch="main",
+        )
+        self.state["run"] = response_data(self.run, include_claim=True)
+        self.state["runner_id"] = self.runner.pk
+        self.host.client = APIBridge(self.client)
+        self.host.workspaces.prepare = lambda *args: self.workspace
+        observation = {
+            "repository_id": 123,
+            "owner_id": 456,
+            "repository_url": self.item.repository_url,
+            "default_branch": "main",
+        }
+        repository = patch(
+            "work_queue.github.repository_metadata", return_value=observation
+        )
+        repository.start()
+        self.addCleanup(repository.stop)
+        native_repository = patch(
+            "vibearr_runner.native_github.NativeGitHub.repository",
+            return_value=(observation, {}),
+        )
+        native_repository.start()
+        self.addCleanup(native_repository.stop)
+        self.journal.save(self.state)
+
+    def engine(self):
+        return NativeLifecycle(
+            self.host, executor=self.executor, validation_profile=self.profile
+        )
+
+    def run_to(self, phase):
+        for _ in range(50):
+            if self.state.get("native", {}).get("phase") == phase:
+                return
+            self.engine().step(self.state)
+        self.fail("Native supervisor did not reach " + phase)
+
+    def publication_clients(self):
+        github, transport = GitHub(), Transport()
+        repository = self.item.repository_url.removeprefix(
+            "https://github.com/"
+        ).removesuffix(".git")
+        github.repository = lambda **kwargs: (
+            {
+                "repository_id": 123,
+                "repository": repository,
+                "repository_url": self.item.repository_url,
+                "default_branch": "main",
+            },
+            {},
+        )
+        return github, transport
+
+    def test_supervisor_receipts_finish_through_real_machine_api(self):
+        self.run_to("delivery")
+        github, transport = self.publication_clients()
+        with patch.object(NativeDelivery, "clients", return_value=(github, transport)):
+            for _ in range(4):
+                self.state = self.journal.load()
+                result = self.engine().step(self.state)
+            self.assertEqual(result, "reporting_pending")
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.result_status, "succeeded")
+        self.assertEqual(self.run.native_outcome, "delivered")
+        self.assertEqual(github.creates, 1)
+        self.assertEqual(self.run.evidence.filter(kind="verified_delivery").count(), 1)
+        response = self.client.get(reverse("runner_plan_detail", args=[self.run.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Native session")
+        self.assertNotContains(response, "Every command still requires")
+
+    def test_restart_after_lost_finish_response_reuses_frozen_termination(self):
+        self.run_to("delivery")
+        github, transport = self.publication_clients()
+        with patch.object(NativeDelivery, "clients", return_value=(github, transport)):
+            for _ in range(3):
+                self.engine().step(self.state)
+        self.assertEqual(
+            self.state["native"]["delivery"]["checkpoint"], "reporting_pending"
+        )
+        frozen = self.state["native"]["metadata"]["termination"]["payload"]
+        processes = len(self.state.get("processes", {}))
+        original = self.host.client.request
+
+        def lose_finish(method, path, payload=None):
+            result = original(method, path, payload)
+            if path.endswith("/finish/"):
+                raise AmbiguousRequest("Fixture lost committed finish response")
+            return result
+
+        self.state = self.journal.load()
+        with patch.object(self.host.client, "request", side_effect=lose_finish):
+            with self.assertRaises(AmbiguousRequest):
+                self.engine().step(self.state)
+        self.state = self.journal.load()
+        self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.assertEqual(
+            self.state["native"]["metadata"]["termination"]["payload"], frozen
+        )
+        self.assertEqual(len(self.state.get("processes", {})), processes)
+        self.assertEqual(github.creates, 1)
+        self.assertEqual(self.run.evidence.filter(kind="native_termination").count(), 1)
+
+    def test_unknown_cancellation_cannot_release_claim_through_api(self):
+        self.run_to("import_candidate")
+        self.executor.unknown.add(self.executor.started[0])
+        self.run.cancellation_requested_at = self.run.created_at
+        self.run.save(update_fields=["cancellation_requested_at"])
+        self.state["run"]["run"][
+            "cancellation_requested_at"
+        ] = self.run.created_at.isoformat()
+        with self.assertRaises(ReconciliationRequired):
+            self.engine().step(self.state)
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.state, "active")
+        self.assertEqual(self.run.active_slot, 1)
+
+    def test_cancel_after_push_prelaunch_pause_releases_claim_through_api(self):
+        self.run_to("delivery")
+        github, _ = self.publication_clients()
+        transport = SupervisorGit(token="fixture-token")
+        paused = []
+        original = processes.run
+
+        def run(arguments, **kwargs):
+            if "push" in arguments:
+                paused.append(True)
+            return original(arguments, **kwargs)
+
+        self.host.checkpoint = lambda: not paused
+        with patch.object(NativeDelivery, "clients", return_value=(github, transport)):
+            with patch.object(transport, "observed_remote", return_value=""):
+                with patch.object(processes, "run", side_effect=run):
+                    self.assertEqual(self.engine().step(self.state), "wait")
+                self.state = self.journal.load()
+                self.run.cancellation_requested_at = self.run.created_at
+                self.run.save(update_fields=["cancellation_requested_at"])
+                self.state["run"]["run"][
+                    "cancellation_requested_at"
+                ] = self.run.created_at.isoformat()
+                self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.state, "completed")
+        self.assertEqual(self.run.native_outcome, "canceled")
+        self.assertIsNone(self.run.active_slot)
+        termination = self.run.evidence.get(kind="native_termination").payload
+        self.assertEqual(termination["publications"][0]["state"], "not_started")
+
+    def test_definitively_rejected_dispatch_metadata_terminates_without_a_model_call(
+        self,
+    ):
+        self.run_to("agent")
+        with patch(
+            "runner_control.native_services.validate_intent_binding",
+            side_effect=ValidationError("Rejected fixture intent"),
+        ):
+            self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.state, "completed")
+        self.assertEqual(self.run.result_status, "failed")
+        self.assertEqual(self.executor.started, [])
+        self.assertEqual(len(self.state["native"]["rejected_metadata"]), 1)
+        self.assertFalse(self.run.evidence.filter(kind="native_intent").exists())
+
+    def test_confirmed_expired_native_session_can_finish_without_an_export(self):
+        self.run_to("agent")
+        self.engine().step(self.state)
+        result = self.executor.states[self.executor.started[0]]["result"]
+        result.update(exit_code=None, timed_out=True, canceled=True)
+        result.pop("artifact")
+        self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.result_status, "failed")
+        self.assertEqual(self.run.evidence.filter(kind="native_termination").count(), 1)
+        self.assertEqual(self.state["native"].get("rejected_metadata", {}), {})

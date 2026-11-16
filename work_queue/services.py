@@ -275,6 +275,8 @@ def branch_wait_reason(item):
 
 
 def source_wait_reason(item):
+    if item.status == QueueItem.Status.QUEUED and native_delivery_exists(item):
+        return "Prior native delivery requires reconciliation before another execution."
     if item.source == QueueItem.Source.MANUAL:
         return branch_wait_reason(item)
     project = item.project
@@ -483,19 +485,102 @@ def finish_item(
     )
 
 
+def native_delivery_exists(item):
+    from runner_control.models import RunEvidence
+
+    return (
+        RunEvidence.objects.filter(run__item_id=item.pk)
+        .filter(
+            Q(kind="native_delivery")
+            | Q(kind="verified_delivery", payload__execution_kind="native")
+        )
+        .exists()
+    )
+
+
+def reset_retry_item(item):
+    values = {
+        "status": QueueItem.Status.QUEUED,
+        "claim_token": None,
+        "started_at": None,
+        "finished_at": None,
+        "execution_ref": "",
+        "result_url": "",
+        "error_summary": "",
+        "source_snapshot": {},
+    }
+    if item.source == QueueItem.Source.GITHUB and item.source_metadata:
+        values.update(
+            title=item.source_metadata.get("title", item.title)[:200],
+            instructions=item.source_metadata.get("body", item.instructions),
+        )
+    return QueueItem.objects.filter(pk=item.pk).update(**values)
+
+
 @transaction.atomic
-def requeue_items(items):
+def requeue_items(items, *, return_summary=False, expected_run_id=None):
     """Stop the previous workflow before requeuing."""
     from runner_control.models import Run
     from runner_control.services import lock_controller
 
     lock_controller()
+    if expected_run_id is not None:
+        from runner_control.services import RunConflict
+
+        expected = Run.objects.filter(pk=expected_run_id).first()
+        latest = (
+            Run.objects.filter(item_id=expected.item_id)
+            .order_by("-created_at", "-pk")
+            .first()
+            if expected
+            else None
+        )
+        if (
+            not expected
+            or latest.pk != expected.pk
+            or not items.filter(pk=expected.item_id).exists()
+        ):
+            raise RunConflict(
+                "This retry refers to an older attempt; inspect the current run."
+            )
     statuses = [QueueItem.Status.RUNNING, QueueItem.Status.FAILED]
     retryable = items.filter(status__in=statuses)
     project_ids = retryable.values_list("project_id", flat=True)
     list(Project.objects.select_for_update().filter(pk__in=project_ids).order_by("pk"))
     list(retryable.select_for_update().order_by("pk"))
-    item_ids = list(retryable.values_list("pk", flat=True))
+    summary = {"requeued": 0, "pending": 0, "held": 0}
+    immediate = []
+    for item in retryable:
+        active = Run.objects.filter(item=item, state=Run.State.ACTIVE).first()
+        if active and active.evidence.filter(kind="native_intent").exists():
+            now = timezone.now()
+            active.retry_requested_at = active.retry_requested_at or now
+            active.cancellation_requested_at = active.cancellation_requested_at or now
+            active.cancellation_reason = (
+                active.cancellation_reason
+                or "Retry requested; stop owned native work first."
+            )
+            active.wait_reason = (
+                "Retry requested; waiting for confirmed native termination."
+            )
+            active.stage = Run.Stage.WAITING
+            active.save(
+                update_fields=[
+                    "retry_requested_at",
+                    "cancellation_requested_at",
+                    "cancellation_reason",
+                    "wait_reason",
+                    "stage",
+                    "updated_at",
+                ]
+            )
+            summary["pending"] += 1
+            continue
+        if native_delivery_exists(item):
+            summary["held"] += 1
+            continue
+        immediate.append(item)
+    item_ids = [item.pk for item in immediate]
     previous = Run.objects.filter(item_id__in=item_ids).exclude(
         state=Run.State.OBSOLETE
     )
@@ -503,29 +588,23 @@ def requeue_items(items):
     previous.update(
         state=Run.State.OBSOLETE, active_slot=None, updated_at=timezone.now()
     )
-    for item in retryable.select_for_update():
-        if item.source == QueueItem.Source.GITHUB and item.source_metadata:
-            item.title = item.source_metadata.get("title", item.title)[:200]
-            item.instructions = item.source_metadata.get("body", item.instructions)
-            item.source_snapshot = {}
-            item.save(update_fields=["title", "instructions", "source_snapshot"])
-    return retryable.update(
-        status=QueueItem.Status.QUEUED,
-        claim_token=None,
-        started_at=None,
-        finished_at=None,
-        execution_ref="",
-        result_url="",
-        error_summary="",
-    )
+    for item in immediate:
+        summary["requeued"] += reset_retry_item(item)
+    return summary if return_summary else summary["requeued"]
 
 
-def refresh_issue_for_launch(*, item_id, claim_token, token, runner=None, run_id=None):
+def refresh_issue_for_launch(
+    *, item_id, claim_token, token, runner=None, run_id=None, mode=None
+):
     """Fetch without locks; apply only while the original owner is still valid."""
     from .github import GitHubAPIError, issue_comments, read_issue, repository_metadata
     from runner_control.models import Run
     from runner_control.services import owned_run, verify_active
 
+    if mode is not None and (
+        not isinstance(mode, str) or mode not in {"initial", "continuation"}
+    ):
+        raise ValidationError("Choose initial or continuation source mode.")
     item = QueueItem.objects.select_related("project").get(pk=item_id)
     verify_source_claim(item, claim_token)
     owner = Run.objects.filter(item=item, state=Run.State.ACTIVE).first()
@@ -535,7 +614,17 @@ def refresh_issue_for_launch(*, item_id, claim_token, token, runner=None, run_id
         )
     if runner is not None:
         verify_active(owned_run(runner, run_id), claim_token)
+    continuation = mode == "continuation"
+    if mode is not None:
+        from runner_control.native_services import native_policy, registered
+
+        if runner is None:
+            raise ValidationError("Native refresh requires its owned run.")
+        native_policy(owner)
+        if continuation and not registered(owner):
+            raise ValidationError("Continuation requires a registered native intent.")
     expected_authority = repository_authority_state(item.project)
+    expected_revision = item.issue_revision
     repository = None
     comments = None
     fresh = None
@@ -543,7 +632,7 @@ def refresh_issue_for_launch(*, item_id, claim_token, token, runner=None, run_id
         repository = repository_metadata(
             item.project.repository_url, token, item.github_repository_id
         )
-        if "comments" not in item.source_snapshot:
+        if not continuation and "comments" not in item.source_snapshot:
             comments = issue_comments(
                 item.project, item.issue_number, token, repository=repository
             )
@@ -558,6 +647,10 @@ def refresh_issue_for_launch(*, item_id, claim_token, token, runner=None, run_id
             or fresh["issue_id"] != item.github_issue_id
         ):
             raise GitHubAPIError("Issue identity changed; launch is blocked.")
+    elif mode is not None:
+        repository = repository_metadata(
+            item.project.repository_url, token, item.project.github_repository_id
+        )
     return _apply_source_refresh(
         expected_authority=expected_authority,
         project_id=item.project_id,
@@ -568,6 +661,8 @@ def refresh_issue_for_launch(*, item_id, claim_token, token, runner=None, run_id
         comments=comments,
         runner=runner,
         run_id=run_id,
+        mode=mode,
+        expected_revision=expected_revision,
     )
 
 
@@ -589,6 +684,8 @@ def _apply_source_refresh(
     comments,
     runner,
     run_id,
+    mode=None,
+    expected_revision=None,
 ):
     from runner_control.auth import token_digest
     from runner_control.models import Run
@@ -602,7 +699,7 @@ def _apply_source_refresh(
             verify_active(run, claim_token)
             if run.item_id != item_id:
                 raise ValidationError("Run does not own this source item.")
-            if run.item.source == QueueItem.Source.GITHUB:
+            if run.item.source == QueueItem.Source.GITHUB or mode is not None:
                 from runner_control.secrets import secret_document
 
                 selection = dict(
@@ -612,6 +709,14 @@ def _apply_source_refresh(
                     purpose="issue",
                 )
                 secret_document(selection, runner)
+            if mode is not None:
+                from runner_control.native_services import lock_scope, registered
+
+                run, _ = lock_scope(run, claim_token)
+                if mode == "continuation" and not registered(run):
+                    raise ValidationError(
+                        "Continuation requires a registered native intent."
+                    )
         project = Project.objects.select_for_update().get(pk=project_id)
         item = QueueItem.objects.select_for_update().get(pk=item_id)
         if item.project_id != project_id:
@@ -626,7 +731,34 @@ def _apply_source_refresh(
         if runner is not None:
             verify_active(owned_run(runner, run_id), claim_token)
         if item.source == QueueItem.Source.MANUAL:
-            return item.source_snapshot
+            if mode is None:
+                return item.source_snapshot
+            project = accept_repository_observation(
+                project=project, repository=repository, expected=expected_authority
+            )
+            item.project = project
+            reason = branch_wait_reason(item)
+            if reason:
+                raise ValidationError(reason)
+            snapshot = dict(run.source_snapshot)
+            if mode != "continuation":
+                if (
+                    registered(run)
+                    and snapshot.get("repository_id") != repository["repository_id"]
+                ):
+                    raise ValidationError(
+                        "Native source identity is immutable after dispatch."
+                    )
+                snapshot.update(repository_id=repository["repository_id"], comments=[])
+                item.source_snapshot = snapshot
+                item.save(update_fields=["source_snapshot"])
+                run.source_snapshot = snapshot
+                run.save(update_fields=["source_snapshot", "updated_at"])
+            from runner_control.native_services import authorize
+
+            run.item = item
+            authorize(run)
+            return snapshot
         if (
             not repository
             or repository["repository_id"] != item.github_repository_id
@@ -637,7 +769,11 @@ def _apply_source_refresh(
         import_issue(
             project=project,
             repository_id=item.github_repository_id,
-            expected_revision=item.source_snapshot.get("revision"),
+            expected_revision=(
+                expected_revision
+                if mode == "continuation"
+                else item.source_snapshot.get("revision")
+            ),
             **fresh,
         )
         project = accept_repository_observation(
@@ -646,7 +782,22 @@ def _apply_source_refresh(
         item.refresh_from_db()
         item.project = project
         reason = source_wait_reason(item)
-        if fresh["revision"] != item.source_snapshot.get(
+        if mode == "continuation":
+            frozen = run.source_snapshot.get("metadata", run.source_snapshot)
+            if fresh["title"] != frozen.get("title") or fresh["body"] != frozen.get(
+                "body"
+            ):
+                reason = (
+                    reason
+                    or "Issue instructions changed after claim; retry explicitly with refreshed context."
+                )
+            if not reason:
+                from runner_control.native_services import authorize
+
+                run.item = item
+                authorize(run)
+                return run.source_snapshot
+        elif fresh["revision"] != item.source_snapshot.get(
             "revision"
         ) or item.issue_revision != item.source_snapshot.get("revision"):
             reason = (
@@ -665,6 +816,10 @@ def _apply_source_refresh(
                 source_snapshot=item.source_snapshot
             )
         snapshot = item.source_snapshot
+        if mode is not None and not reason:
+            from runner_control.native_services import authorize
+
+            authorize(owned_run(runner, run_id))
     if reason:
         raise ValidationError(reason)
     return snapshot

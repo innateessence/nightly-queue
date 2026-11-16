@@ -45,9 +45,30 @@ class Lifecycle:
             executor_factory,
         )
 
-    def ready(self, configuration):
-        # Native runtime/adapter qualification replaces the retired proposal path.
-        return False
+    def native_engine(self):
+        if not hasattr(self, "_native_engine"):
+            from .native_lifecycle import NativeLifecycle
+
+            self._native_engine = NativeLifecycle(self)
+        return self._native_engine
+
+    def ready(self, configuration, state=None):
+        if state is None:
+            return False
+        try:
+            engine = self.native_engine()
+            allowed = engine.ready(configuration, state)
+            self.claim_project_ids = engine.ready_projects
+            return allowed
+        except (ImportError, OSError, ValueError) as exc:
+            state["native_readiness_error"] = str(exc)[:500]
+            self.journal.save(state)
+            return False
+
+    def suspend_owned(self, state, *, ownership_lost=False):
+        from .native_resources import suspend_owned
+
+        suspend_owned(self.journal, state, ownership_lost=ownership_lost)
 
     def secret(self, run_id, claim_token, purpose, **limits):
         result = self.client.request(
@@ -125,6 +146,17 @@ class Lifecycle:
         if self.stop.is_set():
             return "wait"
         run = state["run"]
+        if (
+            run["run"].get("configuration_snapshot", {}).get("execution_kind")
+            == "native"
+        ):
+            try:
+                engine = self.native_engine()
+            except (ImportError, OSError, ValueError):
+                raise ReconciliationRequired(
+                    "Native task dispatch requires configured isolated executor and validation profiles."
+                ) from None
+            return engine.step(state)
         if run["run"].get("cancellation_requested_at"):
             return self.cancel(state)
         delivery = state.get("delivery") or {}
@@ -136,13 +168,6 @@ class Lifecycle:
             )["status"]
         if state.get("failure"):
             return self.fail(state, state["failure"])
-        if (
-            run["run"].get("configuration_snapshot", {}).get("execution_kind")
-            == "native"
-        ):
-            raise ReconciliationRequired(
-                "Native task dispatch is not installed; legacy proposals cannot execute native work."
-            )
         if not self.checkpoint():
             return "wait"
         context_token = current_tracker.set(ProcessTracker(self.journal, state))

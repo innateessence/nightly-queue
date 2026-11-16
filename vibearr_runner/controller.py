@@ -22,6 +22,16 @@ class ControllerStopped(Exception):
     pass
 
 
+class OwnershipLost(ReconciliationRequired):
+    pass
+
+
+def processing_configuration(configuration):
+    if configuration.get("native_dispatch_available") is True:
+        return {**configuration, "execution_ready": True}
+    return configuration
+
+
 class Controller:
     def __init__(
         self,
@@ -84,7 +94,7 @@ class Controller:
         run_id = state["run"]["run"]["id"]
         remote = self.client.reconcile(run_id)
         if remote["run"]["state"] != "active":
-            raise ReconciliationRequired("Remote run no longer owns execution.")
+            raise OwnershipLost("Remote run no longer owns execution.")
         state["run"]["run"] = remote["run"]
         if remote["run"].get("cancellation_requested_at"):
             self.journal.save(state)
@@ -98,7 +108,10 @@ class Controller:
             )
         )
         decision = self.gates.evaluate(
-            configuration, state, checkpoint="stage", run_id=run_id
+            processing_configuration(configuration),
+            state,
+            checkpoint="stage",
+            run_id=run_id,
         )
         self.check_shutdown()
         self.client.gate_report(decision.data())
@@ -145,6 +158,7 @@ class Controller:
                     "stage",
                     "wait_reason",
                     "request",
+                    "native",
                 ):
                     state.pop(field, None)
                 self.journal.save(state)
@@ -159,11 +173,25 @@ class Controller:
                 configuration["accounts"], ScopedCredentials(self.client)
             )
         )
-        decision = self.gates.evaluate(configuration, state, checkpoint="claim")
+        decision = self.gates.evaluate(
+            processing_configuration(configuration), state, checkpoint="claim"
+        )
         self.check_shutdown()
         self.client.gate_report(decision.data())
         self.check_shutdown()
-        if not decision.allowed or not lifecycle.ready(configuration):
+        native = isinstance(lifecycle, Lifecycle)
+        ready = (
+            lifecycle.ready(configuration, state)
+            if native and decision.allowed
+            else None
+        )
+        if not decision.allowed or not (
+            ready if native else lifecycle.ready(configuration)
+        ):
+            if not decision.allowed:
+                self.suspend_owned(state)
+            elif native and self.maintenance and state.get("native_readiness_error"):
+                self.maintenance.blocked(state, state["native_readiness_error"])
             return "wait"
         self.check_shutdown()
         run_id = str(uuid4())
@@ -172,6 +200,8 @@ class Controller:
             "run_id": run_id,
             "configuration_revision": configuration["revision"],
         }
+        if native:
+            payload["project_ids"] = lifecycle.claim_project_ids
         self.journal.prepare(state, run_id, "claim", payload)
         self.check_shutdown()
         result = self.client.request("POST", "/api/v1/runner/runs/claim/", payload)
@@ -211,10 +241,12 @@ class Controller:
                     else poll
                 )
             except AuthenticationError:
+                self.suspend_owned(state, ownership_lost=True)
                 raise
             except ControllerStopped:
                 return
             except ReconciliationRequired as exc:
+                self.suspend_owned(state, ownership_lost=isinstance(exc, OwnershipLost))
                 state["reconciliation_required"] = str(exc)
                 self.journal.save(state)
                 logger.warning("Execution blocked: %s", exc)
@@ -227,6 +259,7 @@ class Controller:
                         )
                 self.stop.wait(30)
             except APIError as exc:
+                self.suspend_owned(state)
                 if check:
                     raise
                 logger.warning(
@@ -235,6 +268,30 @@ class Controller:
                 )
                 self.stop.wait(delay)
                 delay = min(delay * 2, 60)
+            except JournalError:
+                self.suspend_owned(state, ownership_lost=True)
+                raise
+
+    def suspend_owned(self, state, *, ownership_lost=False):
+        native = state.get("native") or state.get("native_preflight")
+        if not native or self.stop.is_set():
+            return
+        try:
+            lifecycle = self.lifecycle_factory(
+                self.client,
+                self.journal,
+                self.backends,
+                self.checkpoint,
+                stop=self.stop,
+            )
+            if hasattr(lifecycle, "suspend_owned"):
+                lifecycle.suspend_owned(state, ownership_lost=ownership_lost)
+        except Exception as exc:
+            state["native_stop_uncertain"] = str(exc)[:500]
+            self.journal.save(state)
+            logger.warning(
+                "Owned native operations remain fenced: %s", type(exc).__name__
+            )
 
     def check_shutdown(self) -> None:
         if self.stop.is_set():

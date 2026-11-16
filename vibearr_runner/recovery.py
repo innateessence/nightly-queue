@@ -3,7 +3,7 @@ import time
 from typing import Any
 from uuid import UUID
 
-from .client import NotFoundError
+from .client import ConflictError, NotFoundError
 from .journal import Journal, JournalError
 from .processes import ProcessTracker
 from .context import check_deadline
@@ -118,7 +118,14 @@ class RecoveryCoordinator:
         if not isinstance(secret, str) or len(secret) != 64:
             raise ReconciliationRequired("Invalid private controller proof.")
         self.client.controller_secret = secret
-        self.request("POST", "/api/v1/runner/controller/", {})
+        try:
+            self.request("POST", "/api/v1/runner/controller/", {})
+        except ConflictError:
+            from .controller import OwnershipLost
+
+            raise OwnershipLost(
+                "Controller proof no longer owns this runner identity."
+            ) from None
 
     def reconcile(self, state):
         ProcessTracker(self.journal, state).recover()
@@ -162,8 +169,13 @@ class RecoveryCoordinator:
                 )
                 for key, adapter in adapters.items():
                     self.gates.adapters.setdefault(key, adapter)
+                from .controller import processing_configuration
+
                 decision = self.gates.evaluate(
-                    configuration, state, checkpoint="claim", retry_claim_id=run_id
+                    processing_configuration(configuration),
+                    state,
+                    checkpoint="claim",
+                    retry_claim_id=run_id,
                 )
                 self.check_shutdown()
                 self.client.gate_report(decision.data())
@@ -177,7 +189,9 @@ class RecoveryCoordinator:
             self.accept_claim(state, result)
             local = state.get("run")
         if remote_id and (not local or local["run"]["id"] != remote_id):
-            raise ReconciliationRequired(
+            from .controller import OwnershipLost
+
+            raise OwnershipLost(
                 "Remote owned work has no matching local journal; operator recovery is required."
             )
         if not local:
@@ -185,11 +199,13 @@ class RecoveryCoordinator:
         run_id = local["run"]["id"]
         remote = self.remote_run(run_id)
         if remote["run"]["state"] == "obsolete":
+            from .controller import OwnershipLost
+
             state["reconciliation_required"] = (
                 "Ownership is obsolete; execution is fenced."
             )
             self.journal.save(state)
-            raise ReconciliationRequired(state["reconciliation_required"])
+            raise OwnershipLost(state["reconciliation_required"])
         if remote["run"]["state"] == "completed":
             if remote.get("item") and local.get("item", {}).get("claim_token"):
                 remote["item"]["claim_token"] = local["item"]["claim_token"]
@@ -209,6 +225,11 @@ class RecoveryCoordinator:
         remote["item"]["claim_token"] = token
         state["run"] = remote
         state["remote_active_run_id"] = run_id
+        if state.get("native"):
+            if state["native"].get("run_id") != run_id:
+                raise ReconciliationRequired("Native recovery belongs to another run.")
+            self.journal.save(state)
+            return remote
         for stage in ("research", "implementation"):
             session = state.get(stage, {}).get(run_id, {})
             pending = session.get("pending") or {}

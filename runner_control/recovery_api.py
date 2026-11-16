@@ -68,6 +68,9 @@ def cancellation(request, run_id):
                 run.cancellation_requested_at = timezone.now()
                 run.cancellation_reason = reason or "Cancellation requested"
             if confirmed:
+                from .native_services import require_termination
+
+                require_termination(run)
                 run.cancellation_confirmed_at = (
                     run.cancellation_confirmed_at or timezone.now()
                 )

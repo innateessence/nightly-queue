@@ -6,9 +6,10 @@ events, and reconciles that same operation after a supervisor restart. The
 supervisor retains GitHub credentials and delivery permissions.
 
 This adapter is separate from the historical Responses API proposal transport.
-It does not enable the queue lifecycle or publish changes by itself. The native
-lifecycle connects sessions to source refresh, validation, and delivery; the
-validation profile remains an independent, credential-free operation.
+The native queue lifecycle connects sessions to source refresh, independent
+validation, and supervisor-owned GitHub delivery. The validation profile remains
+an independent, credential-free operation. See [unattended execution](native-queue.md)
+for deployment and recovery.
 
 ## Image and profiles
 

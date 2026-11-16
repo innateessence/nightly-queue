@@ -21,6 +21,8 @@ REQUIRED_CHECKS = {
     "credential-free-setup",
     "credential-and-receipt-isolation",
     "pid-exhaustion-stop",
+    "pause-resume-deadline",
+    "terminal-retention",
 }
 
 
@@ -98,6 +100,7 @@ def capabilities(runtime: Runtime) -> dict:
         "protocol_version": PROTOCOL_VERSION,
         "qualification_version": QUALIFICATION_VERSION,
         "runtime": "docker-oci-v1",
+        "instance_id": runtime.instance,
         "qualified": qualified,
         "accepting_work": qualified and capacity_ok,
         "storage": {

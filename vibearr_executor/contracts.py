@@ -22,6 +22,14 @@ class Conflict(Rejected):
     pass
 
 
+class ArtifactRemoved(Conflict):
+    pass
+
+
+class NotFound(Rejected):
+    pass
+
+
 def canonical(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 

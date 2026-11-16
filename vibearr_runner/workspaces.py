@@ -161,9 +161,12 @@ class WorkspaceManager:
         *,
         trusted_local_root: Path | None = None,
         remote_git=None,
+        require_new_branch=False,
     ):
         self.directory = private_directory(directory)
         self.remote_git = remote_git
+        self.require_new_branch = require_new_branch
+        self.resume_clone = False
         self.trusted_local_root = (
             trusted_local_root.resolve() if trusted_local_root else None
         )
@@ -219,7 +222,7 @@ class WorkspaceManager:
                 workspace.verify()
                 return workspace
             checkout = directory / "checkout"
-            if checkout.exists():
+            if checkout.exists() and not self.resume_clone:
                 raise WorkspaceError(
                     "An incomplete checkout requires operator recovery."
                 )
@@ -232,10 +235,11 @@ class WorkspaceManager:
                 repository,
                 str(checkout),
             ]
-            if self.remote_git is not None and not local:
-                self.remote_git(arguments)
-            else:
-                git(arguments, local=local)
+            if not checkout.exists():
+                if self.remote_git is not None and not local:
+                    self.remote_git(arguments)
+                else:
+                    git(arguments, local=local)
             resolved = base
             if not resolved:
                 symbolic = git(["symbolic-ref", "refs/remotes/origin/HEAD"], checkout)
@@ -270,6 +274,10 @@ class WorkspaceManager:
                 ).returncode
                 == 0
             )
+            if existing and self.require_new_branch:
+                raise WorkspaceError(
+                    "An existing remote task branch requires publication reconciliation."
+                )
             start = "refs/remotes/origin/" + (branch if existing else resolved)
             current = git(["symbolic-ref", "--short", "HEAD"], checkout)
             if current == branch:

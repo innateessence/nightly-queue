@@ -58,9 +58,11 @@ def history(request):
 @require_GET
 def detail(request, run_id):
     run = get_object_or_404(Run.objects.select_related("item"), pk=run_id)
+    native_run = run.configuration_snapshot.get("execution_kind") == "native"
     reason = ""
     try:
-        valid_handoff(run)
+        if not native_run:
+            valid_handoff(run)
     except RunConflict as exc:
         reason = str(exc)
     except ValidationError:
@@ -91,6 +93,7 @@ def detail(request, run_id):
         "runner_control/plan_detail.html",
         {
             "run": present_run(run),
+            "native_run": native_run,
             "contexts": contexts,
             "plans": plans,
             "handoff_reason": reason if reason is not None else reason_error,

@@ -131,6 +131,9 @@ class DistributionArtifactTests(unittest.TestCase):
 import importlib.metadata
 from vibearr_runner.native_runtime import runtime_diagnostics
 from vibearr_runner.policy import default_execution_policy
+import vibearr_runner.native_contract, coding_runner.native_contract
+assert vibearr_runner.native_contract is coding_runner.native_contract
+assert vibearr_runner.native_contract.status_document(sequence=1, stage='waiting')['sequence'] == 1
 requirements = importlib.metadata.requires('vibearr-runner') or []
 assert any('vibearr-executor' in value and 'native-runtime' in value for value in requirements)
 result = runtime_diagnostics(default_execution_policy())
