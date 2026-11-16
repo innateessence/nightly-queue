@@ -1,8 +1,11 @@
 from django.urls import path
 
-from . import api
+from . import api, configuration_api
 
 urlpatterns = [
+    path(
+        "configuration/", configuration_api.configuration, name="runner_configuration"
+    ),
     path("identity/", api.identity, name="runner_identity"),
     path("runs/claim/", api.claim, name="runner_claim"),
     path("runs/active/", api.active, name="runner_active"),
