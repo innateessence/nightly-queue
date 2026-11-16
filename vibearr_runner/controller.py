@@ -190,6 +190,8 @@ class Controller:
         ):
             if not decision.allowed:
                 self.suspend_owned(state)
+            elif native and self.maintenance and state.get("native_readiness_error"):
+                self.maintenance.blocked(state, state["native_readiness_error"])
             return "wait"
         self.check_shutdown()
         run_id = str(uuid4())

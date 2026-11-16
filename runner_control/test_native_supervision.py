@@ -8,7 +8,12 @@ from django.urls import reverse
 from coding_runner.test_native_delivery import GitHub, Transport
 from coding_runner import test_native_lifecycle as lifecycle_fixture
 from credentials.test_models import TEST_KEY
-from vibearr_runner.client import APIError, ConflictError, NotFoundError
+from vibearr_runner.client import (
+    APIError,
+    AmbiguousRequest,
+    ConflictError,
+    NotFoundError,
+)
 from vibearr_runner.native_delivery import NativeDelivery
 from vibearr_runner.native_lifecycle import NativeLifecycle
 from vibearr_runner.recovery import ReconciliationRequired
@@ -35,6 +40,9 @@ class APIBridge:
             )
             raise error(str(response.json()))
         return response.json()
+
+    def reconcile(self, identity):
+        return self.request("GET", f"/api/v1/runner/runs/{identity}/")
 
 
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
@@ -87,8 +95,7 @@ class NativeSupervisionTests(NativeProtocolMixin, TestCase):
             self.engine().step(self.state)
         self.fail("Native supervisor did not reach " + phase)
 
-    def test_supervisor_receipts_finish_through_real_machine_api(self):
-        self.run_to("delivery")
+    def publication_clients(self):
         github, transport = GitHub(), Transport()
         repository = self.item.repository_url.removeprefix(
             "https://github.com/"
@@ -102,8 +109,16 @@ class NativeSupervisionTests(NativeProtocolMixin, TestCase):
             },
             {},
         )
+        return github, transport
+
+    def test_supervisor_receipts_finish_through_real_machine_api(self):
+        self.run_to("delivery")
+        github, transport = self.publication_clients()
         with patch.object(NativeDelivery, "clients", return_value=(github, transport)):
-            self.assertEqual(self.engine().step(self.state), "reporting_pending")
+            for _ in range(4):
+                self.state = self.journal.load()
+                result = self.engine().step(self.state)
+            self.assertEqual(result, "reporting_pending")
         self.run.refresh_from_db()
         self.assertEqual(self.run.result_status, "succeeded")
         self.assertEqual(self.run.native_outcome, "delivered")
@@ -113,6 +128,38 @@ class NativeSupervisionTests(NativeProtocolMixin, TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Native session")
         self.assertNotContains(response, "Every command still requires")
+
+    def test_restart_after_lost_finish_response_reuses_frozen_termination(self):
+        self.run_to("delivery")
+        github, transport = self.publication_clients()
+        with patch.object(NativeDelivery, "clients", return_value=(github, transport)):
+            for _ in range(3):
+                self.engine().step(self.state)
+        self.assertEqual(
+            self.state["native"]["delivery"]["checkpoint"], "reporting_pending"
+        )
+        frozen = self.state["native"]["metadata"]["termination"]["payload"]
+        processes = len(self.state.get("processes", {}))
+        original = self.host.client.request
+
+        def lose_finish(method, path, payload=None):
+            result = original(method, path, payload)
+            if path.endswith("/finish/"):
+                raise AmbiguousRequest("Fixture lost committed finish response")
+            return result
+
+        self.state = self.journal.load()
+        with patch.object(self.host.client, "request", side_effect=lose_finish):
+            with self.assertRaises(AmbiguousRequest):
+                self.engine().step(self.state)
+        self.state = self.journal.load()
+        self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.assertEqual(
+            self.state["native"]["metadata"]["termination"]["payload"], frozen
+        )
+        self.assertEqual(len(self.state.get("processes", {})), processes)
+        self.assertEqual(github.creates, 1)
+        self.assertEqual(self.run.evidence.filter(kind="native_termination").count(), 1)
 
     def test_unknown_cancellation_cannot_release_claim_through_api(self):
         self.run_to("import_candidate")

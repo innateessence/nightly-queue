@@ -106,6 +106,11 @@ class NativeDelivery:
         )
 
     def step(self):
+        if self.data.get(
+            "checkpoint"
+        ) == "reporting_pending" or "termination" in self.native.get("metadata", {}):
+            self.host.terminate()
+            return self.report()
         if not self.host.checkpoint(force_source=True):
             return "wait"
         self.verify()
@@ -142,6 +147,10 @@ class NativeDelivery:
         self.data["pushed_sha"] = commit
         self.host.save()
         self.fact(workspace)
+        if not self.data.get("checkpoint"):
+            self.data["checkpoint"] = "pushed"
+            self.host.save()
+            return "continue"
         pull = github.find_native(
             workspace["repository"],
             workspace["branch"],
@@ -186,12 +195,35 @@ class NativeDelivery:
         self.data["pull_request"] = pull
         self.host.save()
         self.fact(workspace, pull=pull)
+        if self.data.get("checkpoint") == "pushed":
+            self.data["checkpoint"] = "pr_verified"
+            self.host.save()
+            return "continue"
         self.verify()
         evidence = self.evidence(workspace, pull)
         self.host.artifact("verified_delivery", evidence, "verified-delivery")
         self.host.terminate()
-        if not self.host.checkpoint(force_source=True):
-            return "wait"
+        self.data["checkpoint"] = "reporting_pending"
+        self.host.save()
+        return "continue"
+
+    def report(self):
+        pull = self.data["pull_request"]
+        remote = self.host.client.reconcile(self.host.run_id)["run"]
+        if remote["state"] == "completed":
+            if (
+                remote["result_status"] != "succeeded"
+                or remote["result_url"] != pull["url"]
+                or remote.get("native_outcome") != "delivered"
+            ):
+                raise ReconciliationRequired(
+                    "Recorded completion conflicts with the original native delivery."
+                )
+            return "reporting_pending"
+        if remote["state"] != "active":
+            raise ReconciliationRequired(
+                "Native publication no longer owns its completion record."
+            )
         self.host.status(
             "delivery", detail=pull["url"], validation_status="passed", force=True
         )

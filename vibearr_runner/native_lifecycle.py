@@ -64,6 +64,14 @@ class NativeLifecycle:
 
     def ready(self, configuration, state):
         self.ready_projects = self.preflight.select(configuration, state)
+        reports = state.get("native_preflight", {}).get("projects", {})
+        reasons = [
+            value["reason"] for value in reports.values() if not value.get("ready")
+        ]
+        state["native_readiness_error"] = (
+            "; ".join(dict.fromkeys(reasons))[:500] if not self.ready_projects else ""
+        )
+        self.journal.save(state)
         return bool(self.ready_projects)
 
     def save(self):
@@ -112,6 +120,23 @@ class NativeLifecycle:
             if reconciliation:
                 raise ReconciliationRequired(reason) from None
             raise NativeFailure(reason) from None
+
+    def refresh_source(self, mode):
+        try:
+            return self.client.request(
+                "POST",
+                f"/api/v1/runner/runs/{self.run_id}/source/refresh/",
+                {
+                    "claim_token": self.token,
+                    "mode": mode,
+                },
+            )
+        except APIError as exc:
+            if type(exc) is APIError or isinstance(exc, ConflictError):
+                raise NativeFailure(
+                    "Current source authority rejected this frozen attempt; stop and retry explicitly."
+                ) from None
+            raise
 
     def status(
         self,
@@ -266,14 +291,7 @@ class NativeLifecycle:
                         or "Current native runtime is unavailable."
                     )
             mode = "continuation" if self.native.get("intents") else "initial"
-            response = self.client.request(
-                "POST",
-                f"/api/v1/runner/runs/{self.run_id}/source/refresh/",
-                {
-                    "claim_token": self.token,
-                    "mode": mode,
-                },
-            )
+            response = self.refresh_source(mode)
             if response.get("eligible") is not True:
                 raise NativeFailure(
                     response.get("reason")
@@ -356,6 +374,11 @@ class NativeLifecycle:
                 self.native["outcome"] = "canceled"
                 self.save()
                 return self.finish_failure()
+            metadata = self.native.get("metadata", {})
+            if "termination" in metadata and metadata.get("verified-delivery", {}).get(
+                "acknowledged"
+            ):
+                return self.delivery()
             if not self.local_checkpoint():
                 if self.host.stop.is_set():
                     return "wait"
@@ -398,14 +421,7 @@ class NativeLifecycle:
         from .native_validation import CandidateSource
 
         self.status("context", force=True)
-        source_response = self.client.request(
-            "POST",
-            f"/api/v1/runner/runs/{self.run_id}/source/refresh/",
-            {
-                "claim_token": self.token,
-                "mode": "initial",
-            },
-        )
+        source_response = self.refresh_source("initial")
         if source_response.get("eligible") is not True:
             raise NativeFailure(
                 source_response.get("reason") or "Source is not eligible."
@@ -982,6 +998,11 @@ class NativeLifecycle:
 
     def terminate(self):
         from .native_contract import termination_record, intent_operations
+
+        prepared = self.native.get("metadata", {}).get("termination")
+        if prepared:
+            self.artifact("native_termination", prepared["payload"], "termination")
+            return
 
         ProcessTracker(self.journal, self.state).recover()
         observations = self.resources.reconcile(self.run_id, self.executor, stop=True)

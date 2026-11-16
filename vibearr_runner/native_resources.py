@@ -1,6 +1,7 @@
 """Private native resource references survive workspace and log retention separately."""
 
 import json
+import hashlib
 from pathlib import Path
 from uuid import UUID
 
@@ -111,17 +112,20 @@ class NativeResources:
         self.save(value)
 
     def verify_dispatched(self, run_id, executor):
-        from vibearr_executor.client import ExecutorRejected
-
         value = self.load(run_id)
         self.bind(run_id, executor)
         for identity in value.get("dispatched", {}):
+            if callable(getattr(executor, "termination_receipt", None)):
+                self.verify_presence(value, identity, executor)
+                continue
             observed = executor.status(identity)
             if observed.get("state") == "not-started":
                 raise ReconciliationRequired(
                     "A dispatched native operation is missing or unconfirmed; never recreate its record."
                 )
         for identity in value.get("dispatched_builds", {}):
+            from vibearr_executor.client import ExecutorRejected
+
             try:
                 executor.dependencies(identity, "status")
             except ExecutorRejected as exc:
@@ -130,6 +134,34 @@ class NativeResources:
                         "A dispatched dependency build record is missing; retain ownership."
                     ) from None
                 raise
+
+    def verify_presence(self, value, identity, executor):
+        from vibearr_executor.client import ExecutorRejected
+
+        try:
+            receipt = executor.termination_receipt(identity)
+        except ExecutorRejected as exc:
+            if exc.http_status == 404:
+                raise ReconciliationRequired(
+                    "A dispatched native record is missing; retain unknown ownership."
+                ) from None
+            raise
+        manifest = value["operations"][identity]["manifest"]
+        expected = {
+            "schema_version": 1,
+            "instance_id": value["instance_id"],
+            "operation_id": identity,
+            "run_id": value["run_id"],
+            "manifest_digest": hashlib.sha256(
+                json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+        }
+        if any(receipt.get(key) != entry for key, entry in expected.items()):
+            raise ReconciliationRequired(
+                "Native presence receipt differs from its frozen executor state/run/manifest."
+            )
+        if receipt.get("state") not in {"not-started", "running", "exited", "unknown"}:
+            raise ReconciliationRequired("Native presence receipt state is invalid.")
 
     def reconcile(self, run_id, executor, *, stop=False):
         self.bind(run_id, executor)

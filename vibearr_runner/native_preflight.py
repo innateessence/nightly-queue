@@ -65,6 +65,7 @@ class NativePreflight:
         ):
             raise NativeSessionError("Source candidate identities are invalid.")
         data = state.setdefault("native_preflight", {"accounts": {}, "projects": {}})
+        data["projects"] = {}
         self.settle_pending(data, state, configuration)
         self.controls_owned(state, pause=False)
         ready = []
@@ -99,6 +100,7 @@ class NativePreflight:
                     model,
                     policy.runtime_profile,
                     capabilities.get("binding_digest"),
+                    capabilities.get("instance_id"),
                 ]
                 key = hashlib.sha256(json.dumps(key_data).encode()).hexdigest()
                 entry = data["accounts"].setdefault(key, {})

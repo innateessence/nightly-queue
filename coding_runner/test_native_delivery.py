@@ -138,7 +138,10 @@ class Host:
         self.records = {}
         self.finishes = 0
         self.fail_finish = False
-        self.client = SimpleNamespace(request=self.request)
+        self.client = SimpleNamespace(
+            request=self.request,
+            reconcile=lambda identity: {"run": {"state": "active"}},
+        )
 
     def save(self):
         pass
@@ -195,12 +198,19 @@ class NativePublicationTests(unittest.TestCase):
         self.addCleanup(clients.stop)
         self.addCleanup(verify.stop)
 
+    def complete(self):
+        for _ in range(8):
+            result = NativeDelivery(self.host).step()
+            if result == "reporting_pending":
+                return result
+        self.fail("Publication did not reach completion reporting")
+
     def test_lost_push_response_reconciles_the_same_ref_without_another_push(self):
         self.git.lose_push = True
         with self.assertRaises(ReconciliationRequired):
-            NativeDelivery(self.host).step()
+            self.complete()
         publication = self.host.native["delivery"]["publication_id"]
-        self.assertEqual(NativeDelivery(self.host).step(), "reporting_pending")
+        self.assertEqual(self.complete(), "reporting_pending")
         self.assertEqual(self.git.pushes, 1)
         self.assertEqual(self.github.creates, 1)
         self.assertEqual(self.host.native["delivery"]["publication_id"], publication)
@@ -208,18 +218,18 @@ class NativePublicationTests(unittest.TestCase):
     def test_lost_pr_response_reconciles_the_same_pr_without_another_create(self):
         self.github.lose_create = True
         with self.assertRaises(ReconciliationRequired):
-            NativeDelivery(self.host).step()
-        self.assertEqual(NativeDelivery(self.host).step(), "reporting_pending")
+            self.complete()
+        self.assertEqual(self.complete(), "reporting_pending")
         self.assertEqual(self.github.creates, 1)
         self.assertEqual(self.git.pushes, 1)
 
     def test_invisible_unknown_pr_keeps_claim_ownership(self):
         self.github.lose_create = True
         with self.assertRaises(ReconciliationRequired):
-            NativeDelivery(self.host).step()
+            self.complete()
         self.github.pull_request = None
         with self.assertRaises(ReconciliationRequired):
-            NativeDelivery(self.host).step()
+            self.complete()
         with self.assertRaises(ReconciliationRequired):
             NativeDelivery(self.host).reconcile_publications()
         self.assertEqual(self.github.creates, 1)
@@ -230,7 +240,7 @@ class NativePublicationTests(unittest.TestCase):
     ):
         self.github.lose_create = True
         with self.assertRaises(ReconciliationRequired):
-            NativeDelivery(self.host).step()
+            self.complete()
         result = NativeDelivery(self.host).reconcile_publications()
         self.assertTrue(all(value["state"] == "known_pr" for value in result))
         fact = self.host.records["publication-fact:pr"][1]
@@ -240,8 +250,8 @@ class NativePublicationTests(unittest.TestCase):
     def test_lost_finish_response_does_not_repeat_publication(self):
         self.host.fail_finish = True
         with self.assertRaises(AmbiguousRequest):
-            NativeDelivery(self.host).step()
-        self.assertEqual(NativeDelivery(self.host).step(), "reporting_pending")
+            self.complete()
+        self.assertEqual(self.complete(), "reporting_pending")
         self.assertEqual(self.github.creates, 1)
         self.assertEqual(self.git.pushes, 1)
 
@@ -250,5 +260,5 @@ class NativePublicationTests(unittest.TestCase):
             17, "owner/repo", "task/native", "main", "c" * 40, "External", ""
         )
         with self.assertRaisesRegex(ReconciliationRequired, "unowned"):
-            NativeDelivery(self.host).step()
+            self.complete()
         self.assertEqual(self.host.finishes, 0)
