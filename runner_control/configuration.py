@@ -249,14 +249,22 @@ def _configuration_document(saved):
             if reference in credentials
         ],
         "execution_ready": False,
-        "readiness_reason": "Live execution requires controlled release verification; structural validity grants no execution permission.",
+        "readiness_reason": "Native adapter and dispatch qualification are not installed.",
     }
     document["execution_kind"] = "native"
     document["delivery_contract"] = native_evidence_contract()
     document["release_verification"] = {
         "qualified": False,
         "execution_kind": "native",
-        "reason": "Native runtime and backend qualification are not installed. Legacy proposal execution is disabled.",
+        "reason": "Native adapter and dispatch are not installed. Qualify the installed OCI executor independently; legacy proposal execution is disabled.",
+    }
+    document["runtime_contract"] = {
+        "schema_version": 1,
+        "runtime": "docker-oci-v1",
+        "protocol_version": 1,
+        "qualification_version": 1,
+        "qualification_source": "authenticated_executor_capabilities",
+        "requires_production_run": False,
     }
     document["readiness_reason"] = document["release_verification"]["reason"]
     encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()

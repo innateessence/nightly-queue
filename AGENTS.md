@@ -6,10 +6,11 @@
 - `projects/` owns project configuration; `credentials/` owns encrypted secrets and settings views.
 - `runner_control/` owns scoped machine APIs, configuration, immutable context/plans, approvals, recovery, retention, release evidence, operator views, and its migrations.
 - `vibearr_runner/` is the independent standard-library supervisor, backends, workspaces, execution boundaries, Git delivery, recovery, private logs, and cleanup. `coding_runner/` preserves compatibility imports and tests. `coding_runner/acceptance/` intentionally has no `__init__.py`; explicit Git/OS acceptance does not require Git in the Django application image.
+- `vibearr_executor/` is the independent standard-library trusted OCI service and authenticated client. Only the executor host has Docker engine access; registered profiles and generated per-operation inputs stay outside candidate checkouts.
 - App templates and static assets live under each app's `templates/` and `static/` directories; shared navigation is in `templates/base.html`.
 - `vibearr_app/` contains settings, root routing, ASGI/WSGI, and Celery configuration.
 - `vibearr/` is the standalone CLI; `nq/` preserves compatibility imports and tests. It remains a standalone standard-library HTTP CLI, independent of Django, runner code, and database access.
-- Tests live beside their app or runtime module. Run explicit deployment boundary checks with `python -m vibearr_runner.verify --boundary`; unsupported namespaces fail qualification.
+- Tests live beside their app or runtime module. Run deployment boundary checks on the executor host with `python -m vibearr_runner.verify --boundary --executor-image sha256:<id> --database-image sha256:<id>`; unsupported controls fail qualification. See `docs/isolated-executor.md`.
 
 ## Build, Test, and Development Commands
 

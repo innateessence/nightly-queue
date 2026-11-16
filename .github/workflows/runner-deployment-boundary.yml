@@ -3,11 +3,11 @@ name: Runner deployment boundary qualification
 on:
   workflow_dispatch:
     inputs:
-      image:
-        description: 'Approved runner image at an immutable sha256 digest'
+      executor_image:
+        description: 'Installed immutable task image ID (sha256:...) on the executor host'
         required: true
-      policy_artifact:
-        description: 'Absolute path of the reviewed Compose deployment overlay on this runner'
+      database_image:
+        description: 'Installed immutable PostgreSQL 17 image ID (sha256:...)'
         required: true
 
 permissions:
@@ -18,29 +18,19 @@ jobs:
     runs-on: [self-hosted, runner-deployment-qualification]
     timeout-minutes: 20
     steps:
-      - name: Verify the exact reviewed deployment
+      - name: Check out trusted executor source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Qualify actual installed OCI runtime on its host
         env:
-          RUNNER_IMAGE: ${{ inputs.image }}
-          RUNNER_POLICY: ${{ inputs.policy_artifact }}
+          EXECUTOR_IMAGE: ${{ inputs.executor_image }}
+          DATABASE_IMAGE: ${{ inputs.database_image }}
         run: |
-          case "$RUNNER_IMAGE" in *@sha256:*) ;; *) echo 'Immutable image digest required'; exit 1;; esac
-          test -f "$RUNNER_POLICY"
-          deployment_config=$(mktemp)
-          docker compose -f "$RUNNER_POLICY" config --format json > "$deployment_config"
-          python3 -c 'import json,os,sys; config=json.load(open(sys.argv[1])); assert config["services"]["vibearr-runner"]["image"] == os.environ["RUNNER_IMAGE"]' "$deployment_config"
-          rm "$deployment_config"
-          mkdir -p "$RUNNER_TEMP/runner-boundary"
-          chmod 0777 "$RUNNER_TEMP/runner-boundary"
-          policy_digest=$(sha256sum "$RUNNER_POLICY" | cut -d ' ' -f 1)
-          docker compose -f "$RUNNER_POLICY" run --rm --no-deps --entrypoint python \
-            --volume "$RUNNER_TEMP/runner-boundary:/qualification-output" \
-            -e VIBEARR_RUNNER_IMAGE_DIGEST="${RUNNER_IMAGE##*@}" \
-            -e VIBEARR_RUNNER_SANDBOX_POLICY_DIGEST="$policy_digest" \
-            -e VIBEARR_RUNNER_SOURCE_REVISION="$GITHUB_SHA" \
-            vibearr-runner -m vibearr_runner.verify --boundary --evidence /qualification-output/runner-boundary.json
-          docker compose -f "$RUNNER_POLICY" run --rm --no-deps --entrypoint cat \
-            --volume "$RUNNER_TEMP/runner-boundary:/qualification-output:ro" \
-            vibearr-runner /qualification-output/runner-boundary.json > "$RUNNER_TEMP/runner-boundary.json"
+          python3.12 -m vibearr_runner.verify --boundary \
+            --executor-image "$EXECUTOR_IMAGE" --database-image "$DATABASE_IMAGE" \
+            --executor-state "$RUNNER_TEMP/vibearr-oci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --evidence "$RUNNER_TEMP/runner-boundary.json"
       - name: Upload actual deployment boundary evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -48,11 +38,3 @@ jobs:
           path: ${{ runner.temp }}/runner-boundary.json
           if-no-files-found: error
           retention-days: 7
-      - name: Record qualification scope
-        env:
-          RUNNER_IMAGE: ${{ inputs.image }}
-          RUNNER_POLICY: ${{ inputs.policy_artifact }}
-        run: |
-          printf '%s\n' "$RUNNER_IMAGE"
-          sha256sum "$RUNNER_POLICY"
-          uname -r

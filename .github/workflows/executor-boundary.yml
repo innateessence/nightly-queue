@@ -1,0 +1,40 @@
+name: Executor boundary
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: Qualify OCI executor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Test portable executor contracts
+        run: python3.12 -m unittest discover -s vibearr_executor -t . -v
+      - name: Build pinned runtime and install pinned disposable database
+        run: |
+          docker build -f vibearr_executor/Dockerfile -t vibearr-ci-executor .
+          docker pull postgres:17@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
+      - name: Exercise actual OCI execution and restart boundary
+        run: |
+          task_image=$(docker image inspect vibearr-ci-executor --format '{{.Id}}')
+          database_image=$(docker image inspect postgres:17@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f --format '{{.Id}}')
+          python3.12 -m vibearr_runner.verify --boundary \
+            --executor-image "$task_image" --database-image "$database_image" \
+            --executor-state "$RUNNER_TEMP/executor-state" --evidence "$RUNNER_TEMP/executor-boundary.json"
+      - name: Upload runtime qualification evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: executor-boundary
+          path: ${{ runner.temp }}/executor-boundary.json
+          if-no-files-found: error
+          retention-days: 7

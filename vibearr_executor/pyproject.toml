@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vibearr-executor"
+version = "0.1.0"
+description = "Trusted standalone OCI executor and authenticated supervisor client"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+vibearr-executor = "vibearr_executor.server:main"
+vibearr-qualify-runtime = "vibearr_executor.qualify:main"
+
+[tool.setuptools]
+packages = ["vibearr_executor"]
+package-dir = {vibearr_executor = "."}
+
+[tool.setuptools.package-data]
+vibearr_executor = ["Dockerfile"]
