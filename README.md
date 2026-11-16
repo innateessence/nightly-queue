@@ -337,3 +337,5 @@ mypy . --config-file mypy.ini
 pull requests; see [the workflow](.github/workflows/test.yml).
 
 The optional read-only runner supervisor is documented in [runner service setup](docs/runner-service.md). Execution remains disabled pending the controlled release checks.
+
+Processing schedule, allowance adapter, durable counter, and gate evidence contracts are documented in [runner execution gates](docs/runner-execution-gates.md). Live execution remains disabled.

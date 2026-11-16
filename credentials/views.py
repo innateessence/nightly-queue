@@ -1,9 +1,12 @@
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from runner_control.configuration import configuration_document
 from runner_control.settings_forms import RunnerSettingsForm
 from runner_control.settings_models import RunnerSettings
+from runner_control.gate_models import RunnerGateEvidence
 from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_http_methods
@@ -36,10 +39,21 @@ def api_settings(request):
         saved.save(update_fields=fields)
         messages.success(request, "Settings saved.")
         return redirect("api_settings")
+    configuration = configuration_document()
+    gate_evidence = list(
+        RunnerGateEvidence.objects.select_related("runner").order_by("runner__name")
+    )
+    for evidence in gate_evidence:
+        next_check = parse_datetime(evidence.report["next_check_at"])
+        evidence.stale = next_check is None or next_check <= timezone.now()
+        evidence.configuration_changed = (
+            evidence.report["configuration_revision"] != configuration["revision"]
+        )
     context = {
         "form": form,
         "runner_form": runner_form,
-        "runner_configuration": configuration_document(),
+        "runner_configuration": configuration,
+        "runner_gate_evidence": gate_evidence,
     }
     return render(request, "credentials/settings.html", context)
 
