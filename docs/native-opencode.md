@@ -126,8 +126,9 @@ docker run --rm --network none --read-only --cap-drop ALL \
   -I -m vibearr_executor.opencode_smoke
 ```
 
-This inspects actual version, help and effective configuration using a dummy key;
-it makes no provider request and reports authentication/task acceptance false.
+This inspects actual version, help and effective configuration using a dummy key,
+and verifies missing selected material fails before CLI launch. It makes no
+provider request and reports authentication/task acceptance false.
 Portable tests cover shared adapter conformance, parsing/limits, selected auth,
 provider/model failure, lost replies/reconnect, cancellation, token units and the
 fixed launch boundary. The Codex implementation stays unchanged.
