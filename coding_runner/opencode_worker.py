@@ -35,10 +35,18 @@ def main() -> None:
         suffix = "/chat" if provider == "ollama" else "/chat/completions"
         if provider == "anthropic":
             suffix = "/messages"
+        probing = data.get("operation") == "probe"
+        path = parsed.path.rstrip("/") + suffix
+        if probing:
+            path = parsed.path.rstrip("/") + (
+                "/tags" if provider == "ollama" else "/models"
+            )
+            if provider == "opencode":
+                path = "/inference/v1/models"
         connection.request(
-            "POST",
-            parsed.path.rstrip("/") + suffix,
-            json.dumps(data["request"]),
+            "GET" if probing else "POST",
+            path,
+            None if probing else json.dumps(data["request"]),
             headers,
         )
         response = connection.getresponse()
@@ -51,7 +59,31 @@ def main() -> None:
         raw = response.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES:
             raise ValueError
-        print(json.dumps({"response": json.loads(raw)}))
+        value = json.loads(raw)
+        if probing:
+            rows = value.get("models" if provider == "ollama" else "data", [])
+            names = {
+                (
+                    row.get("name", row.get("model"))
+                    if provider == "ollama"
+                    else row.get("id")
+                )
+                for row in rows
+                if isinstance(row, dict)
+            }
+            model = data.get("model")
+            available = model in names or (
+                provider == "ollama"
+                and isinstance(model, str)
+                and model + ":latest" in names
+            )
+            print(
+                json.dumps(
+                    {"probe": {"authenticated": True, "model_available": available}}
+                )
+            )
+            return
+        print(json.dumps({"response": value}))
     except Exception:
         print(json.dumps({"error": "transport"}))
     finally:

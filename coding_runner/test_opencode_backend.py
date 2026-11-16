@@ -224,6 +224,17 @@ class ConnectionTests(unittest.TestCase):
         ):
             self.assertFalse(valid_model(model))
 
+    def test_matching_native_version_still_cannot_grant_execution(self):
+        result = SimpleNamespace(returncode=0, stdout=b"1.19.5\n")
+        with patch(
+            "coding_runner.opencode_backend.subprocess.run", return_value=result
+        ) as probe:
+            value = probe_opencode("/trusted/opencode")
+        self.assertTrue(value["version_matches"])
+        self.assertFalse(value["ready"])
+        self.assertFalse(value["native_tools_supported"])
+        self.assertEqual(probe.call_args.args[0], ["/trusted/opencode", "--version"])
+
     def test_native_cli_probe_never_grants_execution(self):
         result = probe_opencode("/tmp/does-not-exist-opencode")
         self.assertFalse(result["ready"])
@@ -284,6 +295,12 @@ class InferenceServer(ThreadingHTTPServer):
 class InferenceHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
+
+    def do_GET(self):
+        self.server.calls.append((self.path, dict(self.headers), None))
+        self.send_response(self.server.status)
+        self.end_headers()
+        self.wfile.write(json.dumps(self.server.value).encode())
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -368,6 +385,22 @@ class WorkerHTTPTests(unittest.TestCase):
         with self.assertRaises(BackendInterrupted):
             self.run_model(checkpoint=checkpoint)
         self.assertIsNone(self.backend.transport.process)
+
+    def test_nonbillable_probe_requires_installed_model(self):
+        self.server.value = {"models": [{"name": "qwen3-coder:30b"}]}
+        account = {**ACCOUNT, "model": "qwen3-coder:30b"}
+        self.assertTrue(self.backend.probe_authentication(account))
+        self.assertEqual(self.server.calls[0][0], "/api/tags")
+        self.assertIsNone(self.server.calls[0][2])
+        self.assertFalse(
+            self.backend.probe_authentication({**account, "model": "missing:latest"})
+        )
+
+    def test_nonbillable_probe_rejects_failed_authentication(self):
+        self.server.status = 401
+        self.assertFalse(
+            self.backend.probe_authentication({**ACCOUNT, "model": "qwen3-coder:30b"})
+        )
 
     def test_worker_command_is_trusted_and_isolated(self):
         command = OpenCodeProcessTransport().command()

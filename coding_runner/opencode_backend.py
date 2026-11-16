@@ -152,6 +152,26 @@ class OpenCodeBackend:
             CAPABILITIES,
         )
 
+    def probe_authentication(self, account: dict[str, Any]) -> bool:
+        if not valid_model(account.get("model")):
+            return False
+        try:
+            connection = self._connection(account)
+            value = self.transport.exchange(
+                {
+                    "operation": "probe",
+                    "connection": connection,
+                    "model": account["model"],
+                    "timeout": 5,
+                },
+                timeout=6,
+                checkpoint=lambda: True,
+                stop=threading.Event(),
+            )
+            return value == {"probe": {"authenticated": True, "model_available": True}}
+        except BackendError:
+            return False
+
     def read_usage(self, account: dict[str, Any], now: datetime) -> UsageReading:
         # Message token counts and rate limits do not establish remaining account allowance.
         return UsageReading(supported=False)

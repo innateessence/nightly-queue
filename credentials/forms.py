@@ -123,6 +123,13 @@ class CredentialForm(forms.ModelForm):
                 value["base_url"] = data["connection_endpoint"]
             if data.get("connection_api_key"):
                 value["api_key"] = data["connection_api_key"]
+            from coding_runner.opencode_connection import validate_connection
+
+            try:
+                validate_connection(value)
+            except ValueError as exc:
+                self.add_error("connection_provider", str(exc))
+                return data
             data["secret"] = json.dumps(value)
         secret = data.get("secret", "")
         passphrase = data.get("passphrase", "")
