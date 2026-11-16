@@ -38,7 +38,7 @@
   <details open>
     <summary>Saved effective runner configuration</summary>
     <p class="field-hint">Live execution remains release-gated. These saved values apply to future tasks.</p>
-    <dl>{% for name, value in effective_configuration.effective.items %}<dt>{{ name }}</dt><dd>{{ value|default_if_none:"None" }}</dd>{% endfor %}</dl>
+    {% for row in effective_display %}<div class="field"><strong>{{ row.label }}</strong><p class="field-hint">{{ row.value|default:"Not configured" }}</p></div>{% endfor %}
     {% for error in effective_configuration.errors %}<p class="field-error">{{ error.field }}: {{ error.message }}</p>{% endfor %}
   </details>
 {% endif %}

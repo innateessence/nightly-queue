@@ -44,10 +44,16 @@ def edit_project(request, pk):
             runner_form.save(project)
         messages.success(request, "Project updated.")
         return redirect("project_list")
+    effective = effective_project_configuration(project)
+    display = [
+        {"label": field.replace("_id", "").replace("_", " ").title(), "value": value}
+        for field, value in effective["effective"].items()
+    ]
     context = {
         "form": form,
         "runner_form": runner_form,
         "project": project,
-        "effective_configuration": effective_project_configuration(project),
+        "effective_configuration": effective,
+        "effective_display": display,
     }
     return render(request, "projects/edit.html", context)

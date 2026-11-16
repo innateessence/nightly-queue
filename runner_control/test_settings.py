@@ -180,3 +180,121 @@ class RunnerSettingsTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(RunnerSettings.objects.get(pk=1).paused)
         self.assertEqual(APISettings.objects.get(pk=1).auto_sync_interval_hours, 12)
+
+
+class EffectiveConfigurationTests(TestCase):
+    def setUp(self):
+        self.project = Project.objects.create(
+            name="Configured", repository_url="https://github.com/example/configured"
+        )
+        self.github = Credential.objects.create(
+            name="Repository",
+            provider="github",
+            kind="token",
+            encrypted_payload="encrypted-reference",
+        )
+        # Backend credential creation is owned by the following feature branch.
+        self.backend = Credential(
+            name="Backend",
+            provider="codex",
+            kind="token",
+            encrypted_payload="backend-encrypted-reference",
+        )
+        Credential.objects.bulk_create([self.backend])
+        saved = RunnerSettings.objects.get(pk=1)
+        saved.research_backend = "codex"
+        saved.implementation_backend = "codex"
+        saved.research_model = "research-model"
+        saved.implementation_model = "implementation-model"
+        saved.research_credential = self.backend
+        saved.implementation_credential = self.backend
+        saved.issue_credential = self.github
+        saved.repository_credential = self.github
+        saved.validation_commands = ["python -m unittest"]
+        saved.save()
+
+    def test_snapshot_preserves_task_settings_after_edits(self):
+        with transaction.atomic():
+            revision, snapshot = locked_configuration_snapshot(
+                self.project, configuration_document()["revision"]
+            )
+        saved = RunnerSettings.objects.get(pk=1)
+        saved.research_model = "next-model"
+        saved.paused = True
+        saved.save()
+        self.assertEqual(snapshot["effective"]["research_model"], "research-model")
+        self.assertFalse(snapshot["global"]["paused"])
+        self.assertNotEqual(revision, configuration_document()["revision"])
+        self.assertTrue(configuration_document()["global"]["paused"])
+
+    def test_inventory_includes_project_only_accounts(self):
+        other = Credential(
+            name="Project backend",
+            provider="claude",
+            kind="token",
+            encrypted_payload="other-encrypted-reference",
+        )
+        Credential.objects.bulk_create([other])
+        ProjectRunnerSettings.objects.create(
+            project=self.project,
+            overrides={
+                "research_backend": {"mode": "replace", "value": "claude"},
+                "research_credential_id": {"mode": "replace", "value": other.pk},
+            },
+        )
+        accounts = configuration_document()["accounts"]
+        self.assertIn(
+            {
+                "backend": "claude",
+                "credential_id": other.pk,
+                "project_ids": [self.project.pk],
+            },
+            accounts,
+        )
+        self.assertIn(
+            {
+                "backend": "codex",
+                "credential_id": self.backend.pk,
+                "project_ids": [self.project.pk],
+            },
+            accounts,
+        )
+
+    def test_structural_validity_does_not_establish_execution_readiness(self):
+        document = configuration_document()
+        self.assertTrue(document["projects"][0]["structurally_valid"])
+        self.assertFalse(document["execution_ready"])
+        self.assertFalse(document["projects"][0]["execution_ready"])
+
+    def test_deleted_override_credential_fails_closed(self):
+        other = Credential.objects.create(
+            name="Temporary",
+            provider="github",
+            kind="token",
+            encrypted_payload="temporary-encrypted-reference",
+        )
+        ProjectRunnerSettings.objects.create(
+            project=self.project,
+            overrides={"issue_credential_id": {"mode": "replace", "value": other.pk}},
+        )
+        other.delete()
+        errors = effective_project_configuration(self.project)["errors"]
+        self.assertTrue(any(error["code"] == "missing_credential" for error in errors))
+
+    def test_unselected_credential_changes_do_not_change_revision(self):
+        original = configuration_document()["revision"]
+        Credential.objects.create(
+            name="Unrelated",
+            provider="github",
+            kind="token",
+            encrypted_payload="unrelated-reference",
+        )
+        self.assertEqual(original, configuration_document()["revision"])
+
+    def test_credential_rotation_changes_revision_without_secret_serialization(self):
+        original = configuration_document()["revision"]
+        self.github.encrypted_payload = "rotated-ciphertext"
+        self.github.save()
+        document = configuration_document()
+        self.assertNotEqual(original, document["revision"])
+        self.assertNotIn("rotated-ciphertext", str(document))
