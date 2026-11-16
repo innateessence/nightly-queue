@@ -31,11 +31,30 @@ jobs:
           python3.12 -m vibearr_runner.verify --boundary \
             --executor-image "$task_image" --database-image "$database_image" \
             --executor-state "$RUNNER_TEMP/executor-state" --evidence "$RUNNER_TEMP/executor-boundary.json"
+      - name: Exercise installed executor service and client outside checkout
+        run: |
+          python3.12 -m venv "$RUNNER_TEMP/executor-build"
+          "$RUNNER_TEMP/executor-build/bin/python" -m pip install setuptools==80.9.0 wheel==0.48.0
+          "$RUNNER_TEMP/executor-build/bin/python" -m pip wheel --no-build-isolation --no-deps ./vibearr_executor --wheel-dir "$RUNNER_TEMP/executor-wheels"
+          python3.12 -m venv "$RUNNER_TEMP/installed-executor"
+          "$RUNNER_TEMP/installed-executor/bin/python" -m pip install --no-index --no-deps "$RUNNER_TEMP"/executor-wheels/*.whl
+          task_image=$(docker image inspect vibearr-ci-executor --format '{{.Id}}')
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/installed-executor/bin/python" -I -m vibearr_executor.artifact_smoke \
+            --image "$task_image" --state "$RUNNER_TEMP/installed-executor-state" \
+            --evidence "$RUNNER_TEMP/installed-executor-smoke.json"
       - name: Upload runtime qualification evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: executor-boundary
           path: ${{ runner.temp }}/executor-boundary.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload installed artifact service evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: installed-executor-smoke
+          path: ${{ runner.temp }}/installed-executor-smoke.json
           if-no-files-found: error
           retention-days: 7
       - name: Show bounded executor diagnostics on failure

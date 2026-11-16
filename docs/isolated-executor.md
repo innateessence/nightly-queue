@@ -96,6 +96,20 @@ Dockerfiles include the package without installing Docker or mounting its socket
 `vibearr_runner.native_runtime.runtime_diagnostics(policy)` reads the actual
 installed capability report. It reports runtime readiness separately from native
 adapter readiness, and never reads a legacy proposal or production-release proof.
+Both canonical and legacy runner distributions declare the client through the
+`native-runtime` extra. Install reviewed local sources together with
+`pip install ./vibearr_executor './vibearr_runner[native-runtime]'`, or use their
+reviewed wheels. Without that extra, normal standalone CLI imports still work and
+runtime diagnostics explain the missing client. With the client installed, missing
+control configuration names the two required environment variables explicitly.
+The same-object `coding_runner.native_runtime` compatibility import is retained.
+
+Distribution tests build the executor from its sdist, install it with both runner
+sdists in clean environments, invoke diagnostics outside the checkout, and verify
+packaged helper/image-recipe resources. CI additionally installs the executor wheel
+and runs `python -I -m vibearr_executor.artifact_smoke --image sha256:<id> --state <private-directory>`
+outside the checkout. This starts its authenticated service and executes/exports a
+real offline OCI validation job using only installed Python modules.
 
 ## Profiles and manifests
 

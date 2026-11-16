@@ -74,7 +74,7 @@ def runtime_diagnostics(policy: dict, client=None) -> dict:
             "reason": "Installed runtime is qualified; native adapter/authentication and lifecycle diagnostics remain separate.",
         }
     except ImportError:
-        reason = "Install the standalone vibearr-executor client package beside the supervisor."
+        reason = "Install vibearr-runner[native-runtime] with the vibearr-executor client package."
     except (
         KeyError,
         ValueError,

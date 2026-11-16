@@ -55,6 +55,12 @@ class Client:
     def from_environment(cls):
         import os
 
+        if not os.environ.get("VIBEARR_EXECUTOR_URL") or not os.environ.get(
+            "VIBEARR_EXECUTOR_TOKEN_FILE"
+        ):
+            raise Rejected(
+                "Set VIBEARR_EXECUTOR_URL and VIBEARR_EXECUTOR_TOKEN_FILE for authenticated executor control."
+            )
         path = Path(os.environ["VIBEARR_EXECUTOR_TOKEN_FILE"])
         if path.stat().st_mode & 0o077:
             raise Rejected("Executor token file must be private.")

@@ -3,6 +3,7 @@
 import argparse
 import io
 import json
+import os
 import secrets
 import signal
 import socket
@@ -106,8 +107,11 @@ class Harness:
             "--port",
             str(self.port),
         ]
+        environment = dict(os.environ)
+        environment.pop("PYTHONPATH", None)
+        environment.pop("PYTHONHOME", None)
         self.process = subprocess.Popen(
-            command, stdout=self.server_log, stderr=self.server_log
+            command, env=environment, stdout=self.server_log, stderr=self.server_log
         )
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
