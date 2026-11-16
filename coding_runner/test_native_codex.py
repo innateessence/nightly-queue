@@ -12,6 +12,7 @@ from vibearr_runner.policy import default_execution_policy
 
 EXECUTOR_INSTALLED = importlib.util.find_spec("vibearr_executor") is not None
 if EXECUTOR_INSTALLED:
+    from vibearr_executor import QUALIFICATION_VERSION
     from vibearr_executor.artifacts import pack, result_manifest
     from vibearr_executor.contracts import Conflict
 
@@ -36,6 +37,7 @@ class ExecutorFixture:
         self.state = "not-started"
         self.receipt = None
         self.qualified = True
+        self.qualification_version = QUALIFICATION_VERSION
         self.binding_digest = "b" * 64
         self.export_unchanged = False
 
@@ -44,7 +46,7 @@ class ExecutorFixture:
             "runtime": "docker-oci-v1",
             "schema_version": 1,
             "protocol_version": 1,
-            "qualification_version": 1,
+            "qualification_version": self.qualification_version,
             "binding_digest": self.binding_digest,
             "qualified": self.qualified,
             "accepting_work": True,
@@ -166,6 +168,12 @@ class NativeCodexTests(unittest.TestCase):
 
     def test_unqualified_runtime_cannot_prepare_native_work(self):
         self.client.qualified = False
+        with self.assertRaises(NativeSessionError):
+            self.prepare()
+        self.assertFalse(self.client.prepared)
+
+    def test_stale_executor_qualification_contract_is_rejected(self):
+        self.client.qualification_version = QUALIFICATION_VERSION - 1
         with self.assertRaises(NativeSessionError):
             self.prepare()
         self.assertFalse(self.client.prepared)

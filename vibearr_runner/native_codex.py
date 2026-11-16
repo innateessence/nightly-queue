@@ -175,12 +175,18 @@ class NativeCodexAdapter:
         self.client = client
 
     def selected_profile(self, policy: ExecutionPolicy, kind: str):
+        from vibearr_executor import QUALIFICATION_VERSION
         from vibearr_executor.contracts import Limits
 
         capabilities = self.client.capabilities()
+        versions = {
+            "schema_version": 1,
+            "protocol_version": 1,
+            "qualification_version": QUALIFICATION_VERSION,
+        }
         if capabilities.get("runtime") != "docker-oci-v1" or any(
-            type(capabilities.get(key)) is not int or capabilities[key] != 1
-            for key in ("schema_version", "protocol_version", "qualification_version")
+            type(capabilities.get(key)) is not int or capabilities[key] != expected
+            for key, expected in versions.items()
         ):
             raise NativeSessionError("Installed executor protocol is unsupported.")
         if (
