@@ -1,6 +1,9 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -15,6 +18,8 @@ from vibearr_runner.merge_github import (
 )
 from vibearr_runner.native_contract import NativeContractError, digest
 from vibearr_runner.native_merge import NativeMerge
+from vibearr_runner.merge_review import publish_review
+from vibearr_runner.merge_setup import apply_setup
 from vibearr_runner.policy import ExecutionPolicy
 from vibearr_runner.recovery import ReconciliationRequired
 
@@ -421,6 +426,28 @@ class MergeHost:
 
 
 class MergeLifecycleTests(unittest.TestCase):
+    def test_base_race_rejected_by_server_enters_revision_without_merge(self):
+        from vibearr_runner.native_lifecycle import NativeMetadataRejected
+
+        host = MergeHost()
+        provider = Provider()
+        provider.pull = lambda *args: provider.raw
+        bases = iter(["a" * 40, "a" * 40, "e" * 40])
+        provider.base_sha = lambda *args: next(bases)
+        provider.reviews = lambda *args, **kwargs: receipt(host.run_id)["reviews"]
+
+        def rejected(*args):
+            raise NativeMetadataRejected("Confirmed absent after base race")
+
+        host.intent = rejected
+        with (
+            patch.object(NativeMerge, "client", return_value=provider),
+            patch.object(NativeMerge, "repair", return_value="continue") as repair,
+        ):
+            self.assertEqual(NativeMerge(host).step(), "continue")
+        self.assertEqual(repair.call_args.args[0], "base_update")
+        self.assertFalse(host.native["merge"].get("dispatched", False))
+
     def test_lost_merge_response_never_repeats_mutation_while_provider_open(self):
         host = MergeHost()
         provider = Provider()
@@ -435,8 +462,7 @@ class MergeLifecycleTests(unittest.TestCase):
 
         provider.merge_once = merge_once
         with patch.object(NativeMerge, "client", return_value=provider):
-            with self.assertRaises(ReconciliationRequired):
-                NativeMerge(host).step()
+            self.assertEqual(NativeMerge(host).step(), "continue")
             host.native["deadline"] = "2000-01-01T00:00:00+00:00"
             with self.assertRaises(ReconciliationRequired):
                 NativeMerge(host).step()
@@ -494,6 +520,144 @@ class MergeLifecycleTests(unittest.TestCase):
                 {"schema_version": 1, "intent_id": identity, "state": "not_started"},
             ),
         )
+
+
+class CoordinatorTests(unittest.TestCase):
+    def test_lost_status_response_is_reconciled_without_republication(self):
+        value = receipt()["reviews"][0]
+        payload = {
+            "state": "success",
+            "context": value["context"],
+            "target_url": value["report_url"],
+            "description": "Trusted independent AI review: no P2 or higher findings",
+        }
+        provider = Provider()
+        provider.pages = lambda *args: []
+        writes = []
+
+        def request(*args):
+            writes.append(args)
+            raise DeliveryUnknown("lost status response")
+
+        provider.request = request
+        binding = {
+            "run_id": str(uuid4()),
+            "context_digest": "d" * 64,
+            "workspace": workspace(),
+            "pull_number": 9,
+        }
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("vibearr_runner.merge_review.review_status", return_value=payload),
+        ):
+            state = Path(directory) / "review.json"
+            arguments = {
+                "profile": profile(),
+                "binding": binding,
+                "role": "independent",
+                "report_url": value["report_url"],
+                "state_file": state,
+                "apply": True,
+            }
+            with self.assertRaises(DeliveryUnknown):
+                publish_review(provider, **arguments)
+            with self.assertRaises(ReconciliationRequired):
+                publish_review(provider, **arguments)
+            self.assertEqual(len(writes), 1)
+            provider.pages = lambda *args: [
+                {**payload, "id": 500, "creator": {"id": 25}}
+            ]
+            self.assertEqual(publish_review(provider, **arguments)["status_id"], 500)
+            self.assertEqual(len(writes), 1)
+
+    def test_review_preview_creates_no_checkpoint_or_status(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch(
+                "vibearr_runner.merge_review.review_status",
+                return_value={"state": "success"},
+            ),
+        ):
+            state = Path(directory) / "review.json"
+            provider = Provider()
+            result = publish_review(
+                provider,
+                profile=profile(),
+                binding={},
+                role="root",
+                report_url="url",
+                state_file=state,
+            )
+            self.assertFalse(result["apply"])
+            self.assertFalse(state.exists())
+            self.assertEqual(provider.requests, [])
+
+    def test_setup_preview_does_not_modify_policy_or_checkpoint(self):
+        plan = {
+            "repository_id": 17,
+            "repository": "owner/repo",
+            "base": "main",
+            "ruleset_id": 5,
+            "original": {"bypass_actors": [5]},
+            "desired": {"bypass_actors": []},
+        }
+        provider = Provider()
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("vibearr_runner.merge_setup.setup_plan", return_value=plan),
+        ):
+            state = Path(directory) / "setup.json"
+            result = apply_setup(
+                provider, profile(), base="main", ruleset_id=5, checkpoint=state
+            )
+            self.assertFalse(result["apply"])
+            self.assertFalse(state.exists())
+            self.assertEqual(provider.requests, [])
+
+    def test_unknown_setup_update_does_not_repeat_ruleset_mutation(self):
+        plan = {
+            "repository_id": 17,
+            "repository": "owner/repo",
+            "base": "main",
+            "ruleset_id": 5,
+            "original": {"bypass_actors": [5]},
+            "desired": {"bypass_actors": []},
+        }
+        provider = Provider()
+        writes = []
+
+        def request(*args):
+            writes.append(args)
+            raise DeliveryUnknown("lost rules update")
+
+        provider.request = request
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("vibearr_runner.merge_setup.setup_plan", return_value=plan),
+        ):
+            state = Path(directory) / "setup.json"
+            with self.assertRaises(DeliveryUnknown):
+                apply_setup(
+                    provider,
+                    profile(),
+                    base="main",
+                    ruleset_id=5,
+                    checkpoint=state,
+                    apply=True,
+                )
+            with self.assertRaises(ReconciliationRequired):
+                apply_setup(
+                    provider,
+                    profile(),
+                    base="main",
+                    ruleset_id=5,
+                    checkpoint=state,
+                    apply=True,
+                )
+            self.assertEqual(len(writes), 1)
+            self.assertEqual(
+                json.loads(state.read_bytes())["plan"]["original"], plan["original"]
+            )
 
 
 if __name__ == "__main__":

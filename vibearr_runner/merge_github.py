@@ -382,6 +382,13 @@ class MergeGitHub(NativeGitHub):
                 raise DeliveryError(
                     "AI review requires an immutable trusted report URL."
                 )
+            if (
+                configured["report_repository_id"] == workspace["repository_id"]
+                and match[1] == workspace["commit_sha"]
+            ):
+                raise DeliveryError(
+                    "Candidate commits cannot publish their own trusted review reports."
+                )
             identity, _ = self.repository(
                 repository_url=f"https://github.com/{configured['report_repository']}.git"
             )
