@@ -272,7 +272,7 @@ def _configuration_document(saved):
         "schema_version": 1,
         "runtime": "docker-oci-v1",
         "protocol_version": 1,
-        "qualification_version": 1,
+        "qualification_version": 2,
         "qualification_source": "authenticated_executor_capabilities",
         "requires_production_run": False,
     }

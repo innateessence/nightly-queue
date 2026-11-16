@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from .secret_material import contains_secret, redact
+from .secret_material import contains_secret, protection_material, redact
 
 
 class StructuredSecretTests(unittest.TestCase):
@@ -54,3 +54,23 @@ class StructuredSecretTests(unittest.TestCase):
         )
         self.assertFalse(contains_secret(source, selected))
         self.assertEqual(redact(source, selected), source)
+
+    def test_disposable_database_url_and_password_are_redacted_with_backend_tokens(
+        self,
+    ):
+        password = "a" * 48
+        url = f"postgresql://task:{password}@172.20.0.2:5432/task"
+        protected = protection_material(self.secret, url)
+        output = self.access + b" " + password.encode() + b" " + url.encode()
+        self.assertEqual(redact(output, protected), b"[REDACTED] [REDACTED] [REDACTED]")
+
+    def test_disposable_database_password_in_export_is_rejected_without_model_secret(
+        self,
+    ):
+        password = "a" * 48
+        protected = protection_material(
+            b"", f"postgresql://task:{password}@172.20.0.2:5432/task"
+        )
+        self.assertTrue(
+            contains_secret(b"connection_password=" + password.encode(), protected)
+        )

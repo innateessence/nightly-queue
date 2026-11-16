@@ -3,16 +3,57 @@
 import base64
 from datetime import datetime, timezone
 import json
+import ipaddress
 import os
 from pathlib import Path
 import re
 import subprocess
+from urllib.parse import urlsplit
 
 VERSION = "0.169.0"
 BINARY = "/usr/local/bin/codex"
 SECRET_ENV = "VIBEARR_CODEX_AUTH"
 ARGV = ("/usr/local/bin/python", "-I", "-m", "vibearr_executor.codex_task")
 HOSTS = {"token": ("api.openai.com",), "session": ("chatgpt.com",)}
+DATABASE_ENV = "VIBEARR_DISPOSABLE_DATABASE_URL"
+
+
+def disposable_database_environment(url: str) -> dict:
+    try:
+        connection = urlsplit(url)
+        address = ipaddress.IPv4Address(connection.hostname or "")
+        scoped = (
+            connection.scheme == "postgresql"
+            and connection.username == "task"
+            and connection.path == "/task"
+            and connection.port == 5432
+            and not connection.query
+            and not connection.fragment
+            and re.fullmatch(r"[a-f0-9]{48}", connection.password or "") is not None
+            and address.is_private
+            and not address.is_loopback
+            and not address.is_link_local
+            and not address.is_unspecified
+            and not address.is_reserved
+        )
+        if not scoped:
+            raise ValueError
+    except (ValueError, TypeError):
+        raise ValueError(
+            "Executor disposable database connection is invalid."
+        ) from None
+    fields = {
+        "POSTGRES_DB": "task",
+        "POSTGRES_USER": "task",
+        "POSTGRES_PASSWORD": connection.password,
+        "POSTGRES_HOST": str(address),
+        "POSTGRES_PORT": "5432",
+    }
+    return {
+        "DATABASE_URL": url,
+        **fields,
+        **{"VIBEARR_" + key: value for key, value in fields.items()},
+    }
 
 
 def model_id(value):
@@ -92,7 +133,9 @@ def auth_material(kind: str, secret: str, *, runtime=False) -> str:
                 "OPENAI_API_KEY": None,
                 "tokens": {**tokens, "refresh_token": ""},
                 "last_refresh": "1970-01-01T00:00:00Z",
-            }
+            },
+            sort_keys=True,
+            separators=(",", ":"),
         )
     except (ValueError, TypeError, KeyError, IndexError, UnicodeError, RecursionError):
         raise ValueError(
@@ -161,7 +204,14 @@ def launch(
         CODEX_HOME=str(codex_home),
         GIT_CONFIG_NOSYSTEM="1",
         GIT_CONFIG_GLOBAL="/dev/null",
+        NO_PROXY="127.0.0.1,localhost",
+        no_proxy="127.0.0.1,localhost",
+        PYTHONDONTWRITEBYTECODE="1",
+        PYTHONUNBUFFERED="1",
+        TMPDIR="/work",
     )
+    if os.environ.get(DATABASE_ENV):
+        environment.update(disposable_database_environment(os.environ[DATABASE_ENV]))
     if context["auth_kind"] == "token":
         environment["CODEX_API_KEY"] = material
     else:

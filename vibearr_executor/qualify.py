@@ -20,7 +20,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from .artifacts import import_result, pack
-from .client import Client, ExecutorUnavailable
+from .client import Client, ExecutorRejected, ExecutorUnavailable
 from .contracts import Limits, Profile, canonical, digest
 from .proxy import resolve_public
 from .qualification import REQUIRED_CHECKS, binding
@@ -35,6 +35,7 @@ def smoke_profiles(image: str, database_image: str = "") -> list[Profile]:
         ("setup", "setup"),
         ("validation", "validation"),
         ("limits", "validation"),
+        ("oom", "validation"),
         ("sleep", "agent"),
         ("pid-hold", "agent"),
     ):
@@ -45,8 +46,8 @@ def smoke_profiles(image: str, database_image: str = "") -> list[Profile]:
             phase,
             ("python", "-I", "/opt/executor/vibearr_executor/smoke.py", kind),
             Limits(
-                memory_mb=256 if kind in {"limits", "pid-hold"} else 512,
-                pids=32 if kind in {"limits", "pid-hold"} else 64,
+                memory_mb=256 if kind in {"limits", "pid-hold", "oom"} else 512,
+                pids=32 if kind in {"limits", "pid-hold", "oom"} else 64,
             ),
             (
                 ("api.openai.com",)
@@ -76,9 +77,106 @@ def require(value, message):
         raise RuntimeError(message)
 
 
+def memory_probe_profile(profile: Profile, manifest: dict) -> Profile:
+    expected = next(
+        entry
+        for entry in smoke_profiles(profile.image)
+        if entry.profile_id == "smoke-oom-v1"
+    )
+    require(
+        profile == expected
+        and manifest["profile_id"] == expected.profile_id
+        and manifest["profile_digest"] == expected.digest,
+        "Only the exact fixed memory-exhaustion profile can attest an expected OOM",
+    )
+    require(
+        manifest["limits"] == asdict(expected.limits),
+        "Memory-exhaustion limits changed",
+    )
+    return expected
+
+
+def memory_oom_observation(
+    profile: Profile, manifest: dict, status: dict, inspected: dict | None
+) -> dict:
+    expected = memory_probe_profile(profile, manifest)
+    require(
+        status["operation_id"] == manifest["operation_id"]
+        and status.get("container_id"),
+        "Memory-exhaustion operation identity changed",
+    )
+    memory_bytes = expected.limits.memory_mb * 1024 * 1024
+    if status["state"] == "exited":
+        result = status.get("result", {})
+        counters = result.get("resources", {})
+        require(
+            status.get("descendants_terminated") is True
+            and result.get("terminated") is True,
+            "Memory probe termination is unconfirmed",
+        )
+        require(
+            type(result.get("exit_code")) is int
+            and result["exit_code"] in (0, -9)
+            and not result.get("canceled")
+            and not result.get("timed_out"),
+            "Memory probe did not record an expected OOM outcome",
+        )
+        require(
+            counters.get("memory.events", {}).get("oom_kill", 0) > 0,
+            "Memory probe has no protected OOM evidence",
+        )
+        require(
+            counters.get("memory.max", {}).get("value") == memory_bytes
+            and counters.get("memory.swap.max", {}).get("value") == 0,
+            "Memory probe kernel limits do not match the fixed profile",
+        )
+        return {
+            "outcome": "protected_oom_result",
+            "task_exit_code": result["exit_code"],
+            "workspace_export": (
+                "available" if result.get("artifact") else "unavailable"
+            ),
+            "resources": counters,
+        }
+    require(
+        status["state"] == "unknown" and inspected is not None,
+        "Memory probe has no verifiable container outcome",
+    )
+    assert inspected is not None
+    labels = inspected.get("Config", {}).get("Labels", {})
+    require(
+        inspected["Id"] == status["container_id"]
+        and inspected["Image"] == expected.image
+        and labels.get("vibearr.operation") == manifest["operation_id"],
+        "Memory probe engine identity does not match its operation/image",
+    )
+    engine_state = inspected["State"]
+    require(
+        engine_state.get("Running") is False
+        and engine_state.get("OOMKilled") is True
+        and engine_state.get("ExitCode") == 137,
+        "Unknown memory probe was not a confirmed container OOM kill",
+    )
+    limits = inspected["HostConfig"]
+    require(
+        limits.get("Memory") == memory_bytes
+        and limits.get("MemorySwap") == memory_bytes
+        and limits.get("PidsLimit") == expected.limits.pids,
+        "Memory probe engine limits do not match the fixed profile",
+    )
+    return {
+        "outcome": "container_oom",
+        "task_exit_code": None,
+        "engine_exit_code": 137,
+        "engine_oom_killed": True,
+        "workspace_export": "unavailable_after_container_oom",
+    }
+
+
 class Harness:
     def __init__(self, state: Path, profiles: list[Profile]):
         self.state, self.profiles = state, profiles
+        self.jobs: dict[str, str] = {}
         self.process: subprocess.Popen | None = None
         self.server_log = None
         self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -150,7 +248,7 @@ class Harness:
         )
         self.client.upload("source", source)
         self.client.upload("context", context)
-        manifest = {
+        manifest: dict = {
             "schema_version": 1,
             "run_id": run_id or str(uuid4()),
             "operation_id": str(uuid4()),
@@ -166,6 +264,17 @@ class Harness:
             "network_hosts": list(profile.network_hosts),
         }
         self.client.prepare(manifest)
+        self.jobs[manifest["operation_id"]] = profile.profile_id
+        print(
+            json.dumps(
+                {
+                    "qualification_profile": profile.profile_id,
+                    "operation_id": manifest["operation_id"],
+                }
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
         return manifest
 
     def finished(self, operation_id: str, timeout: int = 180) -> dict:
@@ -174,9 +283,77 @@ class Harness:
             result = self.client.status(operation_id)
             if result["state"] == "exited":
                 return result
-            require(result["state"] != "unknown", "Container outcome became unknown")
+            if result["state"] == "unknown":
+                diagnostic = {
+                    key: result[key]
+                    for key in (
+                        "operation_id",
+                        "state",
+                        "container_id",
+                        "wait_reason",
+                        "container_state",
+                    )
+                    if key in result
+                }
+                diagnostic["qualification_profile"] = self.jobs.get(
+                    operation_id, "unavailable"
+                )
+                durable(self.state / "last-failure.json", canonical(diagnostic))
+                raise RuntimeError(
+                    "Container outcome became unknown: "
+                    + json.dumps(diagnostic, sort_keys=True)
+                )
             time.sleep(0.5)
         raise RuntimeError("Qualification task did not terminate in time.")
+
+    def memory_exhaustion(self, manifest: dict, source: bytes) -> dict:
+        from .engine import Docker
+
+        operation_id = manifest["operation_id"]
+        profile = next(
+            entry
+            for entry in self.profiles
+            if entry.profile_id == manifest["profile_id"]
+        )
+        memory_probe_profile(profile, manifest)
+        docker = Docker()
+        try:
+            self.client.start(operation_id)
+        except ExecutorRejected:
+            raise
+        except ExecutorUnavailable:
+            pass
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            status = self.client.status(operation_id)
+            if status["state"] not in {"unknown", "exited"}:
+                time.sleep(0.5)
+                continue
+            inspected = (
+                docker.inspect(status["container_id"])
+                if status["state"] == "unknown"
+                else None
+            )
+            observation = memory_oom_observation(profile, manifest, status, inspected)
+            if status.get("result", {}).get("artifact"):
+                observation["artifact"], _ = self.client.export(operation_id, source)
+            stopped = self.client.stop(operation_id)
+            require(
+                stopped.get("descendants_terminated") is True
+                and stopped["container_id"] == status["container_id"]
+                and docker.inspect(status["container_id"]) is None,
+                "Memory probe descendants were not confirmed gone",
+            )
+            return {
+                **observation,
+                "operation_id": operation_id,
+                "container_id": status["container_id"],
+                "runtime_state_before_stop": status["state"],
+                "descendants_terminated": True,
+            }
+        raise RuntimeError(
+            "Memory-exhaustion probe did not terminate before its deadline"
+        )
 
 
 def qualify_one(state: Path, profiles: list[Profile]) -> dict:
@@ -244,13 +421,8 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
                 finished.get("descendants_terminated") is True,
                 "Termination is unconfirmed",
             )
-            deliberate_oom = kind == "limits" and finished["result"]["exit_code"] == -9
             if kind == "limits":
                 counters = finished["result"].get("resources", {})
-                require(
-                    counters.get("memory.events", {}).get("oom_kill", 0) > 0,
-                    "No protected cgroup OOM evidence",
-                )
                 require(
                     counters.get("pids.events", {}).get("max", 0) > 0,
                     "No protected cgroup PID enforcement evidence",
@@ -260,16 +432,18 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
                     "No protected cgroup CPU throttling evidence",
                 )
                 require(
-                    "workspace-pids-cpu-enforced" in logs
-                    and "memory-exhaustion-probe-started" in logs,
-                    "Resource recipe did not finish its checks before deliberate OOM",
+                    "workspace-pids-cpu-enforced" in logs,
+                    "Resource recipe did not finish its workspace/PID/CPU checks",
+                )
+                observations["resource_export"], _ = harness.client.export(
+                    operation, source
                 )
             require(
-                finished["result"]["exit_code"] == 0 or deliberate_oom,
+                finished["result"]["exit_code"] == 0,
                 f"{kind} smoke failed: {logs} {finished['result']}",
             )
             require(
-                "qualification-recipe-passed" in logs or deliberate_oom,
+                "qualification-recipe-passed" in logs,
                 "Missing actual recipe outcome",
             )
             if kind == "agent":
@@ -310,7 +484,6 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
                 "exit_code": finished["result"]["exit_code"],
                 "log_digest": finished["result"]["log_digest"],
                 "log": logs,
-                "expected_oom_kill": deliberate_oom,
             }
             changed = {**manifest, "source_digest": "0" * 64}
             try:
@@ -319,6 +492,9 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
                 pass
             else:
                 raise RuntimeError("Changed operation manifest was accepted")
+        memory = harness.prepare("oom", source)
+        operations.append(memory["operation_id"])
+        observations["memory_exhaustion"] = harness.memory_exhaustion(memory, source)
         leak = harness.prepare("leak", source)
         leak_op = leak["operation_id"]
         operations.append(leak_op)

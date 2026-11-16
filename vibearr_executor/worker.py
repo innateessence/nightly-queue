@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .artifacts import extract, result_manifest, snapshot
 from .contracts import MAX_LOG, canonical, digest
-from .secret_material import contains_secret, redact
+from .secret_material import contains_secret, protection_material, redact
 
 
 def save(path: Path, value: bytes) -> None:
@@ -74,6 +74,7 @@ def main() -> None:
     job = json.loads(Path("/input/job.json").read_bytes())
     deadline = datetime.fromisoformat(job["manifest"]["deadline"]).timestamp()
     secret = Path("/input/secret").read_bytes()
+    protected_values = protection_material(secret, job.get("database_url", ""))
     source = Path("/input/source.tar").read_bytes()
     save(state / "booted", b"ready")
     remaining = max(0, min(3600, deadline - time.time()))
@@ -127,6 +128,7 @@ def main() -> None:
             )
         if job.get("database_url"):
             environment["DATABASE_URL"] = job["database_url"]
+            environment["VIBEARR_DISPOSABLE_DATABASE_URL"] = job["database_url"]
 
         def demote():
             os.setgroups([])
@@ -165,7 +167,7 @@ def main() -> None:
                 chunk = os.read(process.stdout.fileno(), 65536)
                 log_received += len(chunk)
                 logs.extend(chunk[: max(0, MAX_LOG - len(logs))])
-                save(state / "logs.bin", redact_logs(bytes(logs), secret))
+                save(state / "logs.bin", redact_logs(bytes(logs), protected_values))
         result["timed_out"] = time.monotonic() >= expires
         result["canceled"] = stopping
         if process.poll() is None:
@@ -193,21 +195,25 @@ def main() -> None:
         resources["pids.max"] = {
             "value": int(Path("/sys/fs/cgroup/pids.max").read_text())
         }
+        for name in ("memory.max", "memory.swap.max"):
+            resources[name] = {
+                "value": int((Path("/sys/fs/cgroup") / name).read_text())
+            }
         result["resources"] = resources
         Path("/secrets/backend").unlink(missing_ok=True)
         try:
             exported = snapshot(Path("/work"))
-            if contains_secret(exported, secret):
+            if contains_secret(exported, protected_values):
                 raise ValueError(
-                    "Workspace contains the selected backend credential; source export withheld."
+                    "Workspace contains the selected backend credential or disposable database credentials; source export withheld."
                 )
             save(state / "source.tar", exported)
             result["artifact"] = result_manifest(source, exported)
         except Exception as exc:
             result["export_error"] = type(exc).__name__ + ": " + str(exc)[:500]
-        raw_logs = redact_logs(bytes(logs), secret)
-        if secret:
-            result = redact_result(result, secret.decode())
+        raw_logs = redact_logs(bytes(logs), protected_values)
+        if protected_values:
+            result = redact_result(result, protected_values.decode())
         save(state / "logs.bin", raw_logs)
         result["log_digest"] = digest(raw_logs)
         result["log_bytes"] = len(raw_logs)

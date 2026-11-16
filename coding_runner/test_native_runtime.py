@@ -1,5 +1,7 @@
 import copy
+import importlib.util
 import unittest
+from unittest.mock import patch
 
 from vibearr_runner.backend_registry import ScopedCredentials
 from vibearr_runner.native_runtime import runtime_diagnostics
@@ -28,7 +30,7 @@ class ExecutorFixture:
         self.document = {
             "schema_version": 1,
             "protocol_version": 1,
-            "qualification_version": 1,
+            "qualification_version": 2,
             "runtime": "docker-oci-v1",
             "qualified": True,
             "accepting_work": True,
@@ -41,15 +43,39 @@ class ExecutorFixture:
 
 
 class NativeRuntimeTests(unittest.TestCase):
+    @unittest.skipUnless(
+        importlib.util.find_spec("vibearr_executor"),
+        "Install the native-runtime extra for executor capability tests",
+    )
     def test_runtime_readiness_needs_no_production_delivery_or_backend_proof(self):
         result = runtime_diagnostics(default_execution_policy(), ExecutorFixture())
         self.assertTrue(result["runtime_ready"])
         self.assertFalse(result["native_agent_ready"])
         self.assertEqual(result["binding_digest"], "c" * 64)
 
+    def test_missing_optional_sdk_has_an_actionable_diagnostic(self):
+        original_import = __import__
+
+        def without_sdk(name, *args, **kwargs):
+            if name.startswith("vibearr_executor"):
+                raise ModuleNotFoundError("Executor SDK is intentionally absent")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=without_sdk):
+            result = runtime_diagnostics(default_execution_policy(), ExecutorFixture())
+        self.assertFalse(result["runtime_ready"])
+        self.assertIn("vibearr-runner[native-runtime]", result["reason"])
+
     def test_stale_runtime_qualification_blocks_readiness(self):
         client = ExecutorFixture()
         client.document["qualified"] = False
+        self.assertFalse(
+            runtime_diagnostics(default_execution_policy(), client)["runtime_ready"]
+        )
+
+    def test_previous_qualification_version_blocks_readiness(self):
+        client = ExecutorFixture()
+        client.document["qualification_version"] = 1
         self.assertFalse(
             runtime_diagnostics(default_execution_policy(), client)["runtime_ready"]
         )

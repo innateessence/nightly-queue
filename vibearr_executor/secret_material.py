@@ -1,6 +1,7 @@
 """Selected structured credentials contain independently sensitive values."""
 
 import json
+from urllib.parse import urlsplit
 
 SECRET_FIELDS = {
     "accesstoken",
@@ -14,7 +15,23 @@ SECRET_FIELDS = {
     "authorization",
     "bearertoken",
     "clientsecret",
+    "databaseurl",
 }
+
+
+def protection_material(secret: bytes, database_url: str = "") -> bytes:
+    if not database_url:
+        return secret
+    values = {
+        "secret": secret.decode(),
+        "database_url": database_url,
+        "password": urlsplit(database_url).password or "",
+    }
+    try:
+        values["backend"] = json.loads(secret)
+    except (ValueError, UnicodeError, RecursionError):
+        pass
+    return json.dumps(values, sort_keys=True).encode()
 
 
 def secret_values(secret: bytes) -> tuple[bytes, ...]:

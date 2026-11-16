@@ -137,6 +137,27 @@ Cross-container CLI resume is deliberately unsupported. Repair attempts start a
 new invocation only after the previous operation is confirmed stopped, preserving
 its frozen backend selection and existing attempt limits.
 
+## Project test environment
+
+An agent profile can register a pinned `database_image` through
+`codex_profile(..., database_image=...)`. The executor creates a fresh PostgreSQL
+sidecar and generates its connection under the run's private job. The wrapper
+accepts only that executor-provided disposable connection marker, validates its
+fixed task database format, and derives `DATABASE_URL`, `POSTGRES_*`, and
+`VIBEARR_POSTGRES_*` for the native child. Ambient host database variables are
+discarded. Candidate context cannot name a database or select these variables.
+The existing redaction and export checks include the generated password and URL,
+alongside the selected backend token values.
+
+`NO_PROXY` and `no_proxy` are fixed to `127.0.0.1,localhost` so local HTTP tests
+stay inside the task rather than using the model proxy. Docker DNS, gateways,
+and private networks are not proxy exclusions; the runtime firewall still
+enforces actual egress. Python bytecode writes are disabled, output is unbuffered,
+and `TMPDIR=/work` uses the policy-bounded workspace for temporary venvs and tests.
+No host temporary directory is inherited. Temporary login and prompt files retain
+explicit 0600 modes under a private 0700 home even when project helpers use a
+less restrictive umask.
+
 ## Authentication diagnostics
 
 Configured key or login-file presence does not prove authentication. Without a
