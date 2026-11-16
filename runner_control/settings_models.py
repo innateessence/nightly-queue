@@ -2,6 +2,8 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 
+from vibearr_runner.policy import default_execution_policy
+
 from .validators import (
     BACKENDS,
     validate_commands,
@@ -9,6 +11,7 @@ from .validators import (
     validate_overrides,
     validate_timezone,
     validate_windows,
+    validate_execution_policy,
 )
 
 
@@ -16,6 +19,9 @@ class RunnerSettings(models.Model):
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     enabled = models.BooleanField(default=False)
     paused = models.BooleanField(default=False)
+    execution_policy = models.JSONField(
+        default=default_execution_policy, validators=[validate_execution_policy]
+    )
     schedule_mode = models.CharField(
         max_length=12,
         choices=[("continuous", "Continuous"), ("windows", "Weekday windows")],
@@ -110,6 +116,7 @@ class RunnerSettings(models.Model):
     def clean(self):
         super().clean()
         for field, validator in (
+            ("execution_policy", validate_execution_policy),
             ("windows", validate_windows),
             ("setup_commands", validate_commands),
             ("validation_commands", validate_commands),
@@ -134,7 +141,6 @@ class RunnerSettings(models.Model):
             except ValidationError as exc:
                 raise ValidationError({f"{stage}_model": exc.messages}) from None
         for field in (
-            "research_timeout_seconds",
             "implementation_timeout_seconds",
             "validation_timeout_seconds",
         ):

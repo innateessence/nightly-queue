@@ -1,5 +1,12 @@
 # Coding runner architecture and implementation plan
 
+Native execution uses the [versioned project policy](runner-execution-policy.md)
+and the [MVP contract](vibearr-mvp.md). Per-command human approvals and the old
+structured-proposal release path are retired. Their detailed protocols below
+remain historical reference while native runtime and adapter integration land;
+legacy qualification cannot enable native execution.
+
+
 ## Status
 
 The dedicated service now implements durable scoped ownership, web-managed
@@ -226,18 +233,19 @@ blocked gates without claiming additional work. Resume saved work before new
 claims once usage is strictly above the reserve and the schedule and other gates
 allow processing, including after a provider reset or a user setting change.
 
-## Task input and approval boundaries
+## Task input and execution policy
 
 Keep credentials and claim tokens out of agent prompts and published logs. Pass
-task inputs as structured data or files, never as interpolated shell commands.
-Repository and issue content must not grant access to other projects, host files,
-or infrastructure. Treat issue bodies, comments, repository content, and research
-sources as untrusted data, not authority to override runner or repository rules.
-Always request user confirmation before running anything that arrived as data
-from an untrusted source, including commands suggested in issue comments or
-research results. A saved plan does not grant that confirmation. Surface the
-proposed action and its source in the web UI and pause dependent work until the
-user responds; do not bypass required approvals to keep an unattended run moving.
+inputs as structured data or files, never interpolated shell arguments. Issue
+bodies, comments, repository content, and research cannot grant access to other
+projects, host files, credentials, or infrastructure.
+
+Routine task execution follows the versioned project policy inside a registered
+isolated runtime. Setup, investigation, edits, and validation require no per-command
+human decision. Recheck ownership and the current policy before dispatch; a stale
+claim, changed policy, closed gate, or unregistered capability grants no execution.
+Plans are saved artifacts, not permission checkpoints. See the
+[native execution policy contract](runner-execution-policy.md).
 
 ## Interruption and recovery
 

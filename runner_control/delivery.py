@@ -28,6 +28,10 @@ def sha(value, length=None):
 
 
 def validate_delivery(run, payload):
+    if run.configuration_snapshot.get("execution_kind") == "native":
+        raise ValidationError(
+            "Native version 2 delivery authorization is not installed."
+        )
     try:
         return checked_delivery(run, payload)
     except (KeyError, TypeError, ValueError, AttributeError, DeliveryError):

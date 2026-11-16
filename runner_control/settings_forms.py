@@ -19,7 +19,7 @@ class RunnerSettingsForm(forms.ModelForm):
         for stage in ("research", "implementation"):
             self.fields[f"{stage}_model"].widget.attrs["list"] = "runner-claude-models"
             self.fields[f"{stage}_model"].help_text = (
-                "Select the provider API model ID. Claude uses Messages API; OpenCode uses the selected connection provider (for example qwen3-coder:30b for Ollama). Native Claude Code and OpenCode CLI execution remain unsupported."
+                "Select the configured backend model. Native adapters must qualify before execution. Separate research settings are retained for history and do not gate native execution."
             )
             self.fields[f"{stage}_credential"].queryset = Credential.objects.filter(
                 provider__in=BACKENDS
@@ -31,7 +31,12 @@ class RunnerSettingsForm(forms.ModelForm):
         labels = {"minimum_remaining_usage_percent": "Minimum remaining usage (%)"}
         field_classes = {
             field: ConfigurationJSONField
-            for field in ("windows", "setup_commands", "validation_commands")
+            for field in (
+                "windows",
+                "setup_commands",
+                "validation_commands",
+                "execution_policy",
+            )
         }
         help_texts = {
             "workspace_retention_days": "Remove only acknowledged terminal workspaces; active, waiting, and uncertain reporting remain protected.",
@@ -43,7 +48,8 @@ class RunnerSettingsForm(forms.ModelForm):
             "timezone": "IANA timezone. Schedule evaluation and DST policy belong to the execution gates.",
             "reserve_enabled": "Block all projects if any participating account lacks fresh allowance or is at/below the reserve.",
             "minimum_remaining_usage_percent": "40 permits work only while more than 40% remains. Zero still blocks exhausted accounts.",
-            "setup_commands": "JSON list of setup commands. Untrusted commands require separate approval.",
+            "setup_commands": "JSON list of setup commands, restricted to the configured isolated task policy.",
+            "execution_policy": "Versioned native execution limits. Task content cannot change this policy. Runtime and agent installation are still required.",
             "validation_commands": "JSON list of required validation commands.",
         }
         widgets = {
@@ -93,7 +99,7 @@ class ProjectRunnerSettingsForm(forms.Form):
                     required=False,
                     label=label,
                 )
-            elif key.endswith("commands"):
+            elif key.endswith("commands") or key == "execution_policy":
                 value = ConfigurationJSONField(
                     required=False,
                     label=label,
@@ -111,7 +117,7 @@ class ProjectRunnerSettingsForm(forms.Form):
                     ),
                 )
             if key.endswith("model"):
-                value.help_text = "Use the selected provider model ID, including Ollama tag where needed; native CLI execution remains unsupported."
+                value.help_text = "Use the configured backend model. Native adapters must qualify before execution."
                 value.widget.attrs["list"] = "runner-claude-models"
             self.fields[key] = value
             entry = saved.get(key, {})

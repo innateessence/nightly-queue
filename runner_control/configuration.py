@@ -7,6 +7,8 @@ from django.db import transaction
 
 from credentials.models import Credential
 from projects.models import Project
+from vibearr_runner.policy import ExecutionPolicy
+from vibearr_runner.native_evidence import native_evidence_contract
 
 from .settings_models import ProjectRunnerSettings, RunnerSettings
 from .validators import OVERRIDE_FIELDS, validate_backend_model
@@ -37,13 +39,14 @@ def project_configuration(project, defaults, overrides, credentials):
         sources[field] = mode
     errors = []
     capabilities = [
-        "sandbox",
-        "command_approval",
+        "isolated_runtime",
+        "native_session",
+        "validation_profile",
         "checkpoint",
         "issue_context",
         "git_delivery",
     ]
-    for stage in ("research", "implementation"):
+    for stage in ("implementation",):
         for field in ("backend", "model", "credential_id"):
             key = f"{stage}_{field}"
             if not effective[key]:
@@ -104,6 +107,7 @@ def project_configuration(project, defaults, overrides, credentials):
     for field in OVERRIDE_FIELDS:
         if (
             field.endswith("credential_id")
+            and not field.startswith("research_")
             and effective[field]
             and effective[field] not in credentials
         ):
@@ -115,7 +119,7 @@ def project_configuration(project, defaults, overrides, credentials):
                 }
             )
     for field in OVERRIDE_FIELDS:
-        if not field.endswith("credential_id"):
+        if not field.endswith("credential_id") or field.startswith("research_"):
             continue
         credential = credentials.get(effective[field])
         if credential and credential.get("revoked_at"):
@@ -129,7 +133,7 @@ def project_configuration(project, defaults, overrides, credentials):
         if not credential or not field.startswith(("research", "implementation")):
             continue
         allowed = {
-            "codex": ("token", "session"),
+            "codex": ("token",),
             "claude": ("token",),
             "opencode": ("connection",),
         }
@@ -149,7 +153,12 @@ def project_configuration(project, defaults, overrides, credentials):
                 "message": "Configure required validation commands.",
             }
         )
+    policy = ExecutionPolicy.from_data(effective["execution_policy"])
     return {
+        "execution_kind": "native",
+        "execution_policy": policy.to_data(),
+        "policy_digest": policy.digest,
+        "delivery_contract_version": 2,
         "project_id": project.pk,
         "project_name": project.name,
         "repository_url": project.repository_url,
@@ -200,9 +209,11 @@ def _configuration_document(saved):
         selected.update(
             effective[field]
             for field in OVERRIDE_FIELDS
-            if field.endswith("credential_id") and effective[field]
+            if field.endswith("credential_id")
+            and not field.startswith("research_")
+            and effective[field]
         )
-        for stage in ("research", "implementation"):
+        for stage in ("implementation",):
             backend = effective[f"{stage}_backend"]
             reference = effective[f"{stage}_credential_id"]
             if backend:
@@ -214,7 +225,7 @@ def _configuration_document(saved):
                 if project["project_id"] not in account["project_ids"]:
                     account["project_ids"].append(project["project_id"])
     # Include default accounts even before a project exists.
-    for stage in ("research", "implementation"):
+    for stage in ("implementation",):
         backend = defaults[f"{stage}_backend"]
         reference = defaults[f"{stage}_credential_id"]
         if backend:
@@ -240,19 +251,14 @@ def _configuration_document(saved):
         "execution_ready": False,
         "readiness_reason": "Live execution requires controlled release verification; structural validity grants no execution permission.",
     }
-    from .release import verification
-
-    proof = verification(document)
-    document["release_verification"] = proof
-    document["execution_ready"] = proof["qualified"]
-    document["readiness_reason"] = proof.get(
-        "reason",
-        "Controlled release qualified; execution still requires enabled settings and fresh gates.",
-    )
-    for project in projects:
-        project["execution_ready"] = bool(
-            proof["qualified"] and project["structurally_valid"]
-        )
+    document["execution_kind"] = "native"
+    document["delivery_contract"] = native_evidence_contract()
+    document["release_verification"] = {
+        "qualified": False,
+        "execution_kind": "native",
+        "reason": "Native runtime and backend qualification are not installed. Legacy proposal execution is disabled.",
+    }
+    document["readiness_reason"] = document["release_verification"]["reason"]
     encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     document["revision"] = hashlib.sha256(encoded).hexdigest()
     return document

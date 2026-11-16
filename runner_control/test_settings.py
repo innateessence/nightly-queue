@@ -83,6 +83,7 @@ class RunnerSettingsTests(TestCase):
                 "runner-windows": "[]",
                 "runner-setup_commands": value,
                 "runner-validation_commands": "[]",
+                "runner-execution_policy": json.dumps(saved.execution_policy),
             },
         )
         data = {key: "" if value is None else value for key, value in data.items()}
@@ -278,6 +279,7 @@ class RunnerSettingsTests(TestCase):
                 "runner-windows": "[]",
                 "runner-setup_commands": "[]",
                 "runner-validation_commands": "[]",
+                "runner-execution_policy": json.dumps(saved.execution_policy),
             },
         )
         data = {key: "" if value is None else value for key, value in data.items()}
@@ -429,8 +431,12 @@ class EffectiveConfigurationTests(ConfiguredProjectTestCase):
         ProjectRunnerSettings.objects.create(
             project=self.project,
             overrides={
-                "research_backend": {"mode": "replace", "value": "claude"},
-                "research_credential_id": {"mode": "replace", "value": other.pk},
+                "implementation_backend": {"mode": "replace", "value": "claude"},
+                "implementation_credential_id": {"mode": "replace", "value": other.pk},
+                "implementation_model": {
+                    "mode": "replace",
+                    "value": "claude-sonnet-5-5",
+                },
             },
         )
         accounts = configuration_document()["accounts"]
@@ -446,7 +452,7 @@ class EffectiveConfigurationTests(ConfiguredProjectTestCase):
             {
                 "backend": "codex",
                 "credential_id": self.backend.pk,
-                "project_ids": [self.project.pk],
+                "project_ids": [],
             },
             accounts,
         )

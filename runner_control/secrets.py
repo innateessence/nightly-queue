@@ -52,6 +52,11 @@ def selected_reference(data, runner, document):
     run = owned_run(runner, uuid_field(data, "run_id"))
     verify_active(run, uuid_field(data, "claim_token"))
     purpose = data["purpose"]
+    if (
+        run.configuration_snapshot.get("execution_kind") == "native"
+        and purpose == "research"
+    ):
+        unavailable("Separate research credentials are inactive for native execution.")
     if purpose not in PURPOSES:
         unavailable("Choose a supported credential purpose.")
     effective = run.configuration_snapshot.get("effective", {})

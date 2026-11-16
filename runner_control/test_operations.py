@@ -521,7 +521,7 @@ class ReleaseEvidenceTests(TestCase):
         from .settings_models import RunnerSettings
 
         complete(self.entry.pk, self.runner, self.report)
-        self.assertTrue(configuration_document()["execution_ready"])
+        self.assertFalse(configuration_document()["execution_ready"])
         settings = RunnerSettings.objects.get(pk=1)
         settings.research_model = "changed-model"
         settings.save()
@@ -535,7 +535,7 @@ class ReleaseEvidenceTests(TestCase):
         settings = RunnerSettings.objects.get(pk=1)
         settings.paused = True
         settings.save()
-        self.assertTrue(configuration_document()["execution_ready"])
+        self.assertFalse(configuration_document()["execution_ready"])
         self.assertFalse(configuration_document()["global"]["enabled"])
 
     def test_qualified_evidence_cannot_be_rewritten(self):

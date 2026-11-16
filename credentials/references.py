@@ -2,7 +2,11 @@ def snapshot_credential_ids(snapshot):
     return {
         value
         for field, value in snapshot.get("effective", {}).items()
-        if field.endswith("credential_id") and type(value) is int
+        if field.endswith("credential_id")
+        and type(value) is int
+        and not (
+            snapshot.get("execution_kind") == "native" and field.startswith("research_")
+        )
     }
 
 
@@ -16,5 +20,7 @@ def configuration_credential_ids(document):
         snapshot_credential_ids({"effective": document.get("global", {})})
     )
     for project in document.get("projects", []):
-        references.update(snapshot_credential_ids(project))
+        references.update(
+            snapshot_credential_ids({"effective": project.get("effective", {})})
+        )
     return references

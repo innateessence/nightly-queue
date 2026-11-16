@@ -17,6 +17,7 @@ OVERRIDE_FIELDS += (
     "validation_commands",
     "issue_credential_id",
     "repository_credential_id",
+    "execution_policy",
 )
 
 
@@ -81,6 +82,15 @@ def validate_json_text(value):
         raise ValidationError("Enter valid Unicode text.") from None
 
 
+def validate_execution_policy(value):
+    from vibearr_runner.policy import ExecutionPolicy, PolicyError
+
+    try:
+        ExecutionPolicy.from_data(value)
+    except PolicyError as exc:
+        raise ValidationError(str(exc)) from None
+
+
 def validate_overrides(value):
     if not isinstance(value, dict) or set(value) - set(OVERRIDE_FIELDS):
         raise ValidationError("Enter supported project override fields.")
@@ -95,10 +105,16 @@ def validate_overrides(value):
             )
         if set(entry) - {"mode", "value"}:
             raise ValidationError("Unknown override property.")
+        if key == "execution_policy" and entry["mode"] == "clear":
+            raise ValidationError(
+                "Execution policy cannot be cleared; inherit or replace it."
+            )
         if entry["mode"] != "replace":
             continue
         replacement = entry.get("value")
-        if key.endswith("commands"):
+        if key == "execution_policy":
+            validate_execution_policy(replacement)
+        elif key.endswith("commands"):
             validate_commands(replacement)
         elif key.endswith("credential_id"):
             if type(replacement) is not int or replacement < 1:

@@ -1,5 +1,22 @@
 # Runner operations and release verification
 
+## Native policy upgrade
+
+The [native execution policy](runner-execution-policy.md) replaces human command
+approval. Migration `0009_autonomous_execution_policy` disables execution, preserves
+approval history, and requests cancellation of legacy active runs without releasing
+their ownership fence. Stop/reconcile recorded children and unknown external effects
+before finishing/retrying that work. Do not restore an old approved command merely
+because its decision still reads Approved.
+
+New claims snapshot native policy and a version 2 delivery contract. Research-only
+settings no longer gate native execution. Native runtime/adapter qualification is
+not yet installed in this feature, so normal execution remains unavailable. The
+controlled proposal qualification procedure below is retained for historical
+recovery/readback and cannot qualify native work. Use the [MVP release
+contract](vibearr-mvp.md) for the replacement automated qualification path.
+
+
 The operator UI remains a private-LAN, single-user interface. Browser writes use
 CSRF protection. Runner bearer authentication and the private controller proof
 stored in its volume are separate machine boundaries. Do not expose the browser
