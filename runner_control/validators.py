@@ -1,4 +1,5 @@
 import datetime
+import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.core.exceptions import ValidationError
@@ -114,3 +115,15 @@ def validate_overrides(value):
             raise ValidationError("Choose a supported backend.")
         else:
             validate_json_text(replacement)
+
+
+def validate_backend_model(backend, model):
+    if backend != "claude" or not model:
+        return
+    if (
+        len(model) > 200
+        or re.fullmatch(r"claude-[a-z0-9]+(?:-[a-z0-9]+)*", model) is None
+    ):
+        raise ValidationError(
+            "Enter a Claude API model ID, such as claude-sonnet-5-5; endpoint URLs and CLI aliases are unsupported."
+        )

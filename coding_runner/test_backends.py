@@ -498,7 +498,7 @@ class TransportTests(unittest.TestCase):
             killpg(pid, signum)
 
         with patch(
-            "coding_runner.codex_backend.os.killpg", side_effect=exit_before_signal
+            "coding_runner.proposal_backend.os.killpg", side_effect=exit_before_signal
         ):
             with self.assertRaises(BackendInterrupted):
                 backend.research(

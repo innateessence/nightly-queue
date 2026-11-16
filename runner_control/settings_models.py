@@ -5,6 +5,7 @@ from django.db import models, transaction
 from .validators import (
     BACKENDS,
     validate_commands,
+    validate_backend_model,
     validate_overrides,
     validate_timezone,
     validate_windows,
@@ -125,6 +126,13 @@ class RunnerSettings(models.Model):
             raise ValidationError("Only one runner settings record is allowed.")
         if self.schedule_mode == "windows" and not self.windows:
             raise ValidationError({"windows": "Add at least one processing window."})
+        for stage in ("research", "implementation"):
+            try:
+                validate_backend_model(
+                    getattr(self, f"{stage}_backend"), getattr(self, f"{stage}_model")
+                )
+            except ValidationError as exc:
+                raise ValidationError({f"{stage}_model": exc.messages}) from None
         for field in (
             "research_timeout_seconds",
             "implementation_timeout_seconds",

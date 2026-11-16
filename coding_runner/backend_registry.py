@@ -2,6 +2,7 @@ from typing import Any, Callable
 
 from .backends import Backend, BackendError, BackendRequest
 from .codex_backend import CodexBackend
+from .claude_backend import ClaudeBackend
 
 
 class ScopedCredentials:
@@ -54,7 +55,11 @@ class BackendRegistry:
     def __init__(
         self, factories: dict[str, Callable[[ScopedCredentials], Backend]] | None = None
     ):
-        self.factories = factories if factories is not None else {"codex": CodexBackend}
+        self.factories = (
+            factories
+            if factories is not None
+            else {"codex": CodexBackend, "claude": ClaudeBackend}
+        )
 
     def create(self, provider: str, credentials: ScopedCredentials) -> Backend:
         factory = self.factories.get(provider)

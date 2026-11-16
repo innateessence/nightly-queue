@@ -17,6 +17,10 @@ class RunnerSettingsForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for stage in ("research", "implementation"):
+            self.fields[f"{stage}_model"].widget.attrs["list"] = "runner-claude-models"
+            self.fields[f"{stage}_model"].help_text = (
+                "Claude uses the candidate Messages API transport; select an API model ID. Native Claude Code remains unsupported."
+            )
             self.fields[f"{stage}_credential"].queryset = Credential.objects.filter(
                 provider__in=BACKENDS
             ).defer("encrypted_payload")
@@ -106,6 +110,8 @@ class ProjectRunnerSettingsForm(forms.Form):
                         else forms.TextInput()
                     ),
                 )
+            if key.endswith("model"):
+                value.widget.attrs["list"] = "runner-claude-models"
             self.fields[key] = value
             entry = saved.get(key, {})
             self.initial[f"{key}_mode"] = entry.get("mode", "inherit")

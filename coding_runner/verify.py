@@ -29,6 +29,7 @@ def portable_suite():
         "test_implementation",
         "test_delivery",
         "test_recovery",
+        "test_claude_recovery",
     ):
         path = Path(__file__).parent / "acceptance" / (module + ".py")
         if not path.exists():

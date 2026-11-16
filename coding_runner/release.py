@@ -8,6 +8,7 @@ import platform
 import subprocess
 import sys
 import tempfile
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -427,8 +428,13 @@ def main() -> int:
         from .gates import GateEvaluator
         from .backend_registry import BackendRegistry, ScopedCredentials
         from .lifecycle import Lifecycle
-        from .codex_backend import CodexBackend, CAPABILITIES, ProcessTransport
-        import threading
+        from .codex_backend import CAPABILITIES as CODEX_CAPABILITIES, CodexBackend
+        from .claude_backend import (
+            CAPABILITIES as CLAUDE_CAPABILITIES,
+            ClaudeBackend,
+            ClaudeProcessTransport,
+        )
+        from .proposal_backend import ProcessTransport
 
         gates = GateEvaluator(journal)
         harness = ControlledRelease(client, journal, args.qualification)
@@ -503,18 +509,21 @@ def main() -> int:
             for entry in configuration["credentials"]
         }
 
-        def traced_backend(credentials):
-            from .qualification_trace import ModelTraceTransport
+        def traced_factory(factory, capabilities, probe_transport):
+            def traced_backend(credentials):
+                from .qualification_trace import ModelTraceTransport
 
-            class ControlledCodex(CodexBackend):
-                def readiness(self, account):
+                backend = factory(credentials)
+                original_run = backend._run
+
+                def readiness(account):
                     def probe():
                         if not checkpoint():
                             return None
-                        response = ProcessTransport().exchange(
+                        response = probe_transport().exchange(
                             {
                                 "probe_model": account["model"],
-                                "token": self._token(account),
+                                "token": backend._token(account),
                                 "timeout": 10,
                             },
                             timeout=10,
@@ -524,20 +533,24 @@ def main() -> int:
                         return response.get("authenticated_model")
 
                     return harness.candidate_readiness(
-                        state, account, CAPABILITIES, probe
+                        state, account, capabilities, probe
                     )
 
-                def _run(self, stage, request, progress, checkpoint, stop):
-                    self.transport = ModelTraceTransport(
+                def traced_run(stage, request, progress, checkpoint, stop):
+                    backend.transport = ModelTraceTransport(
                         journal,
                         state,
                         request.account,
                         versions[request.account["credential_id"]],
                         stage,
                     )
-                    return super()._run(stage, request, progress, checkpoint, stop)
+                    return original_run(stage, request, progress, checkpoint, stop)
 
-            return ControlledCodex(credentials)
+                backend.readiness = readiness
+                backend._run = traced_run
+                return backend
+
+            return traced_backend
 
         from .delivery import DeliveryStage, GitHubDeliveryClient, SupervisorGit
 
@@ -577,7 +590,16 @@ def main() -> int:
         lifecycle = Lifecycle(
             client,
             journal,
-            BackendRegistry({"codex": traced_backend}),
+            BackendRegistry(
+                {
+                    "codex": traced_factory(
+                        CodexBackend, CODEX_CAPABILITIES, ProcessTransport
+                    ),
+                    "claude": traced_factory(
+                        ClaudeBackend, CLAUDE_CAPABILITIES, ClaudeProcessTransport
+                    ),
+                }
+            ),
             checkpoint,
             delivery_factory=delivery_factory,
         )

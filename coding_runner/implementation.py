@@ -171,7 +171,7 @@ def verify_delivery_ready(
 
 
 def apply_patch(workspace: Workspace, proposal: dict[str, Any]) -> None:
-    from .codex_backend import validate_proposal
+    from .proposal_backend import validate_proposal
 
     validate_proposal("patch", proposal)
     if (
@@ -562,7 +562,7 @@ class ImplementationStage:
         return self._proposal(state, session, plan, context, workspace)
 
     def _proposal(self, state, session, plan, context, workspace):
-        from .codex_backend import validate_proposal
+        from .proposal_backend import validate_proposal
 
         pending = session["pending"]
         kind, data = pending["kind"], pending["data"]
