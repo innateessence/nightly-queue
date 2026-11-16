@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 import threading
@@ -112,7 +113,8 @@ class RepositoryCredentialTests(unittest.TestCase):
             stream.write(secret.encode())
             stream.flush()
             arguments = [
-                "/usr/bin/python3",
+                sys.executable,
+                "-I",
                 helper,
                 str(os.getpid()),
                 str(stream.fileno()),

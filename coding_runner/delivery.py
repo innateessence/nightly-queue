@@ -6,6 +6,7 @@ import re
 import subprocess
 import tempfile
 import shlex
+import sys
 import time
 from http.client import HTTPException
 from typing import Any
@@ -172,7 +173,8 @@ class SupervisorGit:
             credential.flush()
             helper_path = shlex.quote(os.path.dirname(__file__) + "/git_credential.py")
             scope = repository_path(workspace.repository_url).lstrip("/")
-            helper = f"!/usr/bin/python3 {helper_path} {os.getpid()} {descriptor} {shlex.quote(scope)}"
+            interpreter = shlex.quote(sys.executable)
+            helper = f"!{interpreter} -I {helper_path} {os.getpid()} {descriptor} {shlex.quote(scope)}"
             command = [
                 "/usr/bin/git",
                 "-c",
