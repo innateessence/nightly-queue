@@ -21,6 +21,36 @@ def cancel(request, run_id):
 
 
 @require_POST
+def retry(request, run_id):
+    from django.contrib import messages
+    from work_queue.models import QueueItem
+    from work_queue.services import requeue_items
+    from .models import Run
+
+    run = get_object_or_404(Run, pk=run_id)
+    try:
+        result = requeue_items(
+            QueueItem.objects.filter(pk=run.item_id),
+            return_summary=True,
+            expected_run_id=run.pk,
+        )
+    except RunConflict as exc:
+        return HttpResponse(str(exc), status=409, content_type="text/plain")
+    if result["pending"]:
+        messages.info(
+            request,
+            "Retry requested; the current native attempt keeps ownership until termination is confirmed.",
+        )
+    elif result["held"]:
+        messages.warning(request, "Existing delivery must be reconciled before retry.")
+    elif result["requeued"]:
+        messages.success(request, "Work queued for a new attempt.")
+    else:
+        messages.info(request, "This work is not retryable.")
+    return redirect("runner_plan_detail", run_id=run_id)
+
+
+@require_POST
 def authorize_release(request):
     from django.core.exceptions import ValidationError
     from .models import RunnerIdentity

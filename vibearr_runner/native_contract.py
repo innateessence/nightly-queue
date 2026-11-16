@@ -687,6 +687,8 @@ def receipt_summary(observed):
     result = observed.get("result")
     if not isinstance(result, dict):
         raise NativeContractError("Native operation has no protected result.")
+    if result.get("terminated") is not True:
+        raise NativeContractError("Protected native termination is unconfirmed.")
     identifier(observed.get("operation_id"))
     if result.get("operation_id") != observed["operation_id"]:
         raise NativeContractError("Protected result operation differs from its status.")
@@ -786,6 +788,7 @@ def receipt_passed(value):
                 "source_digest",
                 "export_digest",
                 "inventory_digest",
+                "container_id",
             )
         )
     )

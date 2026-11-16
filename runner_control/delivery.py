@@ -29,9 +29,9 @@ def sha(value, length=None):
 
 def validate_delivery(run, payload):
     if run.configuration_snapshot.get("execution_kind") == "native":
-        raise ValidationError(
-            "Native version 2 delivery authorization is not installed."
-        )
+        from .native_services import validate_delivery as validate_native_delivery
+
+        return validate_native_delivery(run, payload)
     try:
         return checked_delivery(run, payload)
     except (KeyError, TypeError, ValueError, AttributeError, DeliveryError):
@@ -231,5 +231,10 @@ def validate_success(run, result_url):
     if evidence is None:
         reject()
     delivery = validate_delivery(run, evidence.payload)
-    if result_url != delivery["pull_request"]["url"]:
+    pull = (
+        delivery["delivery"]["pull_request"]
+        if delivery.get("execution_kind") == "native"
+        else delivery["pull_request"]
+    )
+    if result_url != pull["url"]:
         reject()
