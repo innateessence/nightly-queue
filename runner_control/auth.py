@@ -36,6 +36,23 @@ def runner_api_view(*methods):
             runner = runner_authentication(request)
             if runner is None:
                 return unauthorized()
+            proof = request.headers.get("X-NQ-Controller-Secret", "")
+            protected = view.__name__ not in {
+                "identity",
+                "configuration",
+                "active",
+                "gates",
+                "bind_controller",
+            }
+            runner.controller_proven = bool(proof) and constant_time_compare(
+                runner.controller_digest, token_digest(proof)
+            )
+            if protected and request.method in methods and not runner.controller_proven:
+                response = JsonResponse(
+                    {"error": "Controller volume proof is required."}, status=409
+                )
+                response["Cache-Control"] = "no-store"
+                return response
             request.runner_identity = runner
             if request.method not in methods:
                 response = JsonResponse(

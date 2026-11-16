@@ -7,6 +7,7 @@ class RunnerIdentity(models.Model):
     name = models.SlugField(max_length=100, unique=True)
     token_digest = models.CharField(max_length=64, editable=False)
     enabled = models.BooleanField(default=True)
+    controller_digest = models.CharField(max_length=64, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -64,6 +65,9 @@ class Run(models.Model):
     error_summary = models.TextField(blank=True)
     finish_digest = models.CharField(max_length=64, blank=True, editable=False)
     claim_digest = models.CharField(max_length=64, blank=True, editable=False)
+    cancellation_requested_at = models.DateTimeField(null=True, blank=True)
+    cancellation_confirmed_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.CharField(max_length=2000, blank=True)
 
     class Meta:
         ordering = ["created_at", "pk"]

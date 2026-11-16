@@ -1,3 +1,4 @@
+from . import processes
 import json
 import os
 import re
@@ -37,7 +38,7 @@ CAPABILITIES = BackendCapabilities(
 
 def probe_codex(binary: str = "codex") -> dict[str, Any]:
     try:
-        result = subprocess.run(
+        result = processes.run(
             [binary, "--version"],
             capture_output=True,
             timeout=5,
@@ -101,7 +102,7 @@ class ProcessTransport:
                 if self.process is not None:
                     raise BackendError("Another model request is active.")
                 self.interrupted.clear()
-                self.process = subprocess.Popen(
+                self.process = processes.popen(
                     self.command(),
                     cwd="/",
                     env={},
@@ -170,6 +171,7 @@ class ProcessTransport:
                         except ProcessLookupError:
                             pass
                 process.wait()
+                processes.reaped(process)
                 with self.lock:
                     self.process = None
 

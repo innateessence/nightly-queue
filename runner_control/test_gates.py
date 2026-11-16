@@ -1,3 +1,4 @@
+from .test_support import CONTROLLER_SECRET, provision_controller
 import copy
 import json
 from datetime import timedelta
@@ -15,9 +16,15 @@ from .models import RunnerIdentity
 class GateEvidenceTests(TestCase):
     def setUp(self):
         self.runner = RunnerIdentity.objects.create(
-            name="test-runner", token_digest=token_digest("gate-test-token")
+            controller_digest=token_digest(CONTROLLER_SECRET),
+            name="test-runner",
+            token_digest=token_digest("gate-test-token"),
         )
-        self.auth = {"HTTP_AUTHORIZATION": "Bearer gate-test-token"}
+        provision_controller(self)
+        self.auth = {
+            "HTTP_AUTHORIZATION": "Bearer gate-test-token",
+            "HTTP_X_NQ_CONTROLLER_SECRET": CONTROLLER_SECRET,
+        }
         now = timezone.now()
         self.report = {
             "schema_version": 1,
@@ -103,7 +110,9 @@ class GateEvidenceTests(TestCase):
     def test_report_does_not_expose_other_runners_evidence(self):
         self.post()
         RunnerIdentity.objects.create(
-            name="other", token_digest=token_digest("other-token")
+            controller_digest=token_digest(CONTROLLER_SECRET),
+            name="other",
+            token_digest=token_digest("other-token"),
         )
         response = self.client.get(
             reverse("runner_gates"), HTTP_AUTHORIZATION="Bearer other-token"

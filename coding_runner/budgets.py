@@ -54,7 +54,12 @@ class ActiveBudget:
         return max(0.0, min(total_left, stage_left))
 
     def checkpoint(self) -> bool:
-        return self.stage is not None and self.remaining(self.stage) > 0
+        if self.stage is None:
+            return (
+                self.data["active"] is None
+                and self.data["total"] < self.limits["total"]
+            )
+        return self.remaining(self.stage) > 0
 
     def run(self, stage: str, operation: Callable[[float], T]) -> T:
         remaining = self.remaining(stage)

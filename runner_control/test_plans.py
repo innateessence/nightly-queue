@@ -1,3 +1,4 @@
+from .test_support import CONTROLLER_SECRET, provision_controller
 import json
 import uuid
 from datetime import timedelta
@@ -24,9 +25,12 @@ class ContextPlanAPITests(TestCase):
     def setUp(self):
         self.token = "test-runner-context-token"
         self.runner = RunnerIdentity.objects.create(
-            name="contexts", token_digest=token_digest(self.token)
+            controller_digest=token_digest(CONTROLLER_SECRET),
+            name="contexts",
+            token_digest=token_digest(self.token),
         )
         self.client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {self.token}"
+        provision_controller(self)
         self.project = Project.objects.create(
             name="Example",
             repository_url="https://github.com/example/repo",
@@ -232,7 +236,9 @@ class ContextPlanAPITests(TestCase):
     def test_foreign_runner_cannot_read_context_or_plans(self):
         self.valid_handoff()
         RunnerIdentity.objects.create(
-            name="foreign", token_digest=token_digest("foreign-token")
+            controller_digest=token_digest(CONTROLLER_SECRET),
+            name="foreign",
+            token_digest=token_digest("foreign-token"),
         )
         self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer foreign-token"
         for name in ["runner_contexts", "runner_plans"]:

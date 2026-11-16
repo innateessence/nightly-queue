@@ -1,3 +1,4 @@
+from .test_support import provision_controller
 import json
 import uuid
 
@@ -23,6 +24,7 @@ class RunnerConfigurationAPITests(ConfiguredProjectTestCase):
             name="configuration-test", token_digest=token_digest(self.token)
         )
         self.client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {self.token}"
+        provision_controller(self)
 
     def claim(self, revision):
         return self.client.post(

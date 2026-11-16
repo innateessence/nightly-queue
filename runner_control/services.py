@@ -38,6 +38,10 @@ def lock_controller(runner=None):
     if runner is None:
         return
     current = RunnerIdentity.objects.get(pk=runner.pk)
+    if current.controller_digest and not getattr(runner, "controller_proven", False):
+        raise RunConflict(
+            "Controller volume proof is required; operator reconciliation is required."
+        )
     if not current.enabled or not constant_time_compare(
         current.token_digest, runner.token_digest
     ):
@@ -51,9 +55,11 @@ def owned_run(runner, run_id):
         raise RunNotFound("Run not found.") from None
 
 
-def verify_active(run, claim_token):
+def verify_active(run, claim_token, *, allow_cancellation=False):
     if run.state != Run.State.ACTIVE or run.item is None:
         raise RunConflict("Run no longer owns active work.")
+    if run.cancellation_requested_at and not allow_cancellation:
+        raise RunConflict("Cancellation requested; stop execution before continuing.")
     item = run.item
     if item.status != QueueItem.Status.RUNNING or item.claim_token is None:
         raise RunConflict("Run no longer owns active work.")
@@ -107,7 +113,7 @@ def recover_claim(*, runner, run_id):
     lock_controller(runner)
     run = owned_run(runner, run_id)
     token = run.item.claim_token if run.item else None
-    verify_active(run, token)
+    verify_active(run, token, allow_cancellation=True)
     return run
 
 
@@ -232,7 +238,13 @@ def finish_run(*, runner, run_id, claim_token, status, result_url="", error_summ
                 "This run already completed with a different claim or result."
             )
         return run
-    verify_active(run, claim_token)
+    verify_active(run, claim_token, allow_cancellation=True)
+    if run.cancellation_requested_at and (
+        status != QueueItem.Status.FAILED or not run.cancellation_confirmed_at
+    ):
+        raise RunConflict(
+            "Cancellation requires confirmed termination and a failed result."
+        )
     result_url, error_summary = redact_run_payload(run, [result_url, error_summary])
     result.update(result_url=result_url, error_summary=error_summary)
     if status == QueueItem.Status.SUCCEEDED:

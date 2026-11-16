@@ -17,6 +17,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 from uuid import uuid4
 
 from .backends import BackendError
+from . import processes
 from .client import APIError, AmbiguousRequest, NoRedirects
 from .context import repository_path
 from .workspaces import Workspace, WorkspaceError, clean_environment, git
@@ -205,21 +206,28 @@ class SupervisorGit:
         self.trusted_local = trusted_local
 
     def remote(self, workspace: Workspace, arguments: list[str]) -> str:
+        return self.command(
+            arguments, workspace.repository_url, workspace.directory, workspace.checkout
+        )
+
+    def command(
+        self, arguments: list[str], repository_url: str, directory, cwd=None
+    ) -> str:
         if not self.trusted_local:
-            repository_path(workspace.repository_url)
+            repository_path(repository_url)
             if (
                 not self.token
                 or len(self.token) > 65536
                 or any(character.isspace() for character in self.token)
             ):
                 raise DeliveryError("A selected repository credential is required.")
-        credential = tempfile.TemporaryFile(dir=workspace.directory)
+        credential = tempfile.TemporaryFile(dir=directory)
         descriptor = credential.fileno()
         try:
             credential.write(self.token.encode())
             credential.flush()
             helper_path = shlex.quote(os.path.dirname(__file__) + "/git_credential.py")
-            scope = repository_path(workspace.repository_url).lstrip("/")
+            scope = repository_path(repository_url).lstrip("/")
             interpreter = shlex.quote(sys.executable)
             helper = f"!{interpreter} -I {helper_path} {os.getpid()} {descriptor} {shlex.quote(scope)}"
             command = [
@@ -245,9 +253,9 @@ class SupervisorGit:
                 "-c",
                 "core.sshCommand=/usr/bin/false",
             ]
-            result = subprocess.run(
+            result = processes.run(
                 command + arguments,
-                cwd=workspace.checkout,
+                cwd=cwd,
                 env=clean_environment(),
                 capture_output=True,
                 timeout=120,

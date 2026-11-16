@@ -551,7 +551,9 @@ class ControllerGateTests(ServerCase):
         self.assertIn("release_disabled", report["reasons"])
         self.assertIn("usage_missing", report["reasons"])
         writes = [path for method, path in self.server.calls if method == "POST"]
-        self.assertEqual(writes, ["/api/v1/runner/gates/report/"])
+        self.assertEqual(
+            writes, ["/api/v1/runner/controller/", "/api/v1/runner/gates/report/"]
+        )
 
 
 if __name__ == "__main__":

@@ -30,7 +30,15 @@ def create(request, run_id):
     operation_id = uuid_field(data, "operation_id")
     action = data.get("action")
     bearer = request.headers.get("Authorization", "").split()[-1]
-    reject_secrets(action, [str(token), token.hex, bearer])
+    reject_secrets(
+        action,
+        [
+            str(token),
+            token.hex,
+            bearer,
+            request.headers.get("X-NQ-Controller-Secret", ""),
+        ],
+    )
 
     def operation():
         approval = request_approval(
