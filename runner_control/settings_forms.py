@@ -14,6 +14,10 @@ class ConfigurationJSONField(forms.JSONField):
 
 
 class RunnerSettingsForm(forms.ModelForm):
+    def clean_merge_profile(self):
+        value = self.cleaned_data.get("merge_profile")
+        return {} if value is None else value
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for stage in ("research", "implementation"):
@@ -36,6 +40,7 @@ class RunnerSettingsForm(forms.ModelForm):
                 "setup_commands",
                 "validation_commands",
                 "execution_policy",
+                "merge_profile",
             )
         }
         help_texts = {
@@ -50,6 +55,7 @@ class RunnerSettingsForm(forms.ModelForm):
             "minimum_remaining_usage_percent": "40 permits work only while more than 40% remains. Zero still blocks exhausted accounts.",
             "setup_commands": "JSON list of setup commands, restricted to the configured isolated task policy.",
             "execution_policy": "Versioned native execution limits. Task content cannot change this policy. Runtime and agent installation are still required.",
+            "merge_profile": "Trusted required workflows and independent/root AI review producers. Required for automatic merge; leave unset for PR-only delivery.",
             "validation_commands": "JSON list of required validation commands.",
         }
         widgets = {
@@ -99,7 +105,10 @@ class ProjectRunnerSettingsForm(forms.Form):
                     required=False,
                     label=label,
                 )
-            elif key.endswith("commands") or key == "execution_policy":
+            elif key.endswith("commands") or key in {
+                "execution_policy",
+                "merge_profile",
+            }:
                 value = ConfigurationJSONField(
                     required=False,
                     label=label,

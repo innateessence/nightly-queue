@@ -66,7 +66,7 @@ def selected_reference(data, runner, document):
         if type(reference) is not int or not selected or not granted:
             unavailable("This account is not selected for runner preflight.")
         return reference, backend
-    if scope not in {"run", "reconciliation"} or set(data) != {
+    if scope not in {"run", "reconciliation", "completion"} or set(data) != {
         "scope",
         "run_id",
         "claim_token",
@@ -75,10 +75,19 @@ def selected_reference(data, runner, document):
         unavailable("Use a configured preflight account or an owned active run.")
     run = owned_run(runner, uuid_field(data, "run_id"))
     reconciliation = scope == "reconciliation"
+    completion = scope == "completion"
     verify_active(
-        run, uuid_field(data, "claim_token"), allow_cancellation=reconciliation
+        run,
+        uuid_field(data, "claim_token"),
+        allow_cancellation=reconciliation or completion,
     )
     purpose = string_field(data, "purpose", max_length=30)
+    if completion:
+        from .merge_services import completion_authority
+
+        if purpose not in {"issue", "repository"}:
+            unavailable("Completion credentials are restricted to GitHub reporting.")
+        completion_authority(run, document)
     if reconciliation:
         from .native_services import registered
 
@@ -180,6 +189,8 @@ def secret_document(data, runner):
         }
         if data["scope"] == "reconciliation":
             result["access_mode"] = "reconciliation-read-only"
+        elif data["scope"] == "completion":
+            result["access_mode"] = "completion-reporting-only"
         elif data["scope"] == "preflight" and data["backend"] == "github":
             result["access_mode"] = "preflight-read-only"
         return result

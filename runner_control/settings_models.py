@@ -12,6 +12,7 @@ from .validators import (
     validate_timezone,
     validate_windows,
     validate_execution_policy,
+    validate_merge_profile,
 )
 
 
@@ -21,6 +22,9 @@ class RunnerSettings(models.Model):
     paused = models.BooleanField(default=False)
     execution_policy = models.JSONField(
         default=default_execution_policy, validators=[validate_execution_policy]
+    )
+    merge_profile = models.JSONField(
+        default=dict, blank=True, validators=[validate_merge_profile]
     )
     schedule_mode = models.CharField(
         max_length=12,
@@ -117,6 +121,7 @@ class RunnerSettings(models.Model):
         super().clean()
         for field, validator in (
             ("execution_policy", validate_execution_policy),
+            ("merge_profile", validate_merge_profile),
             ("windows", validate_windows),
             ("setup_commands", validate_commands),
             ("validation_commands", validate_commands),

@@ -20,6 +20,20 @@ class RunnerController(models.Model):
     generation = models.PositiveBigIntegerField(default=0)
 
 
+class RepositoryMergeFence(models.Model):
+    repository_id = models.PositiveBigIntegerField(unique=True)
+    run = models.ForeignKey(
+        "Run", on_delete=models.PROTECT, related_name="merge_fences"
+    )
+    publication_id = models.UUIDField()
+    intent_id = models.UUIDField()
+    head_sha = models.CharField(max_length=64)
+    base_sha = models.CharField(max_length=64)
+    state = models.CharField(max_length=20, default="pending")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
 class Run(models.Model):
     class State(models.TextChoices):
         ACTIVE = "active", "Active"
