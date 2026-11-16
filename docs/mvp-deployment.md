@@ -1,64 +1,67 @@
-# Deploy the MVP
+# Deploy the MVP with Docker Compose
 
-The web app, PostgreSQL and issue importer run in Compose. A persistent user
-service owns the native supervisor and a second service owns the local executor.
-Only the executor accesses Docker. Task containers receive a source archive and
-the selected coding credential; the live checkout, database and control tokens
-stay outside them.
+Every vibearr process runs in Docker: web, database, importer, supervisor, coding
+workers, validation, tools, qualification, browser capture, backup and recovery.
+Existing Docker Engine and Compose are the only runtime prerequisites. Installation
+and operation never install host packages, services, virtual environments, coding
+CLIs or browsers, or change host security, shell or lingering configuration.
 
-Keep deployment state under the ignored, mode0700 `.runtime/` directory. Store
-database backups, environment files, tokens, profiles and journals there with
-mode0600 files. Use a separate immutable release checkout for the services;
-changing the web checkout must not change a running supervisor's Python modules.
+The [Docker-only runtime plan](docker-only-runtime-plan.md) defines the architecture,
+correction branches and release gates. It replaces the withdrawn host-service
+procedure. The current Compose file does not yet provide the complete replacement;
+keep autonomous execution disabled until D1–D4 are implemented and qualified.
 
-Before updating, stop new claims and confirm that active runs have finished or
-have protected termination receipts. Stop the importer and take a PostgreSQL
-custom-format backup plus a private copy of `.env`. Preserve the existing
-Compose project and database volume names. Pull the accepted main revision,
-build the app, apply migrations, and start the web app and importer.
+## Runtime layout
 
-Follow [bootstrap](self-development-bootstrap.md) to explicitly select the
-repository, coding connection, runner identity and grants. Existing connections
-and historical queue data remain intact. Enabling autonomous discovery creates
-a genuine current cutoff; do not backdate it to admit historical issues.
+Compose owns services, health checks, restart policies, private networks, named
+volumes and bounded tmpfs. Released images contain source and pinned tools.
+Production services do not mount the host checkout, home, credentials, `.git`,
+`.runtime`, Docker socket, devices or arbitrary host paths. No privileged container,
+host namespace or Docker-engine reconfiguration is part of this deployment.
 
-Build or reuse the reviewed immutable agent and validation images. Qualify the
-actual executor source and **all generated profiles** in the persistent executor
-state directory before starting the service. Reuse only image bytes, never
-another executor's journal or qualification file. See
-[isolated execution](isolated-executor.md) for the qualification command.
+The supervisor uses authenticated APIs on fixed worker slots provisioned by Compose.
+Trusted worker PID 1 separates task UIDs from control state, runs registered recipes,
+confirms descendant termination and resets all job state before reuse. Agent,
+setup and validation workers have separate credentials and network rules. Test
+PostgreSQL slots never share production data. No runtime component controls a daemon.
 
-Save `.runtime/service.env` with the dedicated runner API token, queue URL,
-runner state directory, executor URL/token-file, validation profile path and
-Docker connection. Use canonical `VIBEARR_*` names. Do not commit that file.
-The executor binds only to loopback; the supervisor uses the web app's published
-loopback port. Configure the same generated registry used during qualification.
+## Setup and upgrade sequence
 
-Render the service units with the installed Python3.12 executable:
+1. Build pinned images and inspect the rendered Compose configuration. Reject
+   forbidden mounts, privileges and exposed control/test ports.
+2. Start production database, broker, web and import containers. Apply migrations
+   through the application container, preserving existing data and encryption keys.
+3. Run a Docker bootstrap job to initialize private named volumes, choose saved
+   connections and worker profiles, and provision a runner identity. Keep claims
+   disabled. Never discover credentials by reading the operator's home or login.
+4. Start the controller and worker slots on private Docker networks. The normal
+   stack publishes only the intended application port.
+5. Run containerized qualification against actual images, limits, networks, journals,
+   reset/stop behavior and worker boot identities. Old host-based proofs are historical.
+6. Verify no-bypass GitHub policy and required CI. Run the bounded dependent two-issue
+   scenario, browser-container screenshots, recovery and backup/restore acceptance.
+   Enable routine processing only after these gates pass.
 
-```sh
-python deploy/render_services.py \
-  --release /absolute/path/to/immutable/release \
-  --runtime /absolute/path/to/.runtime \
-  --python /absolute/path/to/.runtime/venv/bin/python
-systemd-analyze --user verify /absolute/path/to/.runtime/units/*.service
-systemctl --user link /absolute/path/to/.runtime/units/*.service
-systemctl --user enable --now vibearr-executor.service vibearr-supervisor.service
-```
+These are implementation requirements, not instructions to start nonexistent tool
+services. A missing Docker tool must not be replaced with a host command.
 
-Enable user lingering when this host must continue processing after logout.
-Check authenticated executor capabilities, the supervisor journal and startup
-diagnostics before enabling claims. Configure the automatic-merge profile with
-the four required workflow identities, strict checks, squash merge and no
-ruleset bypass. AI review statuses are optional; the MVP runs with `reviews: []`.
-There is no command, plan or per-task approval step.
+## State, credentials and recovery
 
-Verify the actual two-issue MVP, its screenshots and recorded merge identities.
-Restart both services and confirm that they retain the same executor instance
-and controller ownership. Finally verify the web app, migrations, discovery and
-background service health against the deployed revision. A merged source change
-becomes the next task's base; updating these running services is a deployment.
+Preserve `postgres-data`, `valkey-data`, the encryption key, saved connections,
+queue and history. Use separate Docker-managed runner, worker, artifact, secret
+and backup volumes with minimal access. No model credential enters validation;
+no control token, production database connection or engine access enters a task.
 
-For rollback, stop claims and services, restore the matching source/environment
-and database backup, and start the previous release. Do not combine an older
-application with a database whose migrations it does not understand.
+The old host `.runtime` directory is not part of the deployment. Initialize fresh
+Docker identities where old host state was deleted and explicitly retire unused
+host identities. Reconcile unfinished GitHub publications without duplicating work,
+copying controller proofs or manufacturing successful completion.
+
+Before upgrades, stop claims, drain/checkpoint owned work and produce consistent
+container-generated backups. Verify restore in a disposable Compose project.
+Update images, migrate in a container, check health, then enable claims. Rollback
+uses compatible images and data. Host export is only an explicit operator-selected
+Docker copy; startup never deletes backups, credentials or rollback data.
+
+Use Docker logs and container health for operations. There are no host service
+files, schedulers, package installers or global configuration edits to maintain.

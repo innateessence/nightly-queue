@@ -2,10 +2,32 @@
 
 Date: 2026-11-15. Baseline: `5905c0f` on `main`.
 Planning branch: `plan/autonomous-ai-queue-pivot`.
+Docker-only revision: 2026-11-16, branch `docs/docker-only-mvp`.
 
 The [MVP release contract](vibearr-mvp.md) defines the first self-improvement loop,
 runtime choice, native evidence format, validation boundary, and release scenarios.
 This document maps that contract to feature branches and the later product roadmap.
+
+## Docker-only deployment is a P0 requirement
+
+The [Docker-only runtime plan](docker-only-runtime-plan.md) is authoritative. Every
+runtime, coding, test, packaging, migration, qualification, browser, backup and
+recovery process runs in a container. No host Python, virtual environment, coding
+CLI, Git task process, browser, systemd/cron service, lingering, package install or
+host configuration change is permitted. No runtime component receives a host Docker
+socket, privileged mode, host namespace, device or arbitrary host filesystem mount.
+
+Compose preprovisions fixed agent/setup/validation worker slots with authenticated
+APIs, private networks, named volumes and bounded tmpfs. Trusted worker initialization
+runs tasks under a separate unprivileged UID and proves complete reset/termination
+between jobs. This replaces dynamic host Docker dispatch without giving the
+application authority over the host engine. Old host-based acceptance is historical.
+
+Correction branches D1–D4 in that plan cover packaging, socketless worker slots,
+validation and Docker-only operations/acceptance. Each has its own branch/issue/PR.
+They are release-blocking prerequisites for the MVP, including already implemented
+features 02–07 and 15. Keep live claims disabled until the new boundary qualifies.
+This documentation revision does not resume execution or deploy anything.
 
 ## Outcome and priority
 
@@ -31,10 +53,10 @@ running application upgrade have separate evidence and outcomes.
 This document supersedes the sequencing and approval requirements in
 [the previous feature backlog](runner-feature-branches.md) for future pivot work.
 It is a development plan, not a claim that autonomous execution works today.
-This planning branch changes documentation only; it does not enable execution,
-alter repository instructions, publish issues, or run paid agents.
+This revision changes documentation and repository instructions and removes obsolete
+host service templates. It does not enable execution, install services or run paid agents.
 
-## Current code and actual blockers
+## Original baseline inventory (historical)
 
 | Area | Current evidence | Pivot work |
 | --- | --- | --- |
@@ -51,7 +73,7 @@ alter repository instructions, publish issues, or run paid agents.
 
 1. GitHub owns issue intent, discussion, and closure. PostgreSQL owns execution
    attempts, effective settings, synchronization cursors, and delivery evidence.
-   Local runner storage owns workspaces and protected recovery state.
+   Docker-managed runner volumes own workspaces and protected recovery state.
 2. Once a repository and permitted issue authors are configured, new open issues
    from those authors are eligible automatically. Start with the repository owner
    for this app's backlog. An optional `vibearr:hold` label excludes work; a `ready`
@@ -78,12 +100,16 @@ alter repository instructions, publish issues, or run paid agents.
 8. Unknown execution or delivery outcomes reconcile before retrying. Never start
    a replacement agent just because a heartbeat expired. Never claim success from
    a model's final message without checking the workspace and validation results.
+9. All execution and operations stay in Docker. Application services have no host
+   engine access. State lives in named volumes; workers cannot access host paths,
+   production storage, controller journals or credentials outside their grants.
 
 ## Feature branches and dependencies
 
-Only the planning branch is created by this change. The branches below are future
-features, each with its own GitHub issue and PR. Create each from updated `main`
-after its dependencies merge; do not accumulate all features on this plan branch.
+The original feature IDs below remain stable for issue/history references. Each
+feature or Docker correction needs its own branch and PR from updated `main` after
+its dependencies merge. Do not reuse an already merged branch or accumulate
+implementation on this documentation branch.
 The numbered IDs are planning identifiers, not existing GitHub issue numbers.
 
 | ID | Priority | Feature branch | Depends on | Result |
@@ -105,7 +131,7 @@ The numbered IDs are planning identifiers, not existing GitHub issue numbers.
 | 13 | P2 | `feat/parallel-project-workers` | 07 | Bounded concurrency across repositories |
 | 14 | P2 | `refactor/retire-legacy-approval-stack` | 07, 08, 09 | Remove obsolete runtime and approval plumbing after migration |
 
-The MVP consists of 01–07 and 15. Feature 15 keeps a new ID so existing plan
+The MVP consists of 01–07 and 15 plus mandatory Docker corrections D1–D4. Feature 15 keeps a new ID so existing plan
 references do not change. The rename in 00 can land independently and does not
 delay execution work. Branch 05 can proceed after 01 while runtime work proceeds
 through 02, then 03 and 15, then 04. Features 08–11 and the full rename do not delay
@@ -168,29 +194,23 @@ request to use multiple development agents now.
 
 ### 02 — Isolated native agent runtime
 
-- Implement the MVP's fixed OCI executor service using Docker on a dedicated
-  Linux runner host. Do not require nested bubblewrap. Prove Git, Python 3.12,
-  dependency installation, resource limits, restart-stable container identity, and
-  full descendant termination on the actual target host. Pin the task image;
-  branch 03 adds the native agent binary and verifies its runtime requirements.
-- Keep the web app and supervisor outside agent workspaces. Do not expose the
-  production checkout, application database, encryption key, Docker socket,
-  unrelated tasks, or supervisor journal to agent processes. Give agents their own
-  disposable Git metadata and import file changes into a separate trusted checkout;
-  publishing remains supervisor-owned. Only the trusted executor has engine access.
-- Separate dependency setup from credentialed model traffic. Define enforceable
-  egress and private-network restrictions and explicitly test the chosen model
-  auth mechanism. Native tools cannot inherit unrestricted supervisor secrets.
-  A model credential available to a CLI may be exposed to that CLI's tools unless
-  an actual broker isolates it; document and verify this boundary.
-- Replace the old approval-bound release path with automated, versioned runtime
-  qualification: real boundary tests, pinned-image provenance, auth diagnostics,
-  and revocation on material runtime changes. Keep failure diagnostics actionable;
-  a readiness switch alone cannot bypass a failed environment.
-- Acceptance: actual image/host tests prove allowed writes and installs, denied
-  access to host/control-plane files and networks, resource limits, cancellation
-  of all descendants, and recovery after restart. The explicit deployment boundary
-  verifier must test the selected runtime, not a retired namespace assumption.
+- Implement the Docker-only worker contract and correction branch D2. Compose
+  starts fixed slots; no executor, supervisor or agent receives a host engine
+  socket, daemon credentials, privileged mode or host-management API.
+- Trusted worker PID 1 accepts authenticated registered jobs, separates task UIDs
+  from control state, enforces actual slot limits/deadlines/egress, and confirms
+  complete descendant termination and fresh job state before reuse. Unknowns fence
+  the slot. Never describe a reused container as a fresh per-task container.
+- Keep source checkouts, journals and secrets in separate private Docker volumes.
+  Agents receive verified copies and disposable Git metadata; the supervisor owns
+  publication. Tasks cannot read host paths, production data or other jobs.
+- Separate credential-free dependency setup, credentialed model work and offline
+  validation. Never inherit host home, plugins, login material or global config.
+- Version and qualify the worker protocol, image/profile/boot identities and
+  reset/stop behavior. Old host-launcher evidence cannot establish readiness.
+- Acceptance: containerized probes prove no engine/host access, enforced resource
+  limits, denied LAN/metadata/control networks, no cross-job leakage, and correct
+  restart/cancel/export behavior. Unsupported isolation keeps execution disabled.
 
 ### 03 — Native Codex adapter
 
@@ -210,30 +230,26 @@ request to use multiple development agents now.
   must work before a production run has qualified, without circular release gates.
 - Acceptance: fixture processes test parsing, output limits, missing auth, hangs,
   and signals; a real bounded task edits a temporary repository, runs a test,
-  exits without prompts, and records its genuine session/result. Interrupt and
+  exits without prompts inside a Docker worker, and records its genuine session/result. Interrupt and
   restart without duplicating an unknown remote invocation.
 
 ### 15 — Isolated project validation
 
-- Build the trusted validation manifest and pinned Python 3.12/Git test image for
-  this repository before the delivery lifecycle depends on it. Use a fresh
-  PostgreSQL sidecar and run-specific credentials, volumes, and network. The
-  executor launches resources; candidate code receives no engine socket.
-- Cover formatting/lint/types, migration/system checks, Django tests, CLI tests,
-  portable runner tests, and Git acceptance. Run real boundary qualification on
-  the executor host. Select commands from the configured immutable profile, not
-  candidate-edited scripts. Dependency changes rebuild a candidate image in an
-  isolated executor build phase; production dependencies never change in place.
-- Emit profile/image/tree digests, required command IDs, actual outcomes, and log
-  references for version 2 delivery evidence. Run checks without model/GitHub
-  credentials. Clean up only run-owned disposable resources after recording results.
-- Add `.github/workflows/vibearr-validation.yml` with workflow `Vibearr validation`
-  and job `Validate candidate`, using the same trusted profile. Keep the current
-  `Run test.sh` check until its full coverage is deliberately consolidated later.
-- Acceptance: a known passing candidate passes, a deliberate failing test fails,
-  candidate edits cannot silently skip required checks, repeated runs have no DB
-  state leakage, and the live app/database/runner are unaffected. CI runs the same
-  profile; demonstrate the whole path without any native agent or paid model call.
+- Implement the Docker-only validation contract and correction branch D3. A
+  preprovisioned validation slot runs trusted image-owned commands against a fresh
+  exact-tree snapshot; no host test process or daemon access is involved.
+- Use separate test PostgreSQL slots with fresh job databases/roles and trusted
+  reset. No production volume, connection, credentials or published test DB port.
+- Retain formatting/lint/types, migrations/system checks, full Django, CLI,
+  portable runner, Git acceptance and containerized distribution checks.
+- Resolve dependency changes in the credential-free setup slot into verified,
+  digest-bound artifacts. Do not build images from runtime services, replace
+  image-owned validation tools or modify production dependencies in place.
+- Emit profile/image/tree/job/worker-boot identities, actual outcomes and bounded
+  logs. Validation has no model/GitHub credentials or public egress.
+- CI uses the same container images and profiles. Candidate scripts cannot weaken
+  commands. Demonstrate passing/failing candidates, reset/database isolation,
+  restart/cancel and dependency artifacts without any paid model call.
 
 ### 04 — Unattended issue to PR
 
@@ -399,16 +415,16 @@ request to use multiple development agents now.
 
 ### 12 — Automatic self-updates
 
-- Publish versioned application and runner images from merged commits. A separate
-  narrowly configured deployment component, outside agent workspaces, pulls a
-  selected release channel. Do not give agents the production Docker socket.
-- Drain active work, back up database and runner state, apply compatible migrations,
-  replace services, and run health checks. Record deployed commit/image identity.
-  Failed health checks restore the prior compatible deployment; irreversible schema
-  changes require a documented restore path and cannot promise automatic rollback.
-- Acceptance: a merged self-improvement becomes the running version automatically;
-  in-flight tasks survive the drain/restart; a failed upgrade recovers without
-  launching a second controller or mixing incompatible server/runner versions.
+- Publish versioned application/worker images from merged commits through Docker
+  build jobs. Image publication and update notification can ship first.
+- Keep automatic deployment outside the MVP until a separately designed deployment
+  interface preserves the Docker-only boundary. No host socket, privileged updater,
+  host service, cron job, package install or hidden engine credentials.
+- Drain/checkpoint work, produce and test container-generated backups, apply
+  migrations in containers, update compatible images and verify health. Record
+  deployed identities and honest restore limits for irreversible migrations.
+- Acceptance requires a genuinely scoped Docker-native update mechanism, successful
+  recovery and no host changes. Do not weaken isolation to satisfy auto-update.
 
 ### 13 — Bounded concurrency
 
@@ -437,8 +453,9 @@ Every feature PR lists its concrete behavior, migrations/configuration changes,
 and evidence. Use Django `TestCase` for services/API behavior, migration tests for
 state transitions, and standard-library `unittest` for the independent runtime
 and CLI. Follow repository Black, Ruff, mypy, migration, and system checks.
-Run appropriate focused tests while developing and required CI before merging;
-deployment boundary tests run explicitly on the target supported environment.
+Run focused and required checks inside Docker, including packaging and CI;
+qualification and browser acceptance also run in containers against the target
+Compose stack. Never install host tools or use a host fallback for a missing service.
 
 Maintain a common native-adapter conformance suite plus real acceptance per
 backend. Stubs prove protocol handling; they do not prove authentication, sandbox
@@ -447,6 +464,9 @@ Record exact versions and environment. Do not claim live qualification from
 portable test success or a model-generated success summary.
 
 ## Milestones
+
+- **Container foundation, D1–D4:** the complete Docker-only boundary and operations
+  qualify before M1–M3 can be accepted. Host-based milestones do not substitute.
 
 - **Identity, branch 00:** the application ships as vibearr with a tested migration
   from the previous command, configuration, package, and deployment names.
