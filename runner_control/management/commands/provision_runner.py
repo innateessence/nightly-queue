@@ -6,6 +6,8 @@ from django.core.validators import validate_slug
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
+from vibearr_app.environment import getenv
+
 from runner_control.auth import token_digest
 from runner_control.models import RunnerController, RunnerIdentity
 
@@ -15,7 +17,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("name")
-        parser.add_argument("--token-env", default="NQ_RUNNER_API_TOKEN")
+        parser.add_argument("--token-env", default="VIBEARR_RUNNER_API_TOKEN")
         parser.add_argument("--disable", action="store_true")
 
     def handle(self, *args, **options):
@@ -32,13 +34,16 @@ class Command(BaseCommand):
                 RunnerIdentity.objects.filter(name=name).update(enabled=False)
                 self.stdout.write("Runner identity disabled.")
                 return
-            token = os.environ.get(options["token_env"], "")
+            token_name = options["token_env"]
+            token = os.environ.get(token_name, "")
+            if token_name in {"NQ_RUNNER_API_TOKEN", "VIBEARR_RUNNER_API_TOKEN"}:
+                token = getenv("NQ_RUNNER_API_TOKEN")
             if len(token) < 32 or any(character.isspace() for character in token):
                 raise CommandError(
                     "Set the token environment variable to at least 32 characters without whitespace."
                 )
             if token == settings.NQ_API_TOKEN:
-                raise CommandError("Use a separate token from NQ_API_TOKEN.")
+                raise CommandError("Use a separate token from VIBEARR_API_TOKEN.")
             digest = token_digest(token)
             if (
                 RunnerIdentity.objects.filter(token_digest=digest)

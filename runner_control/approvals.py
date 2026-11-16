@@ -3,7 +3,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.views.decorators.debug import sensitive_variables
 
-from coding_runner.approvals import ActionSpec
+from vibearr_runner.approvals import ActionSpec
 from credentials.redaction import redact_run_payload
 
 from .models import ActionApproval, Run

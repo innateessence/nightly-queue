@@ -4,7 +4,7 @@ from django.http import JsonResponse
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare
 
-from nightly_queue.api import read_body, string_field
+from vibearr_app.api import read_body, string_field
 
 from .api import response_data, run_response
 from .auth import runner_api_view, token_digest

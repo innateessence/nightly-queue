@@ -1,9 +1,10 @@
-import os
+"""Compatibility import for vibearr_app.celery."""
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "nightly_queue.settings")
+import importlib
+import sys
 
-from celery import Celery
+from vibearr_app.celery import *  # noqa: F403
 
-app = Celery("nightly_queue")
-app.config_from_object("django.conf:settings", namespace="CELERY")
-app.autodiscover_tasks()
+_module = importlib.import_module("vibearr_app.celery")
+
+sys.modules[__name__] = _module

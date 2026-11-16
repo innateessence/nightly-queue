@@ -41,7 +41,7 @@ required user confirmations are resolved.
 
 ## Container and process layout
 
-- Add a separately built `coding-runner` service and package. Keep `nq` independent
+- Add a separately built `vibearr-runner` service and package. Keep `nq` independent
   of the runner and Django.
 - Use the existing HTTP API at `http://nightly-queue:8000` on the Compose network.
   The runner has no direct database or Celery broker dependency.

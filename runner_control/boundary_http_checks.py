@@ -6,10 +6,10 @@ from django.test import Client as Browser
 from django.test import LiveServerTestCase
 from django.urls import reverse
 
-from coding_runner.approvals import ApprovalBroker, ApprovalRequired
-from coding_runner.client import Client, ConflictError
-from coding_runner.sandbox import ApprovedExecutor, probe_sandbox
-from coding_runner.test_workspaces import WorkspaceFixture
+from vibearr_runner.approvals import ApprovalBroker, ApprovalRequired
+from vibearr_runner.client import Client, ConflictError
+from vibearr_runner.sandbox import ApprovedExecutor, probe_sandbox
+from vibearr_runner.test_workspaces import WorkspaceFixture
 from projects.models import Project
 from work_queue.services import enqueue_item
 

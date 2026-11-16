@@ -15,7 +15,7 @@ class ProjectForm(forms.ModelForm):
             "autonomous": "Import open issues and make imported issues eligible for claiming. Manual tasks remain independently claimable.",
         }
         widgets = {
-            "name": forms.TextInput(attrs={"placeholder": "e.g. Nightly queue"}),
+            "name": forms.TextInput(attrs={"placeholder": "e.g. vibearr"}),
             "repository_url": forms.URLInput(
                 attrs={"placeholder": "https://github.com/owner/repo"}
             ),

@@ -39,7 +39,7 @@ def repository_issues(repository_url, token):
             headers={
                 "Accept": "application/vnd.github+json",
                 "Authorization": f"Bearer {token}",
-                "User-Agent": "nightly-queue",
+                "User-Agent": "vibearr",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )

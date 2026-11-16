@@ -1,3 +1,5 @@
-from .celery import app as celery_app
+"""Legacy Django project import."""
+
+from vibearr_app import celery_app
 
 __all__ = ("celery_app",)

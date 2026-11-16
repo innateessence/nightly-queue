@@ -17,7 +17,7 @@ UI publicly as an authenticated multi-user service.
    remain necessary. GitHub permissions must cover issue/comment reads, repository
    contents writes, PR writes, and Actions run/artifact reads for qualification.
 4. Build the independent runner image and start the Compose `runner` profile.
-   Set only infrastructure bootstrap variables (`NQ_URL`, runner token, private
+   Set only infrastructure bootstrap variables (`VIBEARR_URL`, runner token, private
    state volume) outside the UI. The service has no database or encryption key.
 5. Run the authenticated `--check` command. It reads configuration without binding
    new ownership or claiming work. Use the same private volume on every restart.
@@ -134,10 +134,10 @@ production deployment acceptance remain blocked; execution is not qualified.
 
 The concrete workflow, after those external prerequisites are satisfied:
 
-1. Bind `NQ_RUNNER_IMAGE_DIGEST=sha256:...`,
-   `NQ_RUNNER_SANDBOX_POLICY_DIGEST=<reviewed-overlay-sha256>`, and
-   `NQ_RUNNER_SOURCE_REVISION=<source-commit>` in the actual deployment. Run
-   `python -m coding_runner.release --probe` there. Unsupported namespaces stop it.
+1. Bind `VIBEARR_RUNNER_IMAGE_DIGEST=sha256:...`,
+   `VIBEARR_RUNNER_SANDBOX_POLICY_DIGEST=<reviewed-overlay-sha256>`, and
+   `VIBEARR_RUNNER_SOURCE_REVISION=<source-commit>` in the actual deployment. Run
+   `python -m vibearr_runner.release --probe` there. Unsupported namespaces stop it.
 2. Complete the deployment-boundary workflow on that same image/source/policy.
    Download its `runner-boundary.json` artifact as data.
 3. In Settings → Controlled release verification authorize the named test repository,
@@ -149,8 +149,8 @@ The concrete workflow, after those external prerequisites are satisfied:
    safe steps and after completing each required approval:
 
    ```sh
-   python -m coding_runner.release --qualification UUID --item-id ITEM_ID
-   python -m coding_runner.release --qualification UUID
+   python -m vibearr_runner.release --qualification UUID --item-id ITEM_ID
+   python -m vibearr_runner.release --qualification UUID
    ```
 
    The scoped claim checks the exact next item and authorized repository. Every
@@ -166,7 +166,7 @@ The concrete workflow, after those external prerequisites are satisfied:
    its downloaded artifact using the selected repository credential:
 
    ```sh
-   python -m coding_runner.release --qualification UUID --boundary \
+   python -m vibearr_runner.release --qualification UUID --boundary \
      --workflow-run-url https://github.com/OWNER/APP/actions/runs/RUN \
      --boundary-evidence /protected/runner-boundary.json
    ```
@@ -179,7 +179,7 @@ The concrete workflow, after those external prerequisites are satisfied:
    Queue and explicitly execute a failing test task; preserve command/revision,
    exit code, protected log references, and useful failure diagnostics, then record
    its terminal result with `--record-result`. Do not manufacture a failure or PR.
-7. Run `python -m coding_runner.release --qualification UUID --submit-evidence`.
+7. Run `python -m vibearr_runner.release --qualification UUID --submit-evidence`.
    The server checks owned completed runs, saved context/plan/validated delivery,
    failure diagnostics, distinct restart observations, real provider response IDs
    for every account/model/version, UI control changes and runner gate history.

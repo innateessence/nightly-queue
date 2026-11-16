@@ -1,6 +1,6 @@
 from django.http import JsonResponse
 
-from nightly_queue.api import read_body, string_field
+from vibearr_app.api import read_body, string_field
 
 from .api import run_response
 from .auth import runner_api_view

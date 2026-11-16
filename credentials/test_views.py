@@ -151,7 +151,7 @@ class CredentialViewTests(TestCase):
     @override_settings(NQ_CREDENTIAL_KEY="")
     def test_missing_encryption_key_shows_error_without_saving(self):
         response = self.client.post(self.url, self.data)
-        self.assertContains(response, "Configure NQ_CREDENTIAL_KEY")
+        self.assertContains(response, "Configure VIBEARR_CREDENTIAL_KEY")
         self.assertNotContains(response, "private-token")
         self.assertFalse(Credential.objects.exists())
 

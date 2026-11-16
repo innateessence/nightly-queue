@@ -10,8 +10,8 @@ reconciliation if a journal operation is pending). The normal loop refreshes
 configuration without consuming work.
 
 Provision the separate runner identity with `manage.py provision_runner`, following
-its `--token-env` help. Put the same secret in the supervisor's `NQ_RUNNER_API_TOKEN`;
-`NQ_API_TOKEN` remains the independent general CLI credential. Configure bootstrap
+its `--token-env` help. Put the same secret in the supervisor's `VIBEARR_RUNNER_API_TOKEN`;
+`VIBEARR_API_TOKEN` remains the independent general CLI credential. Configure bootstrap
 values in an untracked environment file. Do not pass the database password,
 credential encryption key, issue-import secrets, or backend credentials to the
 supervisor.
@@ -60,7 +60,7 @@ routine recovery action.
 
 ## Deployment boundary
 
-The separately built Python 3.12 image copies only `coding_runner/`, uses UID/GID
+The separately built Python 3.12 image copies only `vibearr_runner/`, uses UID/GID
 10001, pins its base digest and Git/GitHub CLI package versions, and does not
 install Django or the application requirements. `coding_runner/pyproject.toml`
 is its independent dependency manifest; runtime dependencies are standard library

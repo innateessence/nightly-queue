@@ -1,16 +1,10 @@
-"""
-WSGI config for the nightly-queue project.
+"""Compatibility import for vibearr_app.wsgi."""
 
-It exposes the WSGI callable as a module-level variable named ``application``.
+import importlib
+import sys
 
-For more information on this file, see
-https://docs.djangoproject.com/en/4.1/howto/deployment/wsgi/
-"""
+from vibearr_app.wsgi import *  # noqa: F403
 
-import os
+_module = importlib.import_module("vibearr_app.wsgi")
 
-from django.core.wsgi import get_wsgi_application
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "nightly_queue.settings")
-
-application = get_wsgi_application()
+sys.modules[__name__] = _module

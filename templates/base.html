@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>{% block title %}Nightly{% endblock %}</title>
+  <title>{% block title %}vibearr{% endblock %}</title>
   <link rel="icon" type="image/x-icon" sizes="16x16 32x32 48x48" href="{% static 'work_queue/favicon.ico' %}">
   <link rel="icon" type="image/svg+xml" href="{% static 'work_queue/favicon.svg' %}">
   <link rel="apple-touch-icon" sizes="180x180" href="{% static 'work_queue/apple-touch-icon.png' %}">
@@ -50,9 +50,9 @@
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="{% url 'index' %}" aria-label="Nightly home">
+    <a class="brand" href="{% url 'index' %}" aria-label="vibearr home">
       <span class="brand-mark" aria-hidden="true">☾</span>
-      nightly<span class="brand-dot">.</span>
+      vibearr<span class="brand-dot">.</span>
     </a>
     <nav class="site-nav" aria-label="Main navigation">
       <a href="{% url 'index' %}"{% block queue_current %}{% endblock %}>Queue</a>

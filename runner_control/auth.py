@@ -7,7 +7,7 @@ from django.utils.crypto import constant_time_compare
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.debug import sensitive_variables
 
-from nightly_queue.api import unauthorized
+from vibearr_app.api import unauthorized
 
 from .models import RunnerIdentity
 
@@ -36,7 +36,8 @@ def runner_api_view(*methods):
             runner = runner_authentication(request)
             if runner is None:
                 return unauthorized()
-            proof = request.headers.get("X-NQ-Controller-Secret", "")
+            legacy_proof = request.headers.get("X-NQ-Controller-Secret", "")
+            proof = request.headers.get("X-Vibearr-Controller-Secret", legacy_proof)
             protected = view.__name__ not in {
                 "identity",
                 "configuration",

@@ -86,7 +86,7 @@ Distinct connections remain distinct accounts across mixed-backend stages.
 
 ## Optional CPU Ollama service
 
-`coding_runner/Dockerfile.ollama` pins official Ollama `0.40.16` by multi-platform
+`vibearr_runner/Dockerfile.ollama` pins official Ollama `0.40.16` by multi-platform
 image digest. The opt-in `ollama` Compose profile adds `runner-ollama`; the runner
 profile remains separate. It has its own model volume, no published host port,
 no GPU/device reservation, no application source/home/socket mounts, no database

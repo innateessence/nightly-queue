@@ -9,7 +9,7 @@ keep their existing authentication, payloads, and completion behavior.
 ## Bootstrap
 
 Apply migrations, then provision a separate, high-entropy runner token through
-infrastructure secret injection. Set `NQ_RUNNER_API_TOKEN` to at least 32
+infrastructure secret injection. Set `VIBEARR_RUNNER_API_TOKEN` to at least 32
 characters and run:
 
 ```sh
@@ -17,7 +17,7 @@ python manage.py provision_runner controller
 ```
 
 Only a SHA-256 digest is stored; no token value is printed or returned. The token
-must differ from `NQ_API_TOKEN` and from every other runner identity's token.
+must differ from `VIBEARR_API_TOKEN` and from every other runner identity's token.
 `--token-env VARIABLE` selects a different environment variable. Repeating the
 command rotates and enables the same identity; old bearer tokens immediately
 stop authenticating. `python manage.py provision_runner controller --disable`

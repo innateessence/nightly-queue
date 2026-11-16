@@ -1,16 +1,10 @@
-"""Only for exporting an existing SQLite database."""
+"""Compatibility import for vibearr_app.sqlite_settings."""
 
-import os
-from pathlib import Path
+import importlib
+import sys
 
-from .settings import *  # noqa: F403
-from .settings import BASE_DIR
+from vibearr_app.sqlite_settings import *  # noqa: F403
 
-database_path = Path(os.environ.get("NQ_DB_PATH", str(BASE_DIR / "db.sqlite3")))
+_module = importlib.import_module("vibearr_app.sqlite_settings")
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": f"{database_path.resolve().as_uri()}?mode=ro",
-    }
-}
+sys.modules[__name__] = _module

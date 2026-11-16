@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.views.decorators.debug import sensitive_variables
 
-from nightly_queue.api import read_body, string_field
+from vibearr_app.api import read_body, string_field
 from work_queue.api import item_data
 
 from .auth import runner_api_view

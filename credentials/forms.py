@@ -123,7 +123,7 @@ class CredentialForm(forms.ModelForm):
                 value["base_url"] = data["connection_endpoint"]
             if data.get("connection_api_key"):
                 value["api_key"] = data["connection_api_key"]
-            from coding_runner.opencode_connection import validate_connection
+            from vibearr_runner.opencode_connection import validate_connection
 
             try:
                 validate_connection(value)

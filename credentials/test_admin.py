@@ -128,7 +128,7 @@ class CredentialAdminTests(TestCase):
     @override_settings(NQ_CREDENTIAL_KEY="")
     def test_missing_key_shows_configuration_error(self):
         response = self.client.post(self.url, self.data)
-        self.assertContains(response, "Configure NQ_CREDENTIAL_KEY")
+        self.assertContains(response, "Configure VIBEARR_CREDENTIAL_KEY")
         self.assertFalse(Credential.objects.exists())
 
     def test_admin_log_does_not_contain_secret(self):

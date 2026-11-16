@@ -1,7 +1,7 @@
 # Runner credential boundary
 
 Runner authentication is provisioned separately with `provision_runner`; the generic
-`NQ_API_TOKEN` cannot retrieve secrets. The runner never receives Django's encryption
+`VIBEARR_API_TOKEN` cannot retrieve secrets. The runner never receives Django's encryption
 key or database credentials. Ordinary configuration and credential pages contain only
 names, IDs, provider/type, rotation version, revocation status and timestamps.
 Execution remains release-gated.

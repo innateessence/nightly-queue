@@ -134,7 +134,7 @@ class Credential(models.Model):
             payload = cipher.decrypt(self.encrypted_payload.encode("ascii"))
         except (InvalidToken, UnicodeEncodeError):
             raise ValidationError(
-                "Unable to decrypt this credential; check NQ_CREDENTIAL_KEY."
+                "Unable to decrypt this credential; check VIBEARR_CREDENTIAL_KEY."
             ) from None
         try:
             value = json.loads(payload)

@@ -220,7 +220,7 @@ class SelectedSecretTests(TestCase):
     def test_missing_encryption_key_returns_redacted_error(self):
         response = self.preflight()
         self.assertEqual(response.status_code, 400)
-        self.assertIn("NQ_CREDENTIAL_KEY", response.content.decode())
+        self.assertIn("VIBEARR_CREDENTIAL_KEY", response.content.decode())
         self.assertNotIn("backend-private-secret", response.content.decode())
 
     def test_wrong_encryption_key_returns_redacted_error(self):
@@ -459,7 +459,7 @@ class SelectedSecretTests(TestCase):
                 content_type="application/json",
             )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("NQ_CREDENTIAL_KEY", response.content.decode())
+        self.assertIn("VIBEARR_CREDENTIAL_KEY", response.content.decode())
         self.assertNotIn("backend-private-secret", response.content.decode())
         self.assertFalse(self.run.evidence.exists())
 

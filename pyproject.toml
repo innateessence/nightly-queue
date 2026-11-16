@@ -3,17 +3,20 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nightly-queue-cli"
+name = "vibearr-cli"
 version = "0.1.0"
-description = "Submit project-linked work to nightly-queue"
+description = "Submit project-linked work to vibearr"
 requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-nq = "nq.cli:main"
+vibearr = "vibearr.cli:main"
+nq = "vibearr.cli:main"
+
+[tool.setuptools]
 
 [tool.setuptools.packages.find]
-include = ["nq*"]
+include = ["vibearr", "nq"]
 
 [tool.ruff]
 line-length = 120
