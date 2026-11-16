@@ -201,6 +201,10 @@ def main() -> None:
         resources["pids.max"] = {
             "value": int(Path("/sys/fs/cgroup/pids.max").read_text())
         }
+        for name in ("memory.max", "memory.swap.max"):
+            resources[name] = {
+                "value": int((Path("/sys/fs/cgroup") / name).read_text())
+            }
         result["resources"] = resources
         Path("/secrets/backend").unlink(missing_ok=True)
         from .validation_profile import BUILD_ARGV

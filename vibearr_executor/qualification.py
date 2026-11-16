@@ -13,6 +13,7 @@ REQUIRED_CHECKS = {
     "agent-boundary-egress-artifacts",
     "offline-validation",
     "resource-enforcement",
+    "memory-exhaustion",
     "restart-and-descendant-stop",
     "retry-and-auth-contract",
     "archive-and-rebinding-rejection",

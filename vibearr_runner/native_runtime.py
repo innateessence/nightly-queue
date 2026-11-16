@@ -7,6 +7,7 @@ def runtime_diagnostics(policy: dict, client=None) -> dict:
     try:
         from vibearr_executor.client import Client, ExecutorUnavailable
         from vibearr_executor.contracts import Limits, Rejected, sha256
+        from vibearr_executor import QUALIFICATION_VERSION
 
         selected = ExecutionPolicy.from_data(policy)
         executor = client or Client.from_environment()
@@ -14,7 +15,7 @@ def runtime_diagnostics(policy: dict, client=None) -> dict:
         if (
             capabilities.get("schema_version") != 1
             or capabilities.get("protocol_version") != 1
-            or capabilities.get("qualification_version") != 1
+            or capabilities.get("qualification_version") != QUALIFICATION_VERSION
         ):
             raise ValueError("Executor protocol version is unsupported.")
         sha256(capabilities.get("binding_digest"))
