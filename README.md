@@ -194,10 +194,10 @@ The planned `coding-runner` service will:
    original issue, then report the actual PR URL to the queue.
 
 Django owns queue state, saved plans, run visibility, and all runner settings in
-the web UI. Settings will include processing days/time ranges and timezone, a
+the web UI. The Coding runner section includes processing days/time ranges and timezone, a
 global minimum remaining-usage percentage, execution limits, research/planning
 and implementation backends/models, credential selections, and retention. Project
-pages will provide overrides plus setup and validation commands. Celery
+pages provide explicit inherit/replace/clear overrides plus setup and validation commands. Celery
 Beat and its worker continue to own scheduled issue discovery. Issue sync and
 coding execution have separate schedules. The Celery greeting task remains a demo.
 
@@ -222,9 +222,11 @@ connectivity/authentication, encryption keys, and container/volume wiring remain
 deployment configuration. Commands arriving as untrusted issue or research data
 require user confirmation before execution, surfaced through the web UI.
 
-The service, comment retrieval, research/planning handoff, runner settings UI,
-credential delivery, and recovery behavior are not implemented yet. The current
-Settings page only configures API credentials and the issue-import interval.
+Runner settings, effective configuration, selected-account inventory, and atomic
+claim snapshots are implemented; see [configuration schema and behavior](docs/runner-settings.md).
+Execution defaults disabled and remains release-gated even when enabled is saved.
+The service, comment retrieval, research/planning handoff, credential delivery,
+and recovery behavior require their separate implementation branches.
 See [the implementation plan](docs/coding-runner.md) for scope and acceptance criteria.
 The [feature-branch backlog](docs/runner-feature-branches.md) compares the current
 code with that architecture and lays out implementation dependencies and checks.
