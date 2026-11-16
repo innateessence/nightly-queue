@@ -108,6 +108,15 @@ class RunnerSettings(models.Model):
 
     def clean(self):
         super().clean()
+        for field, validator in (
+            ("windows", validate_windows),
+            ("setup_commands", validate_commands),
+            ("validation_commands", validate_commands),
+        ):
+            try:
+                validator(getattr(self, field))
+            except ValidationError as exc:
+                raise ValidationError({field: exc.messages}) from None
         if self.pk != 1:
             raise ValidationError("Only one runner settings record is allowed.")
         if self.schedule_mode == "windows" and not self.windows:
@@ -142,6 +151,13 @@ class ProjectRunnerSettings(models.Model):
     overrides = models.JSONField(
         default=dict, blank=True, validators=[validate_overrides]
     )
+
+    def clean(self):
+        super().clean()
+        try:
+            validate_overrides(self.overrides)
+        except ValidationError as exc:
+            raise ValidationError({"overrides": exc.messages}) from None
 
     def save(self, *args, **kwargs):
         self.full_clean()

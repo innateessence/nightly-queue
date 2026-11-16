@@ -1,6 +1,9 @@
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from threading import Event
+
 from django.core.exceptions import ValidationError
-from django.db import transaction
-from django.test import TestCase
+from django.db import connection, connections, transaction
+from django.test import TestCase, TransactionTestCase
 
 from credentials.models import APISettings, Credential
 from projects.models import Project
@@ -49,6 +52,48 @@ class RunnerSettingsTests(TestCase):
             RunnerSettings(
                 windows=[{"days": [7], "start": "22:00", "end": "06:00"}]
             ).full_clean()
+
+    def test_model_rejects_empty_object_windows(self):
+        with self.assertRaisesMessage(ValidationError, "list of at most 32 windows"):
+            RunnerSettings(windows={}).full_clean()
+
+    def test_model_rejects_empty_object_commands(self):
+        with self.assertRaisesMessage(ValidationError, "list of at most 100 commands"):
+            RunnerSettings(setup_commands={}).full_clean()
+
+    def test_model_rejects_empty_list_overrides(self):
+        with self.assertRaisesMessage(ValidationError, "supported project override"):
+            ProjectRunnerSettings(project=self.project, overrides=[]).save()
+        self.assertFalse(ProjectRunnerSettings.objects.exists())
+        self.assertEqual(
+            configuration_document()["projects"][0]["project_id"], self.project.pk
+        )
+
+    def test_settings_post_rejects_null_commands_without_database_error(self):
+        saved = RunnerSettings.objects.get(pk=1)
+        data = {
+            f"runner-{field.name}": field.value_from_object(saved)
+            for field in saved._meta.fields
+            if field.name != "id"
+        }
+        data.update(
+            section="runner",
+            **{
+                "runner-windows": "[]",
+                "runner-setup_commands": "null",
+                "runner-validation_commands": "[]",
+            },
+        )
+        data = {key: "" if value is None else value for key, value in data.items()}
+        response = self.client.post("/settings/", data)
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(
+            response,
+            "runner_form",
+            "setup_commands",
+            "Enter a list of at most 100 commands.",
+        )
+        self.assertEqual(RunnerSettings.objects.get(pk=1).setup_commands, [])
 
     def test_form_accepts_overnight_windows(self):
         saved = RunnerSettings()
@@ -182,8 +227,9 @@ class RunnerSettingsTests(TestCase):
         self.assertEqual(APISettings.objects.get(pk=1).auto_sync_interval_hours, 12)
 
 
-class ConfiguredProjectTestCase(TestCase):
+class ConfiguredProjectMixin:
     def setUp(self):
+        super().setUp()
         self.project = Project.objects.create(
             name="Configured", repository_url="https://github.com/example/configured"
         )
@@ -212,6 +258,89 @@ class ConfiguredProjectTestCase(TestCase):
         saved.repository_credential = self.github
         saved.validation_commands = ["python -m unittest"]
         saved.save()
+
+
+class ConfiguredProjectTestCase(ConfiguredProjectMixin, TestCase):
+    pass
+
+
+class ConfigurationWriteConcurrencyTests(ConfiguredProjectMixin, TransactionTestCase):
+    def assert_write_waits_for_snapshot(self, writer):
+        started = Event()
+
+        def write_configuration():
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET statement_timeout = '5s'")
+                started.set()
+                writer()
+            finally:
+                connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with transaction.atomic():
+                revision, snapshot = locked_configuration_snapshot(
+                    self.project, configuration_document()["revision"]
+                )
+                pending = pool.submit(write_configuration)
+                self.assertTrue(started.wait(timeout=5))
+                with self.assertRaises(TimeoutError):
+                    pending.result(timeout=0.2)
+                self.assertEqual(configuration_document()["revision"], revision)
+            pending.result(timeout=5)
+        self.assertNotEqual(configuration_document()["revision"], revision)
+        return snapshot
+
+    def test_global_write_waits_for_claim_snapshot(self):
+        def writer():
+            saved = RunnerSettings.objects.get(pk=1)
+            saved.research_model = "future-model"
+            saved.save()
+
+        snapshot = self.assert_write_waits_for_snapshot(writer)
+        self.assertEqual(snapshot["effective"]["research_model"], "research-model")
+        self.assertEqual(
+            configuration_document()["global"]["research_model"], "future-model"
+        )
+
+    def test_override_write_waits_for_claim_snapshot(self):
+        def writer():
+            ProjectRunnerSettings.objects.create(
+                project=self.project,
+                overrides={
+                    "research_model": {"mode": "replace", "value": "future-model"}
+                },
+            )
+
+        snapshot = self.assert_write_waits_for_snapshot(writer)
+        self.assertEqual(snapshot["effective"]["research_model"], "research-model")
+        effective = effective_project_configuration(self.project)
+        self.assertEqual(effective["effective"]["research_model"], "future-model")
+
+    def test_project_write_waits_for_claim_snapshot(self):
+        def writer():
+            project = Project.objects.get(pk=self.project.pk)
+            project.base_branch = "future-branch"
+            project.save()
+
+        snapshot = self.assert_write_waits_for_snapshot(writer)
+        self.assertEqual(snapshot["base_branch"], "")
+        self.assertEqual(
+            configuration_document()["projects"][0]["base_branch"], "future-branch"
+        )
+
+    def test_credential_rotation_waits_for_claim_snapshot(self):
+        def writer():
+            credential = Credential.objects.get(pk=self.github.pk)
+            credential.encrypted_payload = "future-encrypted-reference"
+            credential.save()
+
+        snapshot = self.assert_write_waits_for_snapshot(writer)
+        self.assertEqual(snapshot["effective"]["issue_credential_id"], self.github.pk)
+        self.assertEqual(
+            Credential.objects.get(pk=self.github.pk).encrypted_payload,
+            "future-encrypted-reference",
+        )
 
 
 class EffectiveConfigurationTests(ConfiguredProjectTestCase):
