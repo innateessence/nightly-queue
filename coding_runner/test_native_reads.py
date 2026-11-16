@@ -13,6 +13,7 @@ from vibearr_runner.delivery import (
 )
 from vibearr_runner.native_github import NativeGitHub
 from vibearr_runner.native_reads import NativeReadExhausted, NativeReadWait, read
+from vibearr_runner.backends import BackendInterrupted
 
 
 class NativeReadTests(unittest.TestCase):
@@ -124,3 +125,19 @@ class NativeReadTests(unittest.TestCase):
             with self.assertRaises(DeliveryUnknown):
                 github.request("POST", "/repos/owner/repo/pulls", {})
         callback.assert_not_called()
+
+    def test_interruption_without_positive_no_launch_proof_keeps_reservation(self):
+        with self.assertRaises(BackendInterrupted):
+            read(
+                self.host,
+                "owned read",
+                Mock(side_effect=BackendInterrupted("unknown stage")),
+            )
+        record = next(iter(self.host.native["transport_reads"].values()))
+        self.assertEqual(record["attempts"], 1)
+
+    def test_crash_keeps_the_durably_reserved_read_attempt(self):
+        with self.assertRaises(KeyboardInterrupt):
+            read(self.host, "owned read", Mock(side_effect=KeyboardInterrupt()))
+        record = next(iter(self.host.native["transport_reads"].values()))
+        self.assertEqual(record["attempts"], 1)

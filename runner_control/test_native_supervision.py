@@ -18,6 +18,8 @@ from vibearr_runner.client import (
     NotFoundError,
 )
 from vibearr_runner.native_delivery import NativeDelivery
+from vibearr_runner.delivery import SupervisorGit
+from vibearr_runner import processes
 from vibearr_runner.native_lifecycle import NativeLifecycle
 from vibearr_runner.recovery import ReconciliationRequired
 from vibearr_runner.workspaces import git
@@ -181,6 +183,37 @@ class NativeSupervisionTests(NativeProtocolMixin, TestCase):
         self.run.refresh_from_db()
         self.assertEqual(self.run.state, "active")
         self.assertEqual(self.run.active_slot, 1)
+
+    def test_cancel_after_push_prelaunch_pause_releases_claim_through_api(self):
+        self.run_to("delivery")
+        github, _ = self.publication_clients()
+        transport = SupervisorGit(token="fixture-token")
+        paused = []
+        original = processes.run
+
+        def run(arguments, **kwargs):
+            if "push" in arguments:
+                paused.append(True)
+            return original(arguments, **kwargs)
+
+        self.host.checkpoint = lambda: not paused
+        with patch.object(NativeDelivery, "clients", return_value=(github, transport)):
+            with patch.object(transport, "observed_remote", return_value=""):
+                with patch.object(processes, "run", side_effect=run):
+                    self.assertEqual(self.engine().step(self.state), "wait")
+                self.state = self.journal.load()
+                self.run.cancellation_requested_at = self.run.created_at
+                self.run.save(update_fields=["cancellation_requested_at"])
+                self.state["run"]["run"][
+                    "cancellation_requested_at"
+                ] = self.run.created_at.isoformat()
+                self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.state, "completed")
+        self.assertEqual(self.run.native_outcome, "canceled")
+        self.assertIsNone(self.run.active_slot)
+        termination = self.run.evidence.get(kind="native_termination").payload
+        self.assertEqual(termination["publications"][0]["state"], "not_started")
 
     def test_definitively_rejected_dispatch_metadata_terminates_without_a_model_call(
         self,

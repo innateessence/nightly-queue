@@ -101,8 +101,14 @@ cycles keep cancellation, pause, ownership and original deadline checks active
 during that wait. Exhaustion fails ordinary work, while an unresolved publication
 keeps its claim and reports reconciliation required. Push and PR mutations retain
 their original identities and are never repeated as transport read retries.
+Git control rejections refund a reserved read attempt only when the tracked
+launcher positively confirms it never released the transport. Interruptions after
+launch, unclassified exceptions and crashes retain their reserved attempts.
 Native push dispatch is recorded immediately before the push command; remote-ref
 reads run separately before dispatch and after the command for reconciliation.
+The tracked child waits behind its launch gate while the supervisor rechecks
+controls and saves dispatch. A rejected prelaunch check reaps that blocked child
+without recording a push; uncertainty after release keeps the publication fence.
 Clone recovery records the exact owned destination before launch. A partial
 checkout is removed only after tracked process termination is confirmed; a
 durably completed clone resumes local setup without another clone. Unregistered

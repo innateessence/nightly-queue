@@ -1,6 +1,7 @@
 import argparse
 import io
 import json
+import runpy
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import TestCase
 from unittest.mock import patch
@@ -62,14 +63,67 @@ class CLITests(TestCase):
         request.return_value = {"projects": [project]}
         status, output, _ = self.run_cli(["projects"])
         self.assertEqual(status, 0)
-        self.assertIn("12\tExample\thttps://github.com/a/b.git", output)
+        self.assertEqual(output, "12\tExample\thttps://github.com/a/b.git\n")
 
     @patch("nq.cli.request_api")
     def test_projects_explains_empty_list(self, request):
         request.return_value = {"projects": []}
         status, output, _ = self.run_cli(["projects"])
         self.assertEqual(status, 0)
-        self.assertIn("Create one in Django admin", output)
+        self.assertEqual(output, "No projects. Create one in Django admin first.\n")
+
+    @patch("nq.cli.request_api")
+    def test_projects_json_preserves_api_values(self, request):
+        project = {
+            "id": 9007199254740993,
+            "name": "Café 東京 🚀",
+            "repository_url": "https://github.com/a/b.git",
+            "enabled": True,
+            "description": None,
+        }
+        response = {"projects": [project], "next": None}
+        request.return_value = response
+        status, output, errors = self.run_cli(["projects", "--json"])
+        self.assertEqual(status, 0)
+        self.assertEqual(json.loads(output), response)
+        self.assertIsInstance(json.loads(output)["projects"][0]["id"], int)
+        self.assertTrue(output.endswith("\n"))
+        self.assertEqual(len(output.splitlines()), 1)
+        self.assertEqual(errors, "")
+        request.assert_called_once_with(
+            "http://localhost:8000", "test-token", "projects/"
+        )
+
+    @patch("nq.cli.request_api")
+    def test_projects_json_empty_list(self, request):
+        request.return_value = {"projects": []}
+        status, output, errors = self.run_cli(["projects", "--json"])
+        self.assertEqual((status, output, errors), (0, '{"projects": []}\n', ""))
+
+    @patch("nq.cli.request_api")
+    def test_projects_json_api_error(self, request):
+        request.side_effect = RuntimeError("API returned HTTP 403: Forbidden")
+        status, output, errors = self.run_cli(["projects", "--json"])
+        self.assertEqual(status, 1)
+        self.assertEqual(output, "")
+        self.assertEqual(errors, "vibearr: API returned HTTP 403: Forbidden\n")
+
+    @patch("vibearr.cli.request_api")
+    def test_projects_json_module_entrypoints(self, request):
+        response = {"projects": [{"id": 12, "name": "東京"}]}
+        request.return_value = response
+        for module in ("vibearr", "nq"):
+            with self.subTest(module=module):
+                output = io.StringIO()
+                errors = io.StringIO()
+                with patch("sys.argv", [module, "projects", "--json"]):
+                    with redirect_stdout(output), redirect_stderr(errors):
+                        with self.assertRaises(SystemExit) as raised:
+                            runpy.run_module(module, run_name="__main__")
+                self.assertEqual(raised.exception.code, 0)
+                self.assertEqual(json.loads(output.getvalue()), response)
+                self.assertTrue(output.getvalue().endswith("\n"))
+                self.assertEqual(errors.getvalue(), "")
 
     def test_add_requires_project_argument(self):
         self.assert_usage_error(["add", "Task"])
