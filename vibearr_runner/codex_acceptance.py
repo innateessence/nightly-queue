@@ -182,6 +182,7 @@ def acceptance(
         cancel_started = adapter.start(canceled)
         expires = time.monotonic() + 45
         observed_session = ""
+        tool_started = False
         while time.monotonic() < expires:
             parser, _ = adapter.read_events(canceled)
             observed_session = parser.session_id

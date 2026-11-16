@@ -1,14 +1,21 @@
 import base64
 from datetime import datetime, timezone
+from datetime import timedelta
+from dataclasses import asdict
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from uuid import uuid4
 
-from .codex_task import auth_material, context_data, launch
+from .artifacts import pack
+from .codex_task import ARGV, HOSTS, SECRET_ENV, auth_material, context_data, launch
+from .contracts import Limits, Profile, digest
+from .runtime import Runtime
 
 
 def session_secret(*, expires=None):
@@ -59,6 +66,69 @@ class CodexTaskTests(unittest.TestCase):
         self.assertNotIn("refresh-token-not-for-tasks", transported)
         self.assertEqual(json.loads(transported)["auth_mode"], "chatgptAuthTokens")
         self.assertEqual(json.loads(transported)["tokens"]["refresh_token"], "")
+
+    def test_same_selected_session_retries_after_cross_process_executor_restart(self):
+        selected = session_secret(expires=4102444800)
+        program = "import sys; from vibearr_executor.codex_task import auth_material; print(auth_material('session', sys.stdin.read()), end='')"
+        materials = []
+        for seed in (1, 2, 3):
+            result = subprocess.run(
+                [sys.executable, "-c", program],
+                input=selected,
+                text=True,
+                capture_output=True,
+                env={**os.environ, "PYTHONHASHSEED": str(seed)},
+                check=True,
+                timeout=10,
+            )
+            materials.append(result.stdout)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            profile = Profile(
+                "codex-auth-retry-v1",
+                1,
+                "sha256:" + "a" * 64,
+                "agent",
+                ARGV,
+                Limits(),
+                HOSTS["session"],
+                SECRET_ENV,
+            )
+            source, context = pack({"source.txt": (0o644, b"source\n")}), b"context"
+            manifest = {
+                "schema_version": 1,
+                "run_id": str(uuid4()),
+                "operation_id": str(uuid4()),
+                "profile_id": profile.profile_id,
+                "profile_digest": profile.digest,
+                "source_digest": digest(source),
+                "context_digest": digest(context),
+                "phase": "agent",
+                "limits": asdict(profile.limits),
+                "deadline": (
+                    datetime.now(timezone.utc) + timedelta(minutes=1)
+                ).isoformat(),
+                "network_hosts": list(profile.network_hosts),
+            }
+            runtime = Runtime(directory, [profile])
+            try:
+                runtime.upload("source", source, digest(source))
+                runtime.upload("context", context, digest(context))
+                runtime.prepare(manifest)
+                runtime.supply_secret(manifest["operation_id"], materials[0])
+            finally:
+                runtime.close()
+            runtime = Runtime(directory, [profile])
+            try:
+                runtime.prepare(manifest)
+                for material in materials[1:]:
+                    self.assertEqual(
+                        runtime.supply_secret(manifest["operation_id"], material),
+                        {"stored": True},
+                    )
+                self.assertEqual(len(set(materials)), 1)
+            finally:
+                runtime.close()
 
     def test_expired_session_is_rejected_without_login_or_refresh(self):
         with self.assertRaises(ValueError):

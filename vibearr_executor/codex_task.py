@@ -92,7 +92,9 @@ def auth_material(kind: str, secret: str, *, runtime=False) -> str:
                 "OPENAI_API_KEY": None,
                 "tokens": {**tokens, "refresh_token": ""},
                 "last_refresh": "1970-01-01T00:00:00Z",
-            }
+            },
+            sort_keys=True,
+            separators=(",", ":"),
         )
     except (ValueError, TypeError, KeyError, IndexError, UnicodeError, RecursionError):
         raise ValueError(
