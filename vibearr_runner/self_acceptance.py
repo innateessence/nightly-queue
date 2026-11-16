@@ -353,6 +353,7 @@ def collect_run(
         "created_at": issue["created_at"],
         "discovered_at": item["created_at"],
         "claimed_at": run["created_at"],
+        "delivery_recovery": run.get("delivery_recovery"),
         "finished_at": run["finished_at"],
         "outcome": expected,
         "approvals": 0,
