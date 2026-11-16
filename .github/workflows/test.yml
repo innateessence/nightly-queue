@@ -24,6 +24,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify standalone distribution artifacts
+        run: |
+          python3.12 -m venv "$RUNNER_TEMP/vibearr-distributions"
+          "$RUNNER_TEMP/vibearr-distributions/bin/python" -m pip install setuptools==80.9.0 wheel==0.48.0
+          "$RUNNER_TEMP/vibearr-distributions/bin/python" -m unittest vibearr.test_distributions
+
       - name: Run test suite
         run: bash test.sh
 

@@ -15,4 +15,4 @@ coding-runner = "vibearr_runner.__main__:main"
 
 [tool.setuptools]
 packages = ["vibearr_runner", "coding_runner"]
-package-dir = {vibearr_runner = "../vibearr_runner", coding_runner = ".", "" = ".."}
+package-dir = {vibearr_runner = "../vibearr_runner", coding_runner = "."}

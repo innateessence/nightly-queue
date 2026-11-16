@@ -43,7 +43,7 @@ required user confirmations are resolved.
 
 - Add a separately built `vibearr-runner` service and package. Keep `nq` independent
   of the runner and Django.
-- Use the existing HTTP API at `http://nightly-queue:8000` on the Compose network.
+- Use the existing HTTP API at `http://vibearr:8000` on the Compose network.
   The runner has no direct database or Celery broker dependency.
 - Process one item at a time initially. Claim only when capacity is available and
   the configured execution window is open and the global usage reserve permits it.

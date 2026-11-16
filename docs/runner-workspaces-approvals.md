@@ -142,16 +142,16 @@ deployment blocker.
 
 For a supported deployment, an administrator must review the host's namespace
 policy and supply narrowly scoped container policy artifacts, for example
-`/etc/nightly-queue/runner-seccomp.json` and an AppArmor profile named
-`nightly-queue-runner`, through an operator-owned Compose override:
+`/etc/vibearr/runner-seccomp.json` and an AppArmor profile named
+`vibearr-runner`, through an operator-owned Compose override:
 
 ```yaml
 services:
-  coding-runner:
+  vibearr-runner:
     security_opt:
       - no-new-privileges:true
-      - seccomp=/etc/nightly-queue/runner-seccomp.json
-      - apparmor=nightly-queue-runner
+      - seccomp=/etc/vibearr/runner-seccomp.json
+      - apparmor=vibearr-runner
 ```
 
 Those policy files are deliberately not shipped as an untested permission grant.
