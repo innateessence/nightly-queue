@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -212,6 +213,25 @@ class NativeValidationTests(unittest.TestCase):
         self.assertEqual(len(set(self.client.started)), len(CHECK_IDS))
         self.runner.start(session)
         self.assertEqual(len(self.client.started), len(CHECK_IDS))
+
+    def test_recovered_tree_label_must_match_prepared_context(self):
+        session = self.prepare()
+        for _ in CHECK_IDS:
+            self.runner.start(session)
+        changed = deepcopy(session)
+        changed["tree_sha"] = "c" * 40
+        recovered = ValidationRunner(self.client)
+        with self.assertRaises(Rejected):
+            recovered.status(changed)
+        self.assertEqual(recovered.status(session)["state"], "passed")
+
+    def test_consistently_changed_context_cannot_start_validation(self):
+        session = self.prepare()
+        for entry in session["operations"]:
+            entry["manifest"]["context_digest"] = "d" * 64
+        with self.assertRaises(Rejected):
+            self.runner.start(session)
+        self.assertEqual(self.client.started, [])
 
     def test_missing_check_cannot_be_attested_as_passing(self):
         session = self.prepare()

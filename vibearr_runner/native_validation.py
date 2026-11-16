@@ -292,7 +292,13 @@ class ValidationRunner:
 
     @staticmethod
     def checked(session: dict) -> list[dict]:
-        from vibearr_executor.contracts import Rejected, identifier, sha256
+        from vibearr_executor.contracts import (
+            Rejected,
+            canonical,
+            digest,
+            identifier,
+            sha256,
+        )
         from vibearr_executor.validation_profile import CHECK_IDS, ValidationProfile
 
         expected = {
@@ -324,7 +330,17 @@ class ValidationRunner:
             value.get("id") for value in entries
         ] != list(CHECK_IDS):
             raise Rejected("Validation must include every required check in order.")
-        context_digest = None
+        context_digest = digest(
+            canonical(
+                {
+                    "schema_version": 1,
+                    "kind": "validation",
+                    "tree_sha": session["tree_sha"],
+                    "source_digest": session["source_digest"],
+                    "validation_profile_digest": profile.digest,
+                }
+            )
+        )
         for entry, fixed in zip(entries, profile.executor_profiles()):
             if set(entry) != {"id", "manifest"}:
                 raise Rejected("Validation command identity changed.")
@@ -344,12 +360,10 @@ class ValidationRunner:
             ):
                 raise Rejected("Validation manifest differs from its required command.")
             sha256(manifest.get("context_digest"))
-            if (
-                context_digest is not None
-                and context_digest != manifest["context_digest"]
-            ):
-                raise Rejected("Validation context changed between checks.")
-            context_digest = manifest["context_digest"]
+            if context_digest != manifest["context_digest"]:
+                raise Rejected(
+                    "Validation context differs from its frozen tree/source/profile."
+                )
         return entries
 
     def status(self, session: dict) -> dict:
