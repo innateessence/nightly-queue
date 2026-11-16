@@ -113,4 +113,8 @@ class NativeBackendRegistry:
             from .native_codex import NativeCodexAdapter
 
             return NativeCodexAdapter(client)
+        if provider == "claude":
+            from .native_claude import NativeClaudeAdapter
+
+            return NativeClaudeAdapter(client)
         raise NativeSessionError("Selected provider has no installed native adapter.")

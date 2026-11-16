@@ -1,0 +1,117 @@
+{
+  "architecture": "linux-x86_64",
+  "boundary_qualification": "not-run-for-this-image",
+  "flags": [
+    "--bare",
+    "--safe-mode",
+    "--disable-slash-commands",
+    "--print",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    "claude-sonnet-5-5",
+    "--tools",
+    "Bash,Read,Edit,Write,Glob,Grep",
+    "--allowedTools",
+    "Bash,Read,Edit,Write,Glob,Grep",
+    "--permission-mode",
+    "dontAsk",
+    "--permission-prompts",
+    "none",
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--mcp-config",
+    "{\"mcpServers\":{}}",
+    "--no-session-persistence"
+  ],
+  "image": "sha256:d4d9b24c59595b9a8069237634281f5fd2cc5f0bee6f5d13c435e1c9cb3d986d",
+  "issue_to_pr": "not-run-no-selected-api-key",
+  "live_authentication": "not-run-no-selected-api-key",
+  "live_edit_restart_cancel": "not-run-no-selected-api-key",
+  "network": "none",
+  "observed_date": "2026-11-16",
+  "paid_provider_requests": false,
+  "results": {
+    "help": {
+      "exit_code": 0,
+      "output_sha256": "1e734dc647e2d7c775d2e581b3aa68a8741ff4fdde7e864c4e5799d70777558c",
+      "used_flags_present": true
+    },
+    "missing-auth": {
+      "exit_code": 1,
+      "init": {
+        "apiKeySource": "none",
+        "claude_code_version": "2.1.325",
+        "cwd": "/work",
+        "mcp_servers": [],
+        "model": "claude-sonnet-5-5",
+        "permissionMode": "dontAsk",
+        "plugins": [
+          {
+            "name": "cc-plugin-agents-md",
+            "path": "builtin",
+            "source": "cc-plugin-agents-md@builtin"
+          },
+          {
+            "name": "cc-plugin-privacy",
+            "path": "builtin",
+            "source": "cc-plugin-privacy@builtin"
+          },
+          {
+            "name": "cc-plugin-plugin-authoring",
+            "path": "builtin",
+            "source": "cc-plugin-plugin-authoring@builtin"
+          }
+        ],
+        "skills": [],
+        "slash_commands": [],
+        "tools": [
+          "Bash",
+          "Edit",
+          "Read"
+        ]
+      },
+      "output_sha256": "8203bff402c1fca341b0fdb5bc4b822af2b230379ead7c5c928313fd17216acb",
+      "terminal": {
+        "is_error": true,
+        "num_turns": 1,
+        "permission_denials": [],
+        "subtype": "success",
+        "type": "result",
+        "usage": {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "fallback_credit": null,
+          "inference_geo": "",
+          "input_tokens": 0,
+          "iterations": [],
+          "output_tokens": 0,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_fetch_requests": 0,
+            "web_search_requests": 0
+          },
+          "service_tier": "standard",
+          "speed": "standard"
+        }
+      }
+    },
+    "version": {
+      "exit_code": 0,
+      "output": "2.1.325 (Claude Code)",
+      "output_sha256": "52c422d6abf19c096c57fff7414eab62ee955dbd98a90df251a77ba89a8da532"
+    }
+  },
+  "schema_version": 1,
+  "selected_credential": false,
+  "stacked_source_base": "729f70f51dbdb5e0ce43646fff2d98eecab10ff0",
+  "wrapper_sha256": "55f98fade96867060319b4416d5147b38bf5d7b680d435b167c2ec1d24e74274"
+}

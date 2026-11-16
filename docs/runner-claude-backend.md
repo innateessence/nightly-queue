@@ -1,9 +1,14 @@
-# Claude backend candidate
+# Historical Claude proposal backend
 
-The `claude` registry entry is a **Claude Messages API candidate**, not a native
+Normal queue execution uses the optional [native Claude Code adapter](native-claude.md).
+This document describes only the historical proposal implementation and its
+pre-pivot evidence. It does not qualify native execution.
+
+The legacy `BackendRegistry` `claude` entry is a **Claude Messages API candidate**, not a native
 Claude Code CLI integration. Execution remains release-gated. No paid API call,
 live authentication check, or controlled remote delivery/recovery scenario has
-been performed for this branch. Native Claude Code is unsupported. A successful
+been performed for the historical candidate. Native CLI execution is supplied
+separately by `NativeBackendRegistry`, with its own authentication and proof. A successful
 version/help probe does not establish native tool mediation or safe credential
 isolation.
 
@@ -109,8 +114,9 @@ policy was weakened and no runtime execution was enabled for this feature.
 The official npm Linux x64 package `@anthropic-ai/claude-code-linux-x64@2.1.118`
 was downloaded for a nonbillable version/help probe outside the checkout. The
 package bytes were checked against npm's SHA512 integrity before extracting only
-the executable. It is **not installed in the runner image**, because no native
-CLI execution path is supported.
+the executable. That historical probe did not install it in the runner image.
+The new optional native image pins 2.1.325 and does not reuse this older artifact
+or qualification.
 
 - Artifact: `https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64/-/claude-code-linux-x64-2.1.118.tgz`
 - SHA512 (base64): `t6aNIvNa1T+ZR5IkJARqjTy+U5LH59FuWok4QoXa/RpT4C0njeeE/SdUzvvhwmH3ji/Rh6EX4zgbx/v5yGtG8Q==`

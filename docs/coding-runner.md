@@ -309,7 +309,10 @@ Built-in execution is ready only after the service and these behaviors are
 implemented and verified. The existing queue API and issue importer remain the
 foundation throughout this work.
 
-Claude support is an explicit [Messages API candidate](runner-claude-backend.md);
-native Claude Code is unsupported and execution remains release-gated.
+Claude Code has an optional [native adapter](native-claude.md) with pinned CLI,
+selected API-key authentication and the common native lifecycle. Live acceptance
+requires a selected usable account and real task evidence. The historical
+[Messages API candidate](runner-claude-backend.md) remains separate and retired
+from normal execution.
 
 OpenCode support is an explicit [provider API candidate with optional Ollama](runner-opencode-ollama.md); native CLI execution remains unsupported.

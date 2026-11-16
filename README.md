@@ -211,7 +211,9 @@ mypy . --config-file mypy.ini
 `bash test.sh` builds the Compose services and runs the Docker checks used by CI.
 Native Codex sessions use a pinned CLI image and scoped per-task authentication.
 See [native Codex setup and diagnostics](docs/native-codex.md) for agent profiles
-and authentication. [Unattended queue execution](docs/native-queue.md) covers
+and authentication. The optional [native Claude Code adapter](docs/native-claude.md)
+uses a selected dedicated API key; its live acceptance remains pending until
+that account is supplied and verified. [Unattended queue execution](docs/native-queue.md) covers
 dispatch, validation, publication, cancellation and recovery.
 
 The independent runner has its own verification entry point:

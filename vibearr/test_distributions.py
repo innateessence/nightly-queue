@@ -133,6 +133,8 @@ from vibearr_runner.native_runtime import runtime_diagnostics
 from vibearr_runner.policy import default_execution_policy
 import vibearr_runner.native_contract, coding_runner.native_contract
 assert vibearr_runner.native_contract is coding_runner.native_contract
+import vibearr_runner.native_claude, coding_runner.native_claude
+assert vibearr_runner.native_claude is coding_runner.native_claude
 assert vibearr_runner.native_contract.status_document(sequence=1, stage='waiting')['sequence'] == 1
 requirements = importlib.metadata.requires('vibearr-runner') or []
 assert any('vibearr-executor' in value and 'native-runtime' in value for value in requirements)
@@ -194,7 +196,7 @@ import pathlib, sys
 import vibearr_executor, vibearr_executor.client, vibearr_executor.server
 root = pathlib.Path(vibearr_executor.__file__).parent
 assert root.is_relative_to(sys.prefix)
-for name in ('Dockerfile', 'Codex.Dockerfile', 'codex_task.py', 'secret_material.py', 'worker.py', 'firewall.py', 'proxy.py', 'smoke.py', 'pg_smoke.py'):
+for name in ('Dockerfile', 'Codex.Dockerfile', 'Claude.Dockerfile', 'codex_task.py', 'claude_task.py', 'secret_material.py', 'worker.py', 'firewall.py', 'proxy.py', 'smoke.py', 'pg_smoke.py'):
     assert (root / name).is_file(), name
 for name in ('validation.Dockerfile', 'validation-requirements.txt', 'validation_black.toml', 'validation_ruff.toml', 'validation_mypy.ini'):
     assert (root / name).is_file(), name
