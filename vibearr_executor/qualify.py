@@ -239,12 +239,33 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
                 finished.get("descendants_terminated") is True,
                 "Termination is unconfirmed",
             )
+            deliberate_oom = kind == "limits" and finished["result"]["exit_code"] == -9
+            if kind == "limits":
+                counters = finished["result"].get("resources", {})
+                require(
+                    counters.get("memory.events", {}).get("oom_kill", 0) > 0,
+                    "No protected cgroup OOM evidence",
+                )
+                require(
+                    counters.get("pids.events", {}).get("max", 0) > 0,
+                    "No protected cgroup PID enforcement evidence",
+                )
+                require(
+                    counters.get("cpu.stat", {}).get("nr_throttled", 0) > 0,
+                    "No protected cgroup CPU throttling evidence",
+                )
+                require(
+                    "workspace-pids-cpu-enforced" in logs
+                    and "memory-exhaustion-probe-started" in logs,
+                    "Resource recipe did not finish its checks before deliberate OOM",
+                )
             require(
-                finished["result"]["exit_code"] == 0,
+                finished["result"]["exit_code"] == 0 or deliberate_oom,
                 f"{kind} smoke failed: {logs} {finished['result']}",
             )
             require(
-                "qualification-recipe-passed" in logs, "Missing actual recipe outcome"
+                "qualification-recipe-passed" in logs or deliberate_oom,
+                "Missing actual recipe outcome",
             )
             if kind == "agent":
                 require(
@@ -284,6 +305,7 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
                 "exit_code": finished["result"]["exit_code"],
                 "log_digest": finished["result"]["log_digest"],
                 "log": logs,
+                "expected_oom_kill": deliberate_oom,
             }
             changed = {**manifest, "source_digest": "0" * 64}
             try:

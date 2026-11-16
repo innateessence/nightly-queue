@@ -187,6 +187,14 @@ def main() -> None:
         terminate_children()
         result["terminated"] = True
         result["ended_at"] = time.time()
+        resources = {}
+        for name in ("memory.events", "pids.events", "cpu.stat"):
+            path = Path("/sys/fs/cgroup") / name
+            resources[name] = {
+                line.split()[0]: int(line.split()[1])
+                for line in path.read_text().splitlines()
+            }
+        result["resources"] = resources
         Path("/secrets/backend").unlink(missing_ok=True)
         try:
             exported = snapshot(Path("/work"))

@@ -45,6 +45,10 @@ def durable(path: Path, content: bytes, mode: int = 0o600) -> None:
         os.close(descriptor)
 
 
+class ResultInvalid(EngineError):
+    pass
+
+
 class Runtime:
     def __init__(
         self,
@@ -470,8 +474,19 @@ class Runtime:
                 if existing is None and record.get("container_id"):
                     return self.status(operation_id)
                 if record.get("gate_intent"):
-                    if existing is not None and existing["State"]["Running"]:
-                        self.docker.run("exec", record["name"], "touch", "/state/go")
+                    if (
+                        existing is not None
+                        and existing["State"]["Running"]
+                        and not record.get("gate_opened")
+                    ):
+                        try:
+                            self.docker.run(
+                                "exec", record["name"], "touch", "/state/go"
+                            )
+                            record["gate_opened"] = True
+                            self.save(record)
+                        except EngineError:
+                            pass
                     return self.status(operation_id)
             if record["profile"]["backend_secret_env"] and not record.get(
                 "secret_digest"
@@ -607,6 +622,8 @@ class Runtime:
             record["state"] = "running"
             self.save(record)
             self.docker.run("exec", record["name"], "touch", "/state/go")
+            record["gate_opened"] = True
+            self.save(record)
             return self.status(operation_id)
 
     def harvest(self, record: dict) -> bool:
@@ -620,13 +637,13 @@ class Runtime:
             or result.get("run_id") != record["manifest"]["run_id"]
             or result.get("terminated") is not True
         ):
-            raise EngineError(
+            raise ResultInvalid(
                 "Runtime result identity or termination evidence is invalid."
             )
         path = self.path(record["operation_id"])
         logs = self.docker.read(name, "logs.bin", MAX_LOG)
         if logs is None or digest(logs) != result["log_digest"]:
-            raise EngineError("Runtime log digest does not match.")
+            raise ResultInvalid("Runtime log digest does not match.")
         durable(path / "logs.bin", logs)
         if result.get("artifact"):
             exported = self.docker.read(name, "source.tar", MAX_ARCHIVE)
@@ -634,7 +651,7 @@ class Runtime:
             if exported is None or canonical(
                 result_manifest(source, exported)
             ) != canonical(result["artifact"]):
-                raise EngineError("Runtime source export digest does not match.")
+                raise ResultInvalid("Runtime source export digest does not match.")
             durable(path / "source.tar", exported)
         durable(path / "result.json", content)
         durable(path / "input" / "secret", b"")
@@ -653,6 +670,7 @@ class Runtime:
             self.docker.remove("network", record["name"] + suffix)
         durable(self.path(record["operation_id"]) / "input" / "secret", b"")
         record["state"] = "exited"
+        record.pop("wait_reason", None)
         record["descendants_terminated"] = True
         self.save(record)
 
@@ -669,7 +687,22 @@ class Runtime:
             if record.get("result"):
                 self.cleanup(record)
             elif inspected is not None and inspected["State"]["Running"]:
-                if self.harvest(record):
+                try:
+                    complete = self.harvest(record)
+                except ResultInvalid:
+                    record["state"] = "unknown"
+                    record["wait_reason"] = (
+                        "Protected runtime result integrity failed; recovery is required."
+                    )
+                    self.save(record)
+                    return self.public(record)
+                except EngineError:
+                    record["wait_reason"] = (
+                        "Container is running; protected result readback is temporarily unavailable."
+                    )
+                    self.save(record)
+                    return self.public(record)
+                if complete:
                     self.cleanup(record)
             else:
                 durable(self.path(operation_id) / "input" / "secret", b"")
@@ -689,8 +722,11 @@ class Runtime:
                 self.docker.run("kill", "--signal", "TERM", record["name"])
                 deadline = time.monotonic() + 20
                 while time.monotonic() < deadline:
-                    if self.harvest(record):
-                        break
+                    try:
+                        if self.harvest(record):
+                            break
+                    except EngineError:
+                        pass
                     time.sleep(0.1)
             if not record.get("result"):
                 record["result"] = {
@@ -714,6 +750,7 @@ class Runtime:
             "container_id",
             "descendants_terminated",
             "result",
+            "wait_reason",
         )
         return {key: record[key] for key in keys if key in record}
 

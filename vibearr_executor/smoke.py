@@ -245,17 +245,6 @@ def limits():
         for child in children:
             os.kill(child, signal.SIGKILL)
             os.waitpid(child, 0)
-    process = subprocess.run(
-        [sys.executable, "-I", "-c", "x = bytearray(512 * 1024 * 1024)"], timeout=20
-    )
-    check(
-        process.returncode == -signal.SIGKILL,
-        "Memory exhaustion did not kill the allocating child",
-    )
-    check(
-        "oom_kill 0" not in Path("/sys/fs/cgroup/memory.events").read_text(),
-        "No real cgroup OOM evidence",
-    )
     before = Path("/sys/fs/cgroup/cpu.stat").read_text()
     command = [
         sys.executable,
@@ -282,6 +271,26 @@ def limits():
         )
     )
     check(current > previous, "CPU contention did not trigger real cgroup throttling")
+    print("workspace-pids-cpu-enforced", flush=True)
+    print("memory-exhaustion-probe-started", flush=True)
+    process = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import pathlib; pathlib.Path('/proc/self/oom_score_adj').write_text('1000'); x = bytearray(512 * 1024 * 1024)",
+        ],
+        timeout=20,
+    )
+    check(
+        process.returncode == -signal.SIGKILL,
+        "Memory exhaustion did not kill the allocating child",
+    )
+    check(
+        "oom_kill 0" not in Path("/sys/fs/cgroup/memory.events").read_text(),
+        "No real cgroup OOM evidence",
+    )
+
     print("memory-pids-workspace-enforced", flush=True)
 
 

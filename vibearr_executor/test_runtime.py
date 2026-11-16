@@ -14,6 +14,8 @@ from .client import Client, ExecutorUnavailable
 from .contracts import Conflict, Rejected, digest
 from .qualify import smoke_profiles
 from .runtime import Runtime
+from .runtime import ResultInvalid
+from .engine import EngineError
 from .server import Handler, Server
 
 
@@ -106,6 +108,58 @@ class RuntimeContractTests(unittest.TestCase):
             stopped = self.runtime.stop(operation)
         with patch.object(self.runtime.docker, "run") as engine:
             self.assertEqual(self.runtime.start(operation), stopped)
+        engine.assert_not_called()
+
+    def running_record(self):
+        self.runtime.prepare(self.manifest)
+        record = self.runtime.record(self.manifest["operation_id"])
+        record.update(
+            state="running", launch_intent=True, gate_intent=True, gate_opened=True
+        )
+        self.runtime.save(record)
+        return record
+
+    def test_result_readback_starvation_preserves_running_identity_and_fence(self):
+        record = self.running_record()
+        with (
+            patch.object(
+                self.runtime, "owned", return_value={"State": {"Running": True}}
+            ),
+            patch.object(
+                self.runtime,
+                "harvest",
+                side_effect=EngineError("PID limit prevents exec"),
+            ),
+        ):
+            result = self.runtime.status(record["operation_id"])
+        self.assertEqual(result["state"], "running")
+        self.assertIn("temporarily unavailable", result["wait_reason"])
+        self.assertTrue(self.runtime.record(record["operation_id"])["launch_intent"])
+
+    def test_result_integrity_failure_becomes_unknown(self):
+        record = self.running_record()
+        with (
+            patch.object(
+                self.runtime, "owned", return_value={"State": {"Running": True}}
+            ),
+            patch.object(
+                self.runtime, "harvest", side_effect=ResultInvalid("Digest mismatch")
+            ),
+        ):
+            result = self.runtime.status(record["operation_id"])
+        self.assertEqual(result["state"], "unknown")
+
+    def test_start_retry_does_not_exec_again_after_launch_gate_is_confirmed(self):
+        record = self.running_record()
+        expected = {"operation_id": record["operation_id"], "state": "running"}
+        with (
+            patch.object(
+                self.runtime, "owned", return_value={"State": {"Running": True}}
+            ),
+            patch.object(self.runtime, "status", return_value=expected),
+            patch.object(self.runtime.docker, "run") as engine,
+        ):
+            self.assertEqual(self.runtime.start(record["operation_id"]), expected)
         engine.assert_not_called()
 
     def test_only_one_executor_can_own_a_journal(self):

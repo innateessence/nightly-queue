@@ -183,6 +183,10 @@ a verified source manifest or an explicit export error. `descendants_terminated`
 is true only after engine removal/absence of all operation containers has been
 confirmed. A missing/dead container without a protected result stays unknown;
 explicit stop can establish termination but cannot invent its exit code/source.
+PID exhaustion may temporarily prevent protected engine-exec readback. A known
+running container retains its identity/fence and exposes a wait reason until
+readback recovers. A confirmed launch gate is never opened again on a start retry.
+Result integrity failures instead become unknown and require recovery.
 
 The trusted UID 0 init alone retains minimal setup/termination capabilities. Tasks
 cannot read/write its private `/state`, signal it, forge receipts by printing JSON,
@@ -267,6 +271,11 @@ The checks exercise hostile source/imports and forged receipts, selected-secret
 isolation, credential-free package installation, model HTTPS reachability without
 auth, offline validation, real ENOSPC/PID/OOM/CPU enforcement, restart-stable launch,
 detached descendant stop/export, and fresh PostgreSQL/cross-operation isolation.
+The deliberate OOM probe can end with the child or the probe process killed by
+the kernel. It passes only after the workspace/PID/CPU checks completed and the
+protected result records actual OOM/PID/throttling counters. The real nonzero exit
+is preserved in the report; this exception applies only to that fixed resource
+qualification recipe and cannot authorize a native delivery or passing validation.
 Unit tests cover malformed archives, contracts, API auth/conflicts, DNS rebinding,
 and material qualification invalidation. No report substitutes these probes for
 feature 03's genuine authenticated native editing session or the later two-issue
