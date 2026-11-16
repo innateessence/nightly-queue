@@ -1,0 +1,21 @@
+<h3 id="runner-gates">Processing gates</h3>
+<p class="field-hint">Latest runner reports. A policy reading does not grant live execution permission. Reports expire; the runner checks again before work resumes.</p>
+{% for evidence in runner_gate_evidence %}
+  <article aria-label="{{ evidence.runner.name }} processing gates">
+    <h4>{{ evidence.runner.name }}</h4>
+    {% if evidence.stale %}<p class="field-error">Report expired; waiting for fresh evidence.</p>{% endif %}
+    {% if evidence.configuration_changed %}<p class="field-error">Configuration changed since this report.</p>{% endif %}
+    <p>{{ evidence.report.allowed|yesno:"Policy permits processing,Processing blocked" }} · {{ evidence.report.checkpoint }} checkpoint</p>
+    <p>Checked {{ evidence.report.checked_at }} · Received {{ evidence.received_at|date:"c" }} · Recheck by {{ evidence.report.next_check_at }}</p>
+    {% if evidence.report.reasons %}<p>Blocking reasons: {{ evidence.report.reasons|join:", " }}</p>{% endif %}
+    <p>Minimum remaining usage: {{ evidence.report.minimum_remaining_usage_percent }}% · Enforcement {{ evidence.report.reserve_enabled|yesno:"enabled,disabled" }}</p>
+    {% if evidence.report.interval %}<p>Processing interval: {{ evidence.report.interval.start }} until {{ evidence.report.interval.end }} · Tasks started {{ evidence.report.tasks_started }}</p>{% endif %}
+    {% if evidence.report.next_boundary %}<p>Next schedule boundary: {{ evidence.report.next_boundary }}</p>{% endif %}
+    {% for reading in evidence.report.readings %}
+      <p>{{ reading.backend }} · Credential {{ reading.credential_id|default_if_none:"unselected" }} · {{ reading.status }}</p>
+      {% for window in reading.windows %}
+        <p class="field-hint">{{ window.window_id }}: {{ window.remaining_percent|default_if_none:"unknown" }}% remaining · {{ window.status }} · Refreshed {{ window.observed_at }} · Reset {{ window.reset_at|default_if_none:"not reported" }}</p>
+      {% endfor %}
+    {% empty %}<p>No participating allowance readings reported.</p>{% endfor %}
+  </article>
+{% empty %}<p>No processing gate evidence has been received. Live execution remains disabled.</p>{% endfor %}

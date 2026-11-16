@@ -1,9 +1,11 @@
 from django.urls import path
 
-from . import api, configuration_api, secrets
+from . import api, configuration_api, gate_api, secrets
 
 urlpatterns = [
     path("secrets/", secrets.selected_secret, name="runner_selected_secret"),
+    path("gates/", gate_api.gates, name="runner_gates"),
+    path("gates/report/", gate_api.report, name="runner_gate_report"),
     path(
         "configuration/", configuration_api.configuration, name="runner_configuration"
     ),

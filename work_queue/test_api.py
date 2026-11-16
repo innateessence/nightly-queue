@@ -68,6 +68,27 @@ class APITests(TestCase):
         self.assertEqual(item.priority, "normal")
         self.assertEqual(item.status, "queued")
 
+    def test_enqueue_preserves_unicode_and_literal_json_escapes(self):
+        title = "Export \U0001f600 \u00e9"
+        instructions = "Write Unicode \u65e5\u672c\u8a9e and literal " + r"\u0000"
+        response = self.enqueue(title=title, instructions=instructions)
+        self.assertEqual(response.status_code, 201)
+        item = QueueItem.objects.get()
+        self.assertEqual(item.title, title)
+        self.assertEqual(item.instructions, instructions)
+
+    def test_enqueue_rejects_null_characters_in_json_strings(self):
+        response = self.enqueue(instructions="private\x00instructions")
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("private", response.content.decode())
+        self.assertFalse(QueueItem.objects.exists())
+
+    def test_enqueue_rejects_unpaired_surrogates_in_json_strings(self):
+        response = self.enqueue(instructions="private\ud800instructions")
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("private", response.content.decode())
+        self.assertFalse(QueueItem.objects.exists())
+
     def test_enqueue_response_does_not_expose_a_claim_token(self):
         response = self.enqueue()
         self.assertNotIn("claim_token", response.json()["item"])

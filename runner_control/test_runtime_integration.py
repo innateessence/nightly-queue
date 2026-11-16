@@ -1,5 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event
+from unittest.mock import patch
 
 from django.test import LiveServerTestCase
 
@@ -11,6 +13,8 @@ from work_queue.services import enqueue_item
 
 from .auth import token_digest
 from .models import Run, RunnerIdentity
+from .gate_models import RunnerGateEvidence
+from .settings_models import RunnerSettings
 
 
 class RunnerStartupIntegrationTests(LiveServerTestCase):
@@ -42,6 +46,26 @@ class RunnerStartupIntegrationTests(LiveServerTestCase):
         with Journal(self.state_path) as journal:
             with self.assertRaises(AuthenticationError):
                 Controller(client, journal).run(check=True)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.status, "queued")
+        self.assertEqual(Run.objects.count(), 0)
+
+    def test_real_http_poll_publishes_fail_closed_gates_without_claiming(self):
+        settings, _ = RunnerSettings.objects.get_or_create(pk=1)
+        settings.enabled = True
+        settings.reserve_enabled = True
+        settings.save()
+        client = Client(self.live_server_url, self.token)
+        stop = Event()
+        with Journal(self.state_path) as journal:
+            with patch.object(stop, "wait", side_effect=lambda delay: stop.set()):
+                Controller(client, journal, stop).run()
+            checkpoint = journal.load()["gates"]["checkpoint"]
+        evidence = RunnerGateEvidence.objects.get(runner=self.runner)
+        self.assertEqual(evidence.report, checkpoint)
+        self.assertEqual(
+            evidence.report["reasons"], ["release_disabled", "usage_missing_accounts"]
+        )
         self.item.refresh_from_db()
         self.assertEqual(self.item.status, "queued")
         self.assertEqual(Run.objects.count(), 0)

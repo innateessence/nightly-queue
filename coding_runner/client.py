@@ -172,3 +172,6 @@ class Client:
 
         run_id = str(UUID(run_id))
         return self.request("GET", f"/api/v1/runner/runs/{run_id}/")
+
+    def gate_report(self, report: dict[str, Any]) -> dict[str, Any]:
+        return self.request("POST", "/api/v1/runner/gates/report/", {"report": report})

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 import logging
 import threading
 from typing import Any
@@ -10,6 +11,7 @@ from .client import (
     NotFoundError,
 )
 from .journal import Journal, JournalError
+from .gates import GateEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +22,15 @@ class ControllerStopped(Exception):
 
 class Controller:
     def __init__(
-        self, client: Client, journal: Journal, stop: threading.Event | None = None
+        self,
+        client: Client,
+        journal: Journal,
+        stop: threading.Event | None = None,
+        gates: GateEvaluator | None = None,
     ):
         self.client = client
         self.journal = journal
+        self.gates = gates if gates is not None else GateEvaluator(journal)
         self.stop = stop if stop is not None else threading.Event()
 
     def probe(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -85,6 +92,12 @@ class Controller:
                         "Authenticated startup check passed; execution remains disabled."
                     )
                     return
+                active_run_id = state.get("remote_active_run_id")
+                checkpoint = "stage" if active_run_id else "claim"
+                decision = self.gates.evaluate(
+                    configuration, state, checkpoint=checkpoint, run_id=active_run_id
+                )
+                self.client.gate_report(decision.data())
                 poll = configuration["global"].get("polling_interval_seconds", 30)
                 if type(poll) is not int or not 1 <= poll <= 86400:
                     raise InvalidResponse("Polling interval is invalid.")
@@ -92,7 +105,11 @@ class Controller:
                 logger.info(
                     "Connected; execution remains disabled pending controlled release."
                 )
-                self.stop.wait(poll)
+                boundary = datetime.fromisoformat(decision.next_check_at)
+                delay_seconds = max(
+                    0.001, (boundary - datetime.now(UTC)).total_seconds()
+                )
+                self.stop.wait(min(poll, delay_seconds))
             except AuthenticationError:
                 raise
             except ControllerStopped:
