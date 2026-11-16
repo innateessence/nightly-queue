@@ -612,6 +612,7 @@ class DependencyBuilds:
                 docker=self.runtime.docker,
                 profiles={profile.profile_id: profile for profile in profiles},
                 current_denied_ips=self.runtime.current_denied_ips,
+                authorization_denied_ips=self.runtime.authorization_denied_ips,
                 max_active_runs=self.runtime.max_active_runs,
             )
             proof = json.loads(
