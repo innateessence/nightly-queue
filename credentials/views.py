@@ -1,5 +1,5 @@
 from django.contrib import messages
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 
 from runner_control.configuration import configuration_document
 from runner_control.settings_forms import RunnerSettingsForm
@@ -57,3 +57,35 @@ def credential_list(request):
     credentials = Credential.objects.defer("encrypted_payload")
     context = {"form": form, "credentials": credentials}
     return render(request, "credentials/index.html", context)
+
+
+@never_cache
+@sensitive_post_parameters("secret", "passphrase")
+@require_http_methods(["GET", "POST"])
+def credential_edit(request, credential_id):
+    credential = get_object_or_404(Credential, pk=credential_id)
+    form = CredentialForm(
+        request.POST if request.method == "POST" else None, instance=credential
+    )
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(
+            request,
+            "Credential updated. Active runs use the current secret on their next retrieval.",
+        )
+        return redirect("credential_list")
+    return render(
+        request, "credentials/edit.html", {"form": form, "credential": credential}
+    )
+
+
+@never_cache
+@require_http_methods(["POST"])
+def credential_revoke(request, credential_id):
+    credential = get_object_or_404(Credential, pk=credential_id)
+    credential.revoke()
+    messages.success(
+        request,
+        "Credential revoked. Future runner secret retrieval is blocked; stop existing backend processes separately.",
+    )
+    return redirect("credential_list")

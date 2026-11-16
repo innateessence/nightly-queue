@@ -53,7 +53,9 @@ class CredentialMigrationTests(TransactionTestCase):
         executor.migrate(executor.loader.graph.leaf_nodes())
 
     def test_existing_token_becomes_github_token_without_reencryption(self):
-        credential = Credential.objects.get(pk=self.token.pk)
+        credential = Credential.objects.defer("secret_version", "revoked_at").get(
+            pk=self.token.pk
+        )
         self.assertEqual(credential.provider, "github")
         self.assertEqual(credential.kind, "token")
         self.assertEqual(credential.encrypted_payload, self.ciphertext)
@@ -61,7 +63,9 @@ class CredentialMigrationTests(TransactionTestCase):
             self.assertEqual(credential.get_secret()["secret"], "legacy-token")
 
     def test_existing_ssh_key_becomes_github_ssh_without_reencryption(self):
-        credential = Credential.objects.get(pk=self.ssh.pk)
+        credential = Credential.objects.defer("secret_version", "revoked_at").get(
+            pk=self.ssh.pk
+        )
         self.assertEqual(credential.provider, "github")
         self.assertEqual(credential.kind, "ssh")
         self.assertEqual(credential.encrypted_payload, "unchanged-ssh-ciphertext")
@@ -105,3 +109,27 @@ class SyncIntervalMigrationTests(TransactionTestCase):
         self.assertEqual(saved.github_credential_id, credential.pk)
         self.assertEqual(saved.auto_sync_interval_hours, 1)
         self.assertIsNone(saved.last_auto_sync_at)
+
+
+class BackendCredentialMigrationTests(TransactionTestCase):
+    def restore_schema(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_repository_secrets_survive_backend_migration(self):
+        self.addCleanup(self.restore_schema)
+        target = [("credentials", "0004_auto_sync_interval")]
+        executor = MigrationExecutor(connection)
+        executor.migrate(target)
+        apps = executor.loader.project_state(target).apps
+        saved = apps.get_model("credentials", "Credential").objects.create(
+            name="Existing repository",
+            provider="github",
+            kind="token",
+            encrypted_payload="preserved-ciphertext",
+        )
+        self.restore_schema()
+        saved = Credential.objects.get(pk=saved.pk)
+        self.assertEqual(saved.encrypted_payload, "preserved-ciphertext")
+        self.assertEqual(saved.secret_version, 1)
+        self.assertIsNone(saved.revoked_at)

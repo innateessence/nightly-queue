@@ -104,6 +104,33 @@ def project_configuration(project, defaults, overrides, credentials):
                     "message": "The selected credential no longer exists.",
                 }
             )
+    for field in OVERRIDE_FIELDS:
+        if not field.endswith("credential_id"):
+            continue
+        credential = credentials.get(effective[field])
+        if credential and credential.get("revoked_at"):
+            errors.append(
+                {
+                    "field": field,
+                    "code": "revoked_credential",
+                    "message": "The selected credential is revoked.",
+                }
+            )
+        if not credential or not field.startswith(("research", "implementation")):
+            continue
+        allowed = {
+            "codex": ("token", "session"),
+            "claude": ("token",),
+            "opencode": ("connection",),
+        }
+        if credential["kind"] not in allowed.get(credential["provider"], ()):
+            errors.append(
+                {
+                    "field": field,
+                    "code": "wrong_kind",
+                    "message": "Credential type is unsupported for this backend.",
+                }
+            )
     if not effective["validation_commands"]:
         errors.append(
             {
@@ -137,10 +164,14 @@ def configuration_document():
 def _configuration_document(saved):
     defaults = settings_values(saved)
     credential_rows = Credential.objects.values(
-        "id", "name", "provider", "kind", "updated_at"
+        "id", "name", "provider", "kind", "updated_at", "revoked_at", "secret_version"
     )
     credentials = {
-        row["id"]: {**row, "updated_at": row["updated_at"].isoformat()}
+        row["id"]: {
+            **row,
+            "updated_at": row["updated_at"].isoformat(),
+            "revoked_at": row["revoked_at"].isoformat() if row["revoked_at"] else None,
+        }
         for row in credential_rows
     }
     overrides = dict(
@@ -230,7 +261,15 @@ def locked_configuration_snapshot(project, expected_revision):
         raise ValidationError(
             {"configuration": [error["message"] for error in effective["errors"]]}
         )
+    selected = {
+        value
+        for key, value in effective["effective"].items()
+        if key.endswith("credential_id") and value
+    }
     snapshot = {
+        "credential_references": [
+            entry for entry in document["credentials"] if entry["id"] in selected
+        ],
         "schema_version": SCHEMA_VERSION,
         "revision": document["revision"],
         "global": document["global"],

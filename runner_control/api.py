@@ -2,6 +2,7 @@ import json
 
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
+from django.views.decorators.debug import sensitive_variables
 
 from nightly_queue.api import read_body, string_field
 from work_queue.api import item_data
@@ -172,6 +173,7 @@ def recover(request, run_id):
     return run_response(operation)
 
 
+@sensitive_variables()
 def bounded_data(request, fields):
     if len(request.body) > MAX_EVIDENCE_BYTES:
         raise ValidationError({"body": f"Use at most {MAX_EVIDENCE_BYTES} bytes."})
@@ -195,6 +197,7 @@ def bounded_data(request, fields):
 
 
 @runner_api_view("POST")
+@sensitive_variables()
 def progress(request, run_id):
     fields = [
         "operation_id",
@@ -222,6 +225,7 @@ def progress(request, run_id):
 
 
 @runner_api_view("POST")
+@sensitive_variables()
 def artifact(request, run_id):
     data = bounded_data(request, ["operation_id", "claim_token", "kind", "data"])
     kind = string_field(data, "kind", max_length=80)
@@ -232,10 +236,12 @@ def artifact(request, run_id):
     return write_evidence(request, run_id, data, kind, data.get("data", {}))
 
 
+@sensitive_variables()
 def write_evidence(request, run_id, data, kind, payload, updates=None):
     operation_id = uuid_field(data, "operation_id")
     token = uuid_field(data, "claim_token")
 
+    @sensitive_variables()
     def operation():
         entry = record_evidence(
             runner=request.runner_identity,
@@ -252,6 +258,7 @@ def write_evidence(request, run_id, data, kind, payload, updates=None):
 
 
 @runner_api_view("POST")
+@sensitive_variables()
 def finish(request, run_id):
     data = bounded_data(
         request, ["claim_token", "status", "result_url", "error_summary"]
@@ -263,6 +270,7 @@ def finish(request, run_id):
         "error_summary": string_field(data, "error_summary", max_length=8000),
     }
 
+    @sensitive_variables()
     def operation():
         run = finish_run(
             runner=request.runner_identity, run_id=run_id, claim_token=token, **result
