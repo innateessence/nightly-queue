@@ -149,6 +149,11 @@ class MergeGitHub(NativeGitHub):
         ):
             raise DeliveryError("Merge repository differs from the claimed repository.")
         repository = workspace["repository"]
+        if profile["control_base"] == workspace["base_branch"]:
+            raise DeliveryError(
+                "Review control branch must be separate from the application base."
+            )
+        self.base_sha({**workspace, "base_branch": profile["control_base"]})
         raw = self.request("GET", f"/repos/{repository}")
         if raw.get("allow_squash_merge") is not True:
             raise DeliveryError("Repository must permit squash merge.")
