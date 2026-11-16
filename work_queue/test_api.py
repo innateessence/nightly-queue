@@ -174,14 +174,14 @@ class APITests(TestCase):
         self.assertEqual(claimed["status"], "running")
         self.assertEqual(claimed["repository_url"], self.project.repository_url)
         self.assertEqual(claimed["base_branch"], "develop")
-        self.assertEqual(claimed["branch_name"], f"nq/{item.pk}")
+        self.assertEqual(claimed["branch_name"], f"vibearr/manual-{item.pk}")
         self.assertEqual(claimed["execution_ref"], "runner:123")
         self.assertIsNotNone(claimed["started_at"])
         self.assertTrue(uuid.UUID(claimed["claim_token"]))
 
-    def test_claim_preserves_oldest_first_order(self):
-        first = enqueue_item(project=self.project, title="First", priority="low")
-        enqueue_item(project=self.project, title="Second", priority="high")
+    def test_claim_orders_priority_before_age(self):
+        enqueue_item(project=self.project, title="First", priority="low")
+        first = enqueue_item(project=self.project, title="Second", priority="high")
         response = self.post("api_claim", {})
         self.assertEqual(response.json()["item"]["id"], first.pk)
 

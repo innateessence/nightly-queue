@@ -71,7 +71,7 @@ class CredentialMigrationTests(TransactionTestCase):
         self.assertEqual(credential.encrypted_payload, "unchanged-ssh-ciphertext")
 
     def test_project_association_is_preserved(self):
-        project = Project.objects.get(pk=self.project.pk)
+        project = Project.objects.only("id", "credential_id").get(pk=self.project.pk)
         self.assertEqual(project.credential_id, self.token.pk)
 
     def test_existing_credentials_can_be_rolled_back(self):
@@ -133,3 +133,21 @@ class BackendCredentialMigrationTests(TransactionTestCase):
         self.assertEqual(saved.encrypted_payload, "preserved-ciphertext")
         self.assertEqual(saved.secret_version, 1)
         self.assertIsNone(saved.revoked_at)
+
+
+class PollingSecondsMigrationTests(TransactionTestCase):
+    def restore_schema(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_explicit_long_interval_is_preserved_in_seconds(self):
+        self.addCleanup(self.restore_schema)
+        target = [("credentials", "0007_credentialsecretversion_and_more")]
+        executor = MigrationExecutor(connection)
+        executor.migrate(target)
+        apps = executor.loader.project_state(target).apps
+        apps.get_model("credentials", "APISettings").objects.create(
+            auto_sync_interval_hours=12
+        )
+        self.restore_schema()
+        self.assertEqual(APISettings.objects.get().auto_sync_interval_seconds, 43200)

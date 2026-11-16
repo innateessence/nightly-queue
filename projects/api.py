@@ -12,6 +12,11 @@ def project_data(project):
         "repository_url": project.repository_url,
         "base_branch": project.base_branch,
         "autonomous": project.autonomous,
+        "github_repository_id": project.github_repository_id,
+        "github_owner_id": project.github_owner_id,
+        "permitted_author_ids": project.permitted_author_ids,
+        "enabled_at": project.enabled_at.isoformat() if project.enabled_at else None,
+        "backfill_issues": project.backfill_issues,
     }
 
 

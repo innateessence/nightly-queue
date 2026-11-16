@@ -65,6 +65,11 @@ class ProjectAPITests(TestCase):
             "repository_url": "https://github.com/example/repo.git",
             "base_branch": "develop",
             "autonomous": False,
+            "github_repository_id": None,
+            "github_owner_id": None,
+            "permitted_author_ids": [],
+            "enabled_at": None,
+            "backfill_issues": False,
         }
         response = self.client.get(reverse("api_projects"))
         self.assertEqual(response.json()["projects"], [expected])

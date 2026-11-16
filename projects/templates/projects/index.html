@@ -40,6 +40,10 @@
             <p class="item-project"><a href="{{ project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ project.repository_url }}</a></p>
             <p class="item-project">Base branch: {{ project.base_branch|default:"Repository default" }}</p>
             <p class="item-project">Mode: {{ project.autonomous|yesno:"Autonomous,Manual" }}</p>
+            {% if project.autonomous %}
+              <p class="item-project">Discovery attempted: {{ project.sync_attempt_at|date:"M j, H:i T"|default:"Never" }} · Last successful: {{ project.sync_success_at|date:"M j, H:i T"|default:"Never" }}</p>
+              {% if project.sync_error %}<p class="item-instructions" role="status">{{ project.sync_error }}</p>{% endif %}
+            {% endif %}
             <div class="item-footer"><a class="empty-link" href="{% url 'index' %}?project={{ project.pk }}">View queue <span aria-hidden="true">↗</span></a></div>
           </article>
         {% empty %}

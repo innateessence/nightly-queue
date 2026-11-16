@@ -37,7 +37,9 @@ class QueueViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Leave it for the night.")
         self.assertContains(response, "Add your first item")
-        self.assertContains(response, "Built-in task execution is planned.")
+        self.assertContains(
+            response, "Eligible work runs high, normal, then low priority"
+        )
         self.assertEqual(response.context["queue_count"], 0)
 
     def test_add_item_persists_and_redirects(self):
