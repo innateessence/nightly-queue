@@ -195,6 +195,7 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
     operations: list[str] = []
     observations: dict = {}
     harness.start()
+    initial_binding = harness.client.capabilities()["binding_digest"]
     try:
         try:
             urllib.request.urlopen(harness.client.url + "/v1/capabilities", timeout=5)
@@ -413,6 +414,10 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
                 pass
             else:
                 raise RuntimeError("Rebound private DNS destination was accepted")
+        require(
+            harness.client.capabilities()["binding_digest"] == initial_binding,
+            "Runtime binding changed during boundary probes; qualification is revoked.",
+        )
     finally:
         for operation in operations:
             try:
