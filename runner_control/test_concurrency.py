@@ -1,3 +1,4 @@
+from .test_support import CONTROLLER_SECRET
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -26,7 +27,9 @@ class RunConcurrencyTests(TransactionTestCase):
         self.addCleanup(snapshot.stop)
         self.token = "runner-concurrency-token-" + "a" * 32
         self.runner = RunnerIdentity.objects.create(
-            name="controller", token_digest=token_digest(self.token)
+            name="controller",
+            token_digest=token_digest(self.token),
+            controller_digest=token_digest(CONTROLLER_SECRET),
         )
         self.project = Project.objects.create(
             name="Example", repository_url="https://github.com/example/repo"
@@ -39,7 +42,10 @@ class RunConcurrencyTests(TransactionTestCase):
         try:
             with connection.cursor() as cursor:
                 cursor.execute("SET statement_timeout = '5s'")
-            client = Client(HTTP_AUTHORIZATION=f"Bearer {self.token}")
+            client = Client(
+                HTTP_AUTHORIZATION=f"Bearer {self.token}",
+                HTTP_X_NQ_CONTROLLER_SECRET=CONTROLLER_SECRET,
+            )
             kwargs = {"run_id": run_id} if run_id else {}
             if barrier:
                 barrier.wait(timeout=5)

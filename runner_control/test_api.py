@@ -1,3 +1,4 @@
+from .test_support import CONTROLLER_SECRET, provision_controller
 import io
 import json
 import os
@@ -29,9 +30,12 @@ class RunnerAPITests(TestCase):
         self.addCleanup(snapshot.stop)
         self.token = "runner-test-token-" + "a" * 32
         self.runner = RunnerIdentity.objects.create(
-            name="controller", token_digest=token_digest(self.token)
+            controller_digest=token_digest(CONTROLLER_SECRET),
+            name="controller",
+            token_digest=token_digest(self.token),
         )
         self.client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {self.token}"
+        provision_controller(self)
         self.project = Project.objects.create(
             name="Example", repository_url="https://github.com/example/repo"
         )
@@ -134,7 +138,9 @@ class RunnerAPITests(TestCase):
     def test_second_identity_cannot_overlap_active_run(self):
         self.claim_token()
         RunnerIdentity.objects.create(
-            name="second", token_digest=token_digest("second")
+            controller_digest=token_digest(CONTROLLER_SECRET),
+            name="second",
+            token_digest=token_digest("second"),
         )
         self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer second"
         self.assertEqual(self.claim(uuid.uuid4()).status_code, 409)
@@ -186,7 +192,9 @@ class RunnerAPITests(TestCase):
     def test_foreign_run_cannot_be_read_recovered_or_mutated(self):
         token = self.claim_token()
         RunnerIdentity.objects.create(
-            name="second", token_digest=token_digest("second")
+            controller_digest=token_digest(CONTROLLER_SECRET),
+            name="second",
+            token_digest=token_digest("second"),
         )
         self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer second"
         self.assertEqual(

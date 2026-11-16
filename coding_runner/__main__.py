@@ -12,7 +12,7 @@ from .journal import Journal, JournalError
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Read-only runner supervisor; model execution is disabled."
+        description="Recoverable runner supervisor; execution requires controlled release readiness."
     )
     parser.add_argument(
         "--check",

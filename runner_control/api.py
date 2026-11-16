@@ -53,6 +53,18 @@ def run_data(run):
         "result_status": run.result_status,
         "result_url": run.result_url,
         "error_summary": run.error_summary,
+        "finish_digest": run.finish_digest,
+        "cancellation_requested_at": (
+            run.cancellation_requested_at.isoformat()
+            if run.cancellation_requested_at
+            else None
+        ),
+        "cancellation_confirmed_at": (
+            run.cancellation_confirmed_at.isoformat()
+            if run.cancellation_confirmed_at
+            else None
+        ),
+        "cancellation_reason": run.cancellation_reason,
         "evidence": [evidence_data(entry) for entry in reversed(evidence)],
         "evidence_count": evidence_count,
         "evidence_has_more": evidence_count > len(evidence),
@@ -191,7 +203,10 @@ def bounded_data(request, fields):
     claim = uuid_field(data, "claim_token")
     token = str(claim)
     bearer = request.headers.get("Authorization", "").split()[-1]
-    data = redact_payload(data, [token, claim.hex, bearer])
+    data = redact_payload(
+        data,
+        [token, claim.hex, bearer, request.headers.get("X-NQ-Controller-Secret", "")],
+    )
     data["claim_token"] = token
     return data
 

@@ -61,6 +61,7 @@ class Client:
         self.token = token
         self.timeout = timeout
         self.max_bytes = max_bytes
+        self.controller_secret: str | None = None
         self.opener = build_opener(ProxyHandler({}), NoRedirects())
         self.request_lock = threading.Lock()
 
@@ -84,6 +85,8 @@ class Client:
             "Authorization": f"Bearer {self.token}",
             "Accept": "application/json",
         }
+        if self.controller_secret is not None:
+            headers["X-NQ-Controller-Secret"] = self.controller_secret
         if body is not None:
             headers["Content-Type"] = "application/json"
         request = Request(self.url + path, data=body, headers=headers, method=method)

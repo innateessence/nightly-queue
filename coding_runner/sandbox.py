@@ -1,3 +1,4 @@
+from . import processes
 import os
 import signal
 import subprocess
@@ -84,7 +85,7 @@ def sandbox_command(
 
 def probe_sandbox(checkout: Path) -> None:
     try:
-        result = subprocess.run(
+        result = processes.run(
             sandbox_command(checkout, ("/usr/bin/true",)),
             env={},
             capture_output=True,
@@ -184,7 +185,7 @@ class ApprovedExecutor:
         interrupted = False
         started = time.monotonic()
         with tempfile.TemporaryFile() as output:
-            process = subprocess.Popen(
+            process = processes.popen(
                 sandbox_command(
                     workspace.checkout, action.argv, read_only=self.read_only
                 ),
@@ -210,6 +211,7 @@ class ApprovedExecutor:
                     except ProcessLookupError:
                         pass
                 process.wait()
+                processes.reaped(process)
             output.seek(0)
             captured = output.read(1048576)
         try:

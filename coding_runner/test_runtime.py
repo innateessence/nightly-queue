@@ -111,6 +111,64 @@ class ClientTests(ServerCase):
         self.client.request_lock.release()
         self.assertEqual(set(callback_threads), {threading.get_ident()})
 
+    def test_durable_interrupted_mutation_reconciles_exact_pending_request_over_http(
+        self,
+    ):
+        from coding_runner.recovery import DurableClient
+
+        run_id, operation = str(uuid4()), str(uuid4())
+        path = f"/api/v1/runner/runs/{run_id}/contexts/"
+        lookup = f"/api/v1/runner/runs/{run_id}/operations/{operation}/"
+        payload = {
+            "operation_id": operation,
+            "claim_token": "private-test-claim",
+            "document": {"title": "original"},
+        }
+        response = {"context": {"id": str(uuid4())}}
+        self.server.responses[path] = (200, response)
+        self.server.responses[lookup] = (200, {"response": response})
+        self.server.release_mutation = threading.Event()
+        self.client.timeout = 15
+        stopped = threading.Event()
+
+        def stop_after_send():
+            deadline = time.monotonic() + 2
+            while not self.server.calls and time.monotonic() < deadline:
+                time.sleep(0.005)
+            stopped.set()
+
+        stopper = threading.Thread(target=stop_after_send, daemon=True)
+        with Journal(self.path) as journal:
+            state = journal.load()
+            durable = DurableClient(self.client, journal, state)
+            try:
+                stopper.start()
+                started = time.monotonic()
+                with self.assertRaises(AmbiguousRequest):
+                    durable.request(
+                        "POST",
+                        path,
+                        payload,
+                        timeout=2,
+                        checkpoint=lambda: not stopped.is_set(),
+                    )
+                self.assertLess(time.monotonic() - started, 0.7)
+                pending = journal.load()["request"]
+                self.assertEqual(
+                    pending, {"path": path, "payload": payload, "status": "pending"}
+                )
+            finally:
+                self.server.release_mutation.set()
+                stopper.join(2)
+            self.assertTrue(self.client.request_lock.acquire(timeout=2))
+            self.client.request_lock.release()
+            restored = journal.load()
+            DurableClient(self.client, journal, restored).recover(
+                timeout=1, checkpoint=lambda: True
+            )
+            self.assertEqual(restored["request"]["response"], response)
+        self.assertEqual(self.server.calls, [("POST", path), ("GET", lookup)])
+
     def test_full_handoff_gates_can_use_same_client_between_requests(self):
         from unittest.mock import Mock
         from coding_runner.plan_store import ContextPlanStore
@@ -382,13 +440,53 @@ class ClientTests(ServerCase):
         self.server.responses[path] = (200, {"run": {"state": "active"}})
         with Journal(self.path) as journal:
             state = journal.load()
+            state["controller_secret"] = "a" * 64
             journal.prepare(state, run_id, "claim", {"run_id": run_id})
         with Journal(self.path) as journal:
             Controller(self.client, journal).run(check=True)
+            self.assertEqual(self.client.controller_secret, "a" * 64)
             self.assertEqual(
                 journal.load()["operation"]["reconciliation"]["run"]["state"], "active"
             )
         self.assertTrue(all(method == "GET" for method, _ in self.server.calls))
+
+    def test_restart_with_absent_claim_rechecks_current_pause_over_http(self):
+        import copy
+        from coding_runner.gates import GateEvaluator
+        from coding_runner.recovery import RecoveryCoordinator, ReconciliationRequired
+        from coding_runner.test_gates import CONFIG as GATE_CONFIG, NOW
+
+        run_id = str(uuid4())
+        configuration = copy.deepcopy(GATE_CONFIG)
+        self.server.responses[f"/api/v1/runner/runs/{run_id}/"] = (404, {})
+        with Journal(self.path) as journal:
+            state = journal.load()
+            gates = GateEvaluator(journal, clock=lambda: NOW)
+            decision = gates.evaluate(configuration, state)
+            gates.prepare_claim(state, run_id, decision)
+            payload = {
+                "run_id": run_id,
+                "configuration_revision": configuration["revision"],
+            }
+            journal.prepare(state, run_id, "claim", payload)
+            configuration["global"]["paused"] = True
+            self.server.responses["/api/v1/runner/configuration/"] = (
+                200,
+                configuration,
+            )
+            with self.assertRaisesRegex(ReconciliationRequired, "processing gates"):
+                RecoveryCoordinator(self.client, journal, gates).reconcile(
+                    journal.load()
+                )
+            self.assertEqual(journal.load()["operation"]["payload"], payload)
+        self.assertEqual(
+            self.server.calls,
+            [
+                ("GET", f"/api/v1/runner/runs/{run_id}/"),
+                ("GET", "/api/v1/runner/configuration/"),
+                ("POST", "/api/v1/runner/gates/report/"),
+            ],
+        )
 
     def test_pending_claim_is_written_before_http(self):
         run_id = str(uuid4())

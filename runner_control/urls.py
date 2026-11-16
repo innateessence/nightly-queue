@@ -2,7 +2,20 @@ from django.urls import path
 
 from . import api, approval_api, configuration_api, gate_api, plan_api, secrets
 
+from . import recovery_api
+
 urlpatterns = [
+    path(
+        "runs/<uuid:run_id>/operations/<uuid:operation_id>/",
+        recovery_api.operation_detail,
+        name="runner_operation",
+    ),
+    path("controller/", recovery_api.bind_controller, name="runner_controller"),
+    path(
+        "runs/<uuid:run_id>/cancellation/",
+        recovery_api.cancellation,
+        name="runner_cancellation",
+    ),
     path(
         "runs/<uuid:run_id>/contexts/<uuid:document_id>/",
         plan_api.context_detail,

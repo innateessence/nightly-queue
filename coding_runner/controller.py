@@ -1,18 +1,19 @@
-from datetime import UTC, datetime
 import logging
 import threading
 from typing import Any
+from uuid import uuid4
 
 from .client import (
     APIError,
     AuthenticationError,
     Client,
     InvalidResponse,
-    NotFoundError,
 )
 from .journal import Journal, JournalError
 from .gates import GateEvaluator
 from .backend_registry import BackendRegistry, ScopedCredentials
+from .recovery import RecoveryCoordinator, ReconciliationRequired
+from .lifecycle import Lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +30,18 @@ class Controller:
         stop: threading.Event | None = None,
         gates: GateEvaluator | None = None,
         backends: BackendRegistry | None = None,
+        lifecycle_factory=Lifecycle,
+        maintenance=None,
+        completed=None,
     ):
         self.client = client
         self.journal = journal
         self.gates = gates if gates is not None else GateEvaluator(journal)
         self.stop = stop if stop is not None else threading.Event()
         self.backends = backends if backends is not None else BackendRegistry()
+        self.maintenance, self.completed = maintenance, completed
+        self.lifecycle_factory = lifecycle_factory
+        self.state: dict[str, Any] = {}
 
     def probe(self, state: dict[str, Any]) -> dict[str, Any]:
         self.check_shutdown()
@@ -70,66 +77,154 @@ class Controller:
         self.journal.save(state)
         return configuration
 
-    def reconcile(self, state: dict[str, Any]) -> None:
-        operation = state.get("operation")
-        if not operation or operation.get("status") != "pending":
-            return
+    def checkpoint(self) -> bool:
+        if self.stop.is_set():
+            return False
+        state = self.state
+        run_id = state["run"]["run"]["id"]
+        remote = self.client.reconcile(run_id)
+        if remote["run"]["state"] != "active":
+            raise ReconciliationRequired("Remote run no longer owns execution.")
+        state["run"]["run"] = remote["run"]
+        if remote["run"].get("cancellation_requested_at"):
+            self.journal.save(state)
+            return False
         self.check_shutdown()
-        try:
-            result = self.client.reconcile(operation["run_id"])
-        except NotFoundError:
-            result = {"reconciliation": "not_found"}
-        operation["reconciliation"] = result
-        self.journal.save(state)
-        logger.warning("Pending operation requires recovery; no mutation was repeated.")
+        configuration = self.client.configuration()
+        self.check_shutdown()
+        self.gates.adapters.update(
+            self.backends.usage_adapters(
+                configuration["accounts"], ScopedCredentials(self.client)
+            )
+        )
+        decision = self.gates.evaluate(
+            configuration, state, checkpoint="stage", run_id=run_id
+        )
+        self.check_shutdown()
+        self.client.gate_report(decision.data())
+        self.check_shutdown()
+        return decision.allowed
+
+    def reconcile(self, state: dict[str, Any]) -> None:
+        self.check_shutdown()
+        RecoveryCoordinator(
+            self.client, self.journal, self.gates, check_shutdown=self.check_shutdown
+        ).reconcile(state)
+
+    def cycle(self, state, configuration):
+        self.check_shutdown()
+        self.state = state
+        recovery = RecoveryCoordinator(
+            self.client, self.journal, self.gates, check_shutdown=self.check_shutdown
+        )
+        recovery.bind(state)
+        self.check_shutdown()
+        recovery.reconcile(state)
+        self.check_shutdown()
+        lifecycle = self.lifecycle_factory(
+            self.client, self.journal, self.backends, self.checkpoint, stop=self.stop
+        )
+        local = state.get("run")
+        if local:
+            if local["run"]["state"] == "completed":
+                if self.completed:
+                    self.completed(
+                        state,
+                        local["run"]["id"],
+                        local["item"].get("claim_token"),
+                        local["run"].get("finish_digest"),
+                    )
+                for field in (
+                    "run",
+                    "context",
+                    "saved_plan",
+                    "delivery",
+                    "delivery_ready",
+                    "failure",
+                    "cancellation",
+                    "stage",
+                    "wait_reason",
+                    "request",
+                ):
+                    state.pop(field, None)
+                self.journal.save(state)
+                return "completed"
+            return lifecycle.step(state)
+        self.check_shutdown()
+        if self.maintenance and self.maintenance(state, configuration) is not True:
+            return "wait"
+        self.check_shutdown()
+        self.gates.adapters.update(
+            self.backends.usage_adapters(
+                configuration["accounts"], ScopedCredentials(self.client)
+            )
+        )
+        decision = self.gates.evaluate(configuration, state, checkpoint="claim")
+        self.check_shutdown()
+        self.client.gate_report(decision.data())
+        self.check_shutdown()
+        if not decision.allowed or not lifecycle.ready(configuration):
+            return "wait"
+        self.check_shutdown()
+        run_id = str(uuid4())
+        self.gates.prepare_claim(state, run_id, decision)
+        payload = {
+            "run_id": run_id,
+            "configuration_revision": configuration["revision"],
+        }
+        self.journal.prepare(state, run_id, "claim", payload)
+        self.check_shutdown()
+        result = self.client.request("POST", "/api/v1/runner/runs/claim/", payload)
+        recovery.accept_claim(state, result)
+        return "claimed" if state.get("run") else "empty"
 
     def run(self, check: bool = False) -> None:
         state = self.journal.load()
+        if state.get("controller_secret"):
+            self.client.controller_secret = state["controller_secret"]
+        self.state = state
         delay = 1
         while not self.stop.is_set():
             try:
                 configuration = self.probe(state)
-                self.reconcile(state)
+                self.check_shutdown()
                 if check:
+                    operation = state.get("operation")
+                    if operation and operation.get("status") == "pending":
+                        operation["reconciliation"] = self.client.reconcile(
+                            operation["run_id"]
+                        )
+                        self.journal.save(state)
                     logger.info(
-                        "Authenticated startup check passed; execution remains disabled."
+                        "Authenticated startup check passed; no work was claimed."
                     )
                     return
-                active_run_id = state.get("remote_active_run_id")
-                checkpoint = "stage" if active_run_id else "claim"
-                accounts = configuration.get("accounts", [])
-                self.gates.adapters.update(
-                    self.backends.usage_adapters(
-                        accounts, ScopedCredentials(self.client)
-                    )
-                )
-                decision = self.gates.evaluate(
-                    configuration, state, checkpoint=checkpoint, run_id=active_run_id
-                )
-                self.client.gate_report(decision.data())
+                result = self.cycle(state, configuration)
                 poll = configuration["global"].get("polling_interval_seconds", 30)
                 if type(poll) is not int or not 1 <= poll <= 86400:
                     raise InvalidResponse("Polling interval is invalid.")
                 delay = 1
-                logger.info(
-                    "Connected; execution remains disabled pending controlled release."
+                self.stop.wait(
+                    0.01
+                    if result
+                    in {"continue", "claimed", "saved", "delivery_ready", "completed"}
+                    else poll
                 )
-                boundary = datetime.fromisoformat(decision.next_check_at)
-                delay_seconds = max(
-                    0.001, (boundary - datetime.now(UTC)).total_seconds()
-                )
-                self.stop.wait(min(poll, delay_seconds))
             except AuthenticationError:
                 raise
             except ControllerStopped:
                 return
+            except ReconciliationRequired as exc:
+                state["reconciliation_required"] = str(exc)
+                self.journal.save(state)
+                logger.warning("Execution blocked: %s", exc)
+                self.stop.wait(30)
             except APIError as exc:
                 if check:
                     raise
                 logger.warning(
-                    "Queue probe failed (%s); retrying in %s seconds.",
+                    "Queue operation failed (%s); retrying after reconciliation.",
                     type(exc).__name__,
-                    delay,
                 )
                 self.stop.wait(delay)
                 delay = min(delay * 2, 60)

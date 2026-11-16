@@ -194,6 +194,7 @@ class GateEvaluator:
         run_id: str | None = None,
         active_count: int = 0,
         capacity: int = 1,
+        retry_claim_id: str | None = None,
     ) -> GateDecision:
         if checkpoint not in {"claim", "stage", "model", "periodic"}:
             raise ValueError("Unknown gate checkpoint.")
@@ -213,9 +214,23 @@ class GateEvaluator:
         if interval is None:
             reasons.append("outside_window")
         owned = state.get("remote_active_run_id") or gate.get("owned_run_id")
-        if checkpoint == "claim" and (
-            gate.get("pending_claim") or state.get("operation")
+        retrying = retry_claim_id is not None
+        pending = gate.get("pending_claim") or {}
+        operation = state.get("operation") or {}
+        valid_operation = (
+            not operation
+            or operation.get("kind") == "claim"
+            and operation.get("run_id") == retry_claim_id
+        )
+        if retrying and (
+            checkpoint != "claim"
+            or pending.get("run_id") != retry_claim_id
+            or not valid_operation
         ):
+            raise JournalError(
+                "Claim retry must match the original pending reconciliation intent."
+            )
+        if checkpoint == "claim" and not retrying and (pending or operation):
             reasons.append("reconciliation_required")
         if checkpoint == "claim" and owned:
             reasons.append("resume_owned_run_first")
@@ -237,6 +252,8 @@ class GateEvaluator:
             **configuration,
             "accounts": list(configuration["accounts"]),
         }
+        if retrying:
+            usage_configuration["accounts"].extend(pending.get("accounts", []))
         if run_id:
             original_accounts = gate.get("attempt_accounts", {}).get(run_id, [])
             usage_configuration["accounts"].extend(original_accounts)

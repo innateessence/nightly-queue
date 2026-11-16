@@ -1,3 +1,4 @@
+from .test_support import CONTROLLER_SECRET, provision_controller
 import json
 from uuid import uuid4
 from unittest.mock import patch
@@ -29,9 +30,12 @@ class ApprovalTests(TestCase):
         self.addCleanup(snapshot.stop)
         self.token = "approval-runner-test-token"
         self.runner = RunnerIdentity.objects.create(
-            name="approvals", token_digest=token_digest(self.token)
+            controller_digest=token_digest(CONTROLLER_SECRET),
+            name="approvals",
+            token_digest=token_digest(self.token),
         )
         self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer " + self.token
+        provision_controller(self)
         project = Project.objects.create(
             name="Example", repository_url="https://github.com/example/repo"
         )
@@ -115,7 +119,10 @@ class ApprovalTests(TestCase):
 
     def test_duplicate_request_is_idempotent_after_restart(self):
         approval = self.approval()
-        self.client = Client(HTTP_AUTHORIZATION="Bearer " + self.token)
+        self.client = Client(
+            HTTP_X_NQ_CONTROLLER_SECRET=CONTROLLER_SECRET,
+            HTTP_AUTHORIZATION="Bearer " + self.token,
+        )
         replay = self.request_approval()
         self.assertEqual(replay.json()["approval"]["id"], str(approval.pk))
         self.assertEqual(ActionApproval.objects.count(), 1)
@@ -179,7 +186,10 @@ class ApprovalTests(TestCase):
         self.approve(approval)
         first = self.consume(approval)
         self.assertTrue(first.json()["permit"])
-        self.client = Client(HTTP_AUTHORIZATION="Bearer " + self.token)
+        self.client = Client(
+            HTTP_X_NQ_CONTROLLER_SECRET=CONTROLLER_SECRET,
+            HTTP_AUTHORIZATION="Bearer " + self.token,
+        )
         second = self.consume(approval)
         self.assertFalse(second.json()["permit"])
         self.assertEqual(first.json()["execution_id"], second.json()["execution_id"])
@@ -268,7 +278,9 @@ class ApprovalTests(TestCase):
         credential = self.selected_credential("selected-private-secret")
         Credential.objects.filter(pk=credential.pk).update(encrypted_payload="invalid")
         RunnerIdentity.objects.create(
-            name="foreign", token_digest=token_digest("foreign-token")
+            name="foreign",
+            token_digest=token_digest("foreign-token"),
+            controller_digest=token_digest(CONTROLLER_SECRET),
         )
         self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer foreign-token"
         self.assertEqual(self.request_approval().status_code, 404)
@@ -382,7 +394,9 @@ class ApprovalTests(TestCase):
     def test_foreign_runner_cannot_read_request_or_consume(self):
         approval = self.approval()
         RunnerIdentity.objects.create(
-            name="foreign", token_digest=token_digest("foreign-token")
+            controller_digest=token_digest(CONTROLLER_SECRET),
+            name="foreign",
+            token_digest=token_digest("foreign-token"),
         )
         self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer foreign-token"
         self.assertEqual(

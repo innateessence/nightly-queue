@@ -1,10 +1,10 @@
+from . import processes
 import fcntl
 import hashlib
 import json
 import os
 import re
 import stat
-import subprocess
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -46,7 +46,7 @@ def git(arguments: list[str], cwd: Path | None = None, local: bool = False) -> s
         "-c",
         "core.fsmonitor=false",
     ]
-    result = subprocess.run(
+    result = processes.run(
         command + arguments,
         cwd=cwd,
         env=clean_environment(),
@@ -155,8 +155,15 @@ class Workspace:
 
 
 class WorkspaceManager:
-    def __init__(self, directory: Path, *, trusted_local_root: Path | None = None):
+    def __init__(
+        self,
+        directory: Path,
+        *,
+        trusted_local_root: Path | None = None,
+        remote_git=None,
+    ):
         self.directory = private_directory(directory)
+        self.remote_git = remote_git
         self.trusted_local_root = (
             trusted_local_root.resolve() if trusted_local_root else None
         )
@@ -216,18 +223,19 @@ class WorkspaceManager:
                 raise WorkspaceError(
                     "An incomplete checkout requires operator recovery."
                 )
-            git(
-                [
-                    "clone",
-                    "--no-local",
-                    "--no-checkout",
-                    "--no-recurse-submodules",
-                    "--",
-                    repository,
-                    str(checkout),
-                ],
-                local=local,
-            )
+            arguments = [
+                "clone",
+                "--no-local",
+                "--no-checkout",
+                "--no-recurse-submodules",
+                "--",
+                repository,
+                str(checkout),
+            ]
+            if self.remote_git is not None and not local:
+                self.remote_git(arguments)
+            else:
+                git(arguments, local=local)
             resolved = base
             if not resolved:
                 symbolic = git(["symbolic-ref", "refs/remotes/origin/HEAD"], checkout)
@@ -247,7 +255,7 @@ class WorkspaceManager:
                 checkout,
             )
             existing = (
-                subprocess.run(
+                processes.run(
                     [
                         "/usr/bin/git",
                         "show-ref",
@@ -279,6 +287,26 @@ class WorkspaceManager:
             metadata.chmod(0o600)
             workspace.verify()
             return workspace
+
+    def inspect_base(self, workspace: Workspace):
+        arguments = [
+            "ls-remote",
+            "--refs",
+            "--",
+            workspace.repository_url,
+            "refs/heads/" + workspace.resolved_base_branch,
+        ]
+        if self.remote_git:
+            observed = self.remote_git(arguments, cwd=workspace.checkout)
+        else:
+            observed = git(arguments, local=self.trusted_local_root is not None)
+        expected = (
+            workspace.base_revision + "\trefs/heads/" + workspace.resolved_base_branch
+        )
+        if observed != expected:
+            raise WorkspaceError(
+                "Current remote base changed; preserve work and save an assessed replacement plan before resuming."
+            )
 
 
 class SourceStore:

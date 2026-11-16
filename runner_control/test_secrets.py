@@ -1,3 +1,4 @@
+from .test_support import CONTROLLER_SECRET, provision_controller
 import json
 import uuid
 
@@ -23,12 +24,17 @@ from .settings_models import ProjectRunnerSettings, RunnerSettings
 class SelectedSecretTests(TestCase):
     def setUp(self):
         self.runner = RunnerIdentity.objects.create(
-            name="owner", token_digest=token_digest("owner-token")
+            controller_digest=token_digest(CONTROLLER_SECRET),
+            name="owner",
+            token_digest=token_digest("owner-token"),
         )
         self.other = RunnerIdentity.objects.create(
-            name="other", token_digest=token_digest("other-token")
+            controller_digest=token_digest(CONTROLLER_SECRET),
+            name="other",
+            token_digest=token_digest("other-token"),
         )
         self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer owner-token"
+        provision_controller(self)
         self.backend = self.credential("Codex", "codex", "backend-private-secret")
         self.issue = self.credential("Issue", "github", "issue-private-secret")
         self.repository = self.credential(

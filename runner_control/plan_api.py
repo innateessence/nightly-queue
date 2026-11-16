@@ -70,7 +70,15 @@ def document_body(request, fields, limit):
             raise ValidationError({"body": "Send finite JSON values."}) from None
         token = uuid_field(data, "claim_token")
         bearer = request.headers.get("Authorization", "").split()[-1]
-        safe = redact_payload(data, [str(token), token.hex, bearer])
+        safe = redact_payload(
+            data,
+            [
+                str(token),
+                token.hex,
+                bearer,
+                request.headers.get("X-NQ-Controller-Secret", ""),
+            ],
+        )
         if "document" in data and safe["document"] != data["document"]:
             raise ValidationError(
                 {
