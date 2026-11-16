@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import api, configuration_api, gate_api, secrets
+from . import api, approval_api, configuration_api, gate_api, secrets
 
 urlpatterns = [
     path("secrets/", secrets.selected_secret, name="runner_selected_secret"),
@@ -8,6 +8,21 @@ urlpatterns = [
     path("gates/report/", gate_api.report, name="runner_gate_report"),
     path(
         "configuration/", configuration_api.configuration, name="runner_configuration"
+    ),
+    path(
+        "runs/<uuid:run_id>/approvals/",
+        approval_api.collection,
+        name="runner_approvals",
+    ),
+    path(
+        "runs/<uuid:run_id>/approvals/<uuid:approval_id>/",
+        approval_api.detail,
+        name="runner_approval",
+    ),
+    path(
+        "runs/<uuid:run_id>/approvals/<uuid:approval_id>/consume/",
+        approval_api.consume,
+        name="runner_approval_consume",
     ),
     path("identity/", api.identity, name="runner_identity"),
     path("runs/claim/", api.claim, name="runner_claim"),
