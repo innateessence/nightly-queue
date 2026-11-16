@@ -44,6 +44,40 @@ class BackendCredentialTests(TestCase):
             self.make_credential(kind="session", secret=secret)
         self.assertNotIn("private-secret-value", str(caught.exception))
 
+    def test_codex_session_accepts_pinned_cli_owner_and_provenance_metadata(self):
+        tokens = {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "id_token": "id",
+            "account_id": "account",
+            "login_owner_id": "login-owner",
+            "oauth_provenance": {
+                "issuer": "https://auth.openai.com",
+                "client_id": "codex-client",
+            },
+        }
+        credential = self.make_credential(
+            kind="session", secret=json.dumps({"tokens": tokens})
+        )
+        self.assertEqual(
+            json.loads(credential.get_secret()["secret"])["tokens"], tokens
+        )
+
+    def test_codex_session_rejects_unknown_provenance_metadata(self):
+        tokens = {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "id_token": "id",
+            "account_id": "account",
+            "oauth_provenance": {
+                "issuer": "https://auth.openai.com",
+                "client_id": "codex-client",
+                "command": "untrusted",
+            },
+        }
+        with self.assertRaises(ValidationError):
+            self.make_credential(kind="session", secret=json.dumps({"tokens": tokens}))
+
     def test_opencode_ollama_connection(self):
         secret = '{"provider":"ollama","base_url":"http://runner-ollama:11434/api"}'
         credential = self.make_credential(

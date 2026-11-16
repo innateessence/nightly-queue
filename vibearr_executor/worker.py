@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .artifacts import extract, result_manifest, snapshot
 from .contracts import MAX_LOG, canonical, digest
+from .secret_material import contains_secret, redact
 
 
 def save(path: Path, value: bytes) -> None:
@@ -20,20 +21,12 @@ def save(path: Path, value: bytes) -> None:
 
 
 def redact_logs(content: bytes, secret: bytes) -> bytes:
-    if not secret:
-        return content
-    segments = content.split(secret)
-    tail = segments[-1]
-    for count in range(min(len(secret) - 1, len(tail)), 0, -1):
-        if tail.endswith(secret[:count]):
-            segments[-1] = tail[:-count]
-            break
-    return b"[REDACTED]".join(segments)
+    return redact(content, secret, incomplete=True)
 
 
 def redact_result(value, secret: str):
     if isinstance(value, str):
-        return value.replace(secret, "[REDACTED]")
+        return redact(value.encode(), secret.encode()).decode()
     if isinstance(value, dict):
         return {key: redact_result(item, secret) for key, item in value.items()}
     if isinstance(value, list):
@@ -204,7 +197,7 @@ def main() -> None:
         Path("/secrets/backend").unlink(missing_ok=True)
         try:
             exported = snapshot(Path("/work"))
-            if secret and secret in exported:
+            if contains_secret(exported, secret):
                 raise ValueError(
                     "Workspace contains the selected backend credential; source export withheld."
                 )

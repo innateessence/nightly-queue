@@ -133,7 +133,7 @@ def project_configuration(project, defaults, overrides, credentials):
         if not credential or not field.startswith(("research", "implementation")):
             continue
         allowed = {
-            "codex": ("token",),
+            "codex": ("token", "session"),
             "claude": ("token",),
             "opencode": ("connection",),
         }

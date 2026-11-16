@@ -190,7 +190,7 @@ import pathlib, sys
 import vibearr_executor, vibearr_executor.client, vibearr_executor.server
 root = pathlib.Path(vibearr_executor.__file__).parent
 assert root.is_relative_to(sys.prefix)
-for name in ('Dockerfile', 'worker.py', 'firewall.py', 'proxy.py', 'smoke.py', 'pg_smoke.py'):
+for name in ('Dockerfile', 'Codex.Dockerfile', 'codex_task.py', 'secret_material.py', 'worker.py', 'firewall.py', 'proxy.py', 'smoke.py', 'pg_smoke.py'):
     assert (root / name).is_file(), name
 assert 'django' not in sys.modules
 """
