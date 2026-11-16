@@ -1,11 +1,13 @@
 """One journaled publication, reconciled before any repeated mutation."""
 
 from dataclasses import replace
+import time
 from uuid import uuid4
 
 from .delivery import DeliveryError, DeliveryUnknown, SupervisorGit
 from .native_github import NativeGitHub
 from .native_sessions import NativeSession
+from .processes import current_execution
 from .recovery import ReconciliationRequired
 from .workspaces import git
 
@@ -300,6 +302,16 @@ class NativeDelivery:
         }
 
     def reconcile_publications(self):
+        if not self.data.get("intents"):
+            return []
+        checkpoint = lambda: not self.host.host.stop.is_set()
+        token = current_execution.set((time.monotonic() + 60, checkpoint, checkpoint))
+        try:
+            return self._reconcile_publications()
+        finally:
+            current_execution.reset(token)
+
+    def _reconcile_publications(self):
         if not self.data.get("intents"):
             return []
         github, transport = self.clients(reconciliation=True)

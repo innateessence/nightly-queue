@@ -431,3 +431,17 @@ class NativeLifecycleTests(unittest.TestCase):
         with self.assertRaises(ReconciliationRequired):
             self.engine().step(self.state)
         self.assertEqual(self.queue.finishes, [])
+
+    def test_confirmed_expired_session_without_export_finishes_failed(self):
+        self.advance("agent")
+        self.engine().step(self.state)
+        operation = self.executor.started[0]
+        result = self.executor.states[operation]["result"]
+        result.update(exit_code=None, timed_out=True, canceled=True)
+        result.pop("artifact")
+        self.engine().step(self.state)
+        self.assertEqual(self.queue.finishes[0]["outcome"], "failed")
+        self.assertEqual(self.state["native"]["phase"], "agent")
+        self.assertEqual(
+            git(["rev-list", "--count", "HEAD"], self.workspace.checkout), "1"
+        )

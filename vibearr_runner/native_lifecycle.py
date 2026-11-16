@@ -9,6 +9,8 @@ import time
 from uuid import uuid4
 
 from .client import APIError, ConflictError, NotFoundError
+from .backends import BackendInterrupted
+from .budgets import BudgetExceeded
 from .delivery import DeliveryError, SupervisorGit
 from .native_preflight import NativePreflight
 from .native_resources import NativeResources
@@ -243,9 +245,9 @@ class NativeLifecycle:
                     and pending["path"] == path
                     and pending["payload"] == payload
                 ):
-                    self.native.setdefault("rejected_metadata", []).append(
-                        {"operation_id": payload["operation_id"], "path": path}
-                    )
+                    self.native.setdefault("rejected_metadata", {})[
+                        payload["operation_id"]
+                    ] = {"path": path}
                     self.state["request"] = None
                     self.save()
                 reason = "Native metadata was rejected and confirmed absent; terminate this attempt without replacing its execution."
@@ -432,6 +434,19 @@ class NativeLifecycle:
             self.native.update(failure=str(exc), outcome="no_change")
             self.save()
             return self.finish_failure()
+        except BackendInterrupted:
+            if self.host.stop.is_set():
+                return "wait"
+            if utcnow() >= datetime.fromisoformat(self.native["deadline"]):
+                self.native.update(
+                    failure="Native task wall-clock deadline expired.", outcome="failed"
+                )
+                self.save()
+                return self.finish_failure()
+            self.resources.controls(self.run_id, self.executor, pause=True)
+            self.native["paused"] = True
+            self.save()
+            return "wait"
         except (
             NativeFailure,
             NativeSessionError,
@@ -440,6 +455,7 @@ class NativeLifecycle:
             DeliveryError,
             Rejected,
             OSError,
+            BudgetExceeded,
         ) as exc:
             self.native.update(failure=str(exc)[:2000], outcome="failed")
             self.save()
@@ -609,7 +625,12 @@ class NativeLifecycle:
         return "continue"
 
     def agent(self):
-        from .native_contract import agent_intent, agent_result
+        from .native_contract import (
+            agent_intent,
+            agent_result,
+            receipt_summary,
+            validate_native_artifact,
+        )
         from .native_validation import CandidateSource
 
         workspace = self.workspace()
@@ -697,6 +718,45 @@ class NativeLifecycle:
             detail = str(events[-1]) if events else "Native coding session is running."
             self.status("implementation", detail=detail)
             return "running"
+        receipt = receipt_summary(observed)
+        result = observed["result"]
+        failed = result.get("exit_code") != 0 or any(
+            result.get(key)
+            for key in (
+                "canceled",
+                "timed_out",
+                "log_truncated",
+                "error",
+                "export_error",
+            )
+        )
+        if failed or not isinstance(result.get("artifact"), dict):
+            payload = validate_native_artifact(
+                "native_agent",
+                {
+                    "schema_version": 1,
+                    "intent_id": data["intent_id"],
+                    "receipt": receipt,
+                    "successful": False,
+                    "session_id": "",
+                    "agent_version": session.agent_version,
+                    "usage": [],
+                },
+            )
+            if receipt["source_digest"]:
+                self.artifact(
+                    "native_agent",
+                    payload,
+                    f"agent-result:{session.manifest['operation_id']}",
+                )
+            self.preflight.invalidate_account(
+                self.state,
+                account,
+                "Native session failed; authenticate the selected account again before another task.",
+            )
+            raise NativeFailure(
+                "Native session terminated without complete successful output; no candidate was imported."
+            )
         outcome = adapter.outcome(session, original)
         payload = agent_result(
             intent_id=data["intent_id"],

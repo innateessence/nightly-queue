@@ -191,3 +191,15 @@ class NativeSupervisionTests(NativeProtocolMixin, TestCase):
         self.assertEqual(self.executor.started, [])
         self.assertEqual(len(self.state["native"]["rejected_metadata"]), 1)
         self.assertFalse(self.run.evidence.filter(kind="native_intent").exists())
+
+    def test_confirmed_expired_native_session_can_finish_without_an_export(self):
+        self.run_to("agent")
+        self.engine().step(self.state)
+        result = self.executor.states[self.executor.started[0]]["result"]
+        result.update(exit_code=None, timed_out=True, canceled=True)
+        result.pop("artifact")
+        self.assertEqual(self.engine().step(self.state), "reporting_pending")
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.result_status, "failed")
+        self.assertEqual(self.run.evidence.filter(kind="native_termination").count(), 1)
+        self.assertEqual(self.state["native"].get("rejected_metadata", {}), {})
