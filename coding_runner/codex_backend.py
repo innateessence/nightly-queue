@@ -147,7 +147,7 @@ class ProcessTransport:
                     )
                 try:
                     value = json.loads(raw)
-                except (ValueError, UnicodeError):
+                except (ValueError, UnicodeError, RecursionError):
                     raise BackendOutputError(
                         "Model transport did not return JSON."
                     ) from None
@@ -216,7 +216,7 @@ def parse_response(value: dict[str, Any], stage: str) -> BackendEvent:
         raise BackendOutputError("Expected one structured model proposal.")
     try:
         proposal = json.loads(texts[0])
-    except ValueError:
+    except (ValueError, RecursionError):
         raise BackendOutputError("Model proposal is not JSON.") from None
     if (
         not isinstance(proposal, dict)
@@ -250,7 +250,28 @@ def sha(value: Any, size: str) -> bool:
     return isinstance(value, str) and re.fullmatch(size, value) is not None
 
 
+def validate_model_data(value: Any) -> None:
+    try:
+        json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
+    except (TypeError, ValueError, UnicodeError, RecursionError):
+        raise BackendOutputError(
+            "Model proposal data is not finite UTF-8 JSON."
+        ) from None
+    pending = [(value, 0)]
+    while pending:
+        current, depth = pending.pop()
+        if depth > 64:
+            raise BackendOutputError("Model proposal exceeds its nesting limit.")
+        children = current.values() if isinstance(current, dict) else current
+        if not isinstance(current, (dict, list)):
+            continue
+        pending.extend(
+            (entry, depth + 1) for entry in children if isinstance(entry, (dict, list))
+        )
+
+
 def validate_proposal(kind: str, data: dict[str, Any]) -> None:
+    validate_model_data(data)
     valid = False
     if kind == "read":
         valid = set(data) == {"path"} and safe_path(data["path"])

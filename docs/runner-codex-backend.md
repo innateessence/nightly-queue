@@ -86,6 +86,8 @@ Each patch entry is `{path, expected_digest, content}`. A null expected digest
 means create; null content means delete. Paths cannot escape the checkout or
 enter `.git`. Patches are limited to 100 distinct files, each at most 128 KiB
 of UTF-8 text, and must bind the base and current whole-checkout digest.
+Proposal data must be finite UTF-8 JSON with at most 64 nested containers.
+Malformed encoding or excessive nesting returns a generic backend error.
 Implementation owns actual safe application, plan amendments, inspection,
 validation and delivery. No backend event directly commits, pushes, publishes,
 marks a task successful, or finishes a queue item.

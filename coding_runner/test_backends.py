@@ -254,6 +254,14 @@ class BackendTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(BackendOutputError):
                 parse_response(value, "research")
 
+    def test_deeply_nested_proposal_json_is_rejected_without_provider_text(self):
+        value = response()
+        nested = "[" * 10000 + json.dumps(TOKEN) + "]" * 10000
+        value["response"]["output"][0]["content"][0]["text"] = nested
+        with self.assertRaises(BackendOutputError) as failure:
+            parse_response(value, "research")
+        self.assertNotIn(TOKEN, str(failure.exception))
+
     def test_implementation_patch_binds_expected_file_and_checkout(self):
         data = {
             "base_revision": BASE,
@@ -281,6 +289,50 @@ class BackendTests(unittest.TestCase):
             }
             with self.subTest(path=path), self.assertRaises(BackendOutputError):
                 validate_proposal("patch", data)
+
+    def test_patch_rejects_unpaired_surrogate_content(self):
+        data = {
+            "base_revision": BASE,
+            "content_digest": "b" * 64,
+            "files": [{"path": "app.py", "expected_digest": None, "content": "\ud800"}],
+        }
+        with self.assertRaises(BackendOutputError):
+            parse_response(response("patch", data), "implementation")
+
+    def test_read_rejects_unpaired_surrogate_path(self):
+        with self.assertRaises(BackendOutputError):
+            parse_response(response("read", {"path": "\ud800"}), "research")
+
+    def test_plan_rejects_nested_unpaired_surrogate_text(self):
+        with self.assertRaises(BackendOutputError):
+            parse_response(
+                response("plan", {"document": {"findings": ["\ud800"]}}), "research"
+            )
+
+    def test_plan_rejects_nonfinite_nested_json(self):
+        with self.assertRaises(BackendOutputError):
+            parse_response(
+                response("plan", {"document": {"value": float("nan")}}), "research"
+            )
+
+    def test_plan_rejects_excessive_proposal_nesting(self):
+        document = {}
+        for _ in range(65):
+            document = {"nested": document}
+        with self.assertRaises(BackendOutputError):
+            parse_response(response("plan", {"document": document}), "research")
+
+    def test_patch_preserves_valid_unicode_and_nul_content(self):
+        data = {
+            "base_revision": BASE,
+            "content_digest": "b" * 64,
+            "files": [
+                {"path": "app.py", "expected_digest": None, "content": "é漢字🙂\x00"}
+            ],
+        }
+        self.assertEqual(
+            parse_response(response("patch", data), "implementation").data, data
+        )
 
     def test_unsupported_native_cli_never_reports_readiness(self):
         result = SimpleNamespace(returncode=0, stdout=b"codex-cli 0.169.0\n")
@@ -369,6 +421,14 @@ class TransportTests(unittest.TestCase):
     def test_fake_process_malformed_json_fails(self):
         with self.assertRaises(BackendOutputError):
             self.exchange("print('not json')")
+
+    def test_fake_process_deeply_nested_json_fails_and_reaps(self):
+        transport = FakeProcess("print('[' * 10000 + '0' + ']' * 10000)")
+        with self.assertRaises(BackendOutputError):
+            transport.exchange(
+                {}, timeout=1, checkpoint=lambda: True, stop=threading.Event()
+            )
+        self.assertIsNone(transport.process)
 
     def test_fake_process_exit_failure_fails(self):
         with self.assertRaises(BackendOutputError):
@@ -739,6 +799,27 @@ class ResearchTests(unittest.TestCase):
         with self.assertRaisesRegex(BackendError, "unresolved"):
             self.step()
         self.assertEqual(self.backend.research.call_count, 1)
+
+    def test_deeply_nested_model_output_keeps_unresolved_journal_without_retry(self):
+        value = response()
+        nested = "[" * 10000 + json.dumps(TOKEN) + "]" * 10000
+        value["response"]["output"][0]["content"][0]["text"] = nested
+        script = (
+            "import json,sys; json.load(sys.stdin); print("
+            + repr(json.dumps(value))
+            + ")"
+        )
+        backend = CodexBackend(grant, transport=FakeProcess(script))
+        self.backend.research.side_effect = backend.research
+        with self.assertRaises(BackendOutputError):
+            self.step()
+        self.state = self.journal.load()
+        self.assertIs(self.state["research"][self.run_id]["model_pending"], True)
+        self.assertNotIn(TOKEN, json.dumps(self.state))
+        with self.assertRaisesRegex(BackendError, "unresolved"):
+            self.step()
+        self.assertEqual(self.backend.research.call_count, 1)
+        self.assertIsNone(backend.transport.process)
 
     def test_uncertain_approved_execution_is_not_repeated(self):
         self.action()
