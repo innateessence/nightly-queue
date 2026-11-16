@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import time
+import threading
 from datetime import datetime, timezone
 from http.client import HTTPException
 from typing import Any
@@ -100,8 +101,9 @@ class GitHubContextClient:
         self.timeout = timeout
         self.max_pages = max_pages
         self.opener = build_opener(ProxyHandler({}), NoRedirects())
+        self.request_lock = threading.Lock()
 
-    def _get(self, url: str) -> tuple[Any, str]:
+    def _get(self, url: str, *, deadline: float | None = None) -> tuple[Any, str]:
         request = Request(
             url,
             headers={
@@ -110,11 +112,43 @@ class GitHubContextClient:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
+        request_deadline = time.monotonic() + self.timeout
+        deadline = (
+            min(request_deadline, deadline)
+            if deadline is not None
+            else request_deadline
+        )
+        if deadline <= time.monotonic():
+            raise ContextError("Issue discussion request deadline exceeded.")
+        if not self.request_lock.acquire(blocking=False):
+            raise ContextError("A previous issue request is still unavailable.")
+        finished = threading.Event()
+        outcome: list[Any] = []
+
+        def send():
+            try:
+                outcome.append(self._send(request, deadline))
+            except Exception as exc:
+                outcome.append(exc)
+            finally:
+                self.request_lock.release()
+                finished.set()
+
+        # DNS and dripping headers can outlast a socket timeout.
+        worker = threading.Thread(target=send, daemon=True)
+        worker.start()
+        if not finished.wait(max(0, deadline - time.monotonic())):
+            raise ContextError("Issue discussion request deadline exceeded.")
+        result = outcome[0]
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def _send(self, request: Request, deadline: float) -> tuple[Any, str]:
         try:
             with self.opener.open(request, timeout=self.timeout) as response:
                 if response.status != 200:
                     raise ContextError("Issue discussion unavailable.")
-                deadline = time.monotonic() + self.timeout
                 raw = bytearray()
                 while True:
                     chunk = response.read1(

@@ -272,3 +272,29 @@ class PlanContractTests(unittest.TestCase):
             first = register_context_sources(original, store)[0]
             second = register_context_sources(changed, SourceStore(store.directory))[0]
             self.assertNotEqual(first["digest"], second["digest"])
+
+    def test_redacted_context_presentation_cannot_be_used_for_research(self):
+        client = Mock()
+        client.request.return_value = {
+            "context": {**self.context, "presentation_only": True}
+        }
+        store = ContextPlanStore(client, str(uuid4()), str(uuid4()), Mock())
+        with self.assertRaisesRegex(ValueError, "presentation"):
+            store.refresh({**ITEM, "source": "manual"}, BASE)
+
+    def test_redacted_plan_presentation_cannot_be_used_for_implementation(self):
+        client = Mock()
+        client.request.return_value = {"plan": {**self.plan, "presentation_only": True}}
+        store = ContextPlanStore(client, str(uuid4()), str(uuid4()), Mock())
+        with self.assertRaisesRegex(ValueError, "presentation"):
+            store.save_plan(self.plan, self.context, reason="Reviewed")
+
+    def test_redacted_reconciled_handoff_cannot_be_used(self):
+        client = Mock()
+        client.request.return_value = {
+            "context": self.context,
+            "plan": {**self.plan, "presentation_only": True},
+        }
+        store = ContextPlanStore(client, str(uuid4()), str(uuid4()), Mock())
+        with self.assertRaisesRegex(ValueError, "presentation"):
+            store.handoff({**ITEM, "source": "manual"}, BASE, operation_id=str(uuid4()))

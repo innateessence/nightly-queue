@@ -4,9 +4,12 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+
+from credentials.models import Credential
+from credentials.test_models import TEST_KEY
 
 from coding_runner.context import manual_context
 from coding_runner.test_plans import BASE, proposed_plan
@@ -480,3 +483,187 @@ class ContextPlanAPITests(TestCase):
         self.assertContains(response, "Older runs")
         last = self.client.get(reverse("runner_plan_history"), {"page": 5})
         self.assertContains(last, str(self.run_id))
+
+    def select_rotated_credential(self):
+        credential = Credential(
+            name="Context review backend", provider="codex", kind="token"
+        )
+        credential.set_secret("historic-context-secret")
+        credential.save()
+        credential.set_secret("current-context-secret")
+        credential.save()
+        run = Run.objects.get(pk=self.run_id)
+        run.configuration_snapshot = {
+            "effective": {"research_credential_id": credential.pk}
+        }
+        run.save(update_fields=["configuration_snapshot"])
+        return credential
+
+    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    def test_selected_current_and_historical_secrets_are_rejected_in_actual_plans(self):
+        context = self.save_context().json()["context"]
+        self.select_rotated_credential()
+        for material in ["historic-context-secret", "current-context-secret"]:
+            document = proposed_plan(context)
+            document["findings"] = [material]
+            response = self.save_plan(context, document=document)
+            self.assertEqual(response.status_code, 400)
+            self.assertNotContains(response, material, status_code=400)
+        self.assertFalse(PlanVersion.objects.exists())
+
+    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    def test_context_with_selected_material_is_rejected_without_mutation(self):
+        self.item.instructions = "historic-context-secret"
+        self.item.save(update_fields=["instructions"])
+        self.claimed["instructions"] = self.item.instructions
+        self.select_rotated_credential()
+        response = self.save_context()
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(ContextSnapshot.objects.exists())
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.instructions, "historic-context-secret")
+
+    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    def test_selected_secrets_are_redacted_from_persisted_revision_reasons(self):
+        self.select_rotated_credential()
+        response = self.save_context(
+            reason="historic-context-secret and current-context-secret"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["context"]["reason"], "[redacted] and [redacted]"
+        )
+        self.assertEqual(
+            ContextSnapshot.objects.get().reason, "[redacted] and [redacted]"
+        )
+
+    def historical_secret_documents(self):
+        self.item.instructions = "historic-context-secret"
+        self.item.save(update_fields=["instructions"])
+        self.claimed["instructions"] = self.item.instructions
+        context = self.save_context(reason="historic-context-secret").json()["context"]
+        document = proposed_plan(context)
+        document["findings"] = ["historic-context-secret", "current-context-secret"]
+        plan = self.save_plan(
+            context, document=document, reason="current-context-secret"
+        ).json()["plan"]
+        fresh = self.save_context().json()["context"]
+        result = self.handoff(fresh)
+        self.assertEqual(result.status_code, 200)
+        self.select_rotated_credential()
+        return context, plan, fresh
+
+    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    def test_historical_readbacks_scrub_selected_values_without_rewriting_versions(
+        self,
+    ):
+        context, plan, fresh = self.historical_secret_documents()
+        original_context = ContextSnapshot.objects.get(pk=context["id"])
+        original_plan = PlanVersion.objects.get(pk=plan["id"])
+        operation = (
+            Run.objects.get(pk=self.run_id)
+            .evidence.get(kind="plan_handoff")
+            .operation_id
+        )
+        urls = [
+            reverse("runner_context_detail", args=[self.run_id, context["id"]]),
+            reverse("runner_plan_document", args=[self.run_id, plan["id"]]),
+            reverse("runner_handoff_detail", args=[self.run_id, operation]),
+            reverse("runner_contexts", args=[self.run_id]),
+            reverse("runner_plans", args=[self.run_id]),
+        ]
+        for url in urls:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertNotContains(response, "historic-context-secret")
+            self.assertNotContains(response, "current-context-secret")
+        detail = self.client.get(urls[0]).json()["context"]
+        self.assertTrue(detail["presentation_only"])
+        self.assertEqual(detail["digest"], original_context.digest)
+        original_context.refresh_from_db()
+        original_plan.refresh_from_db()
+        self.assertEqual(original_context.document, context["document"])
+        self.assertEqual(original_plan.document, plan["document"])
+        self.assertEqual(original_context.reason, "historic-context-secret")
+        self.assertEqual(self.handoff(fresh).status_code, 400)
+        self.assertEqual(
+            self.post("runner_progress", {"stage": "implementation"}).status_code, 400
+        )
+
+    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    def test_operator_history_and_document_pages_redact_item_titles_and_content(self):
+        self.historical_secret_documents()
+        self.item.title = "current-context-secret"
+        self.item.save(update_fields=["title"])
+        run = Run.objects.get(pk=self.run_id)
+        run.wait_reason = "historic-context-secret"
+        run.save(update_fields=["wait_reason"])
+        for name, args in [
+            ("runner_plan_history", []),
+            ("runner_plan_detail", [self.run_id]),
+        ]:
+            response = self.client.get(reverse(name, args=args))
+            self.assertEqual(response.status_code, 200)
+            self.assertNotContains(response, "historic-context-secret")
+            self.assertNotContains(response, "current-context-secret")
+            self.assertEqual(response["Cache-Control"], "no-store")
+        self.assertContains(response, "Redacted presentation only")
+
+    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    def test_unavailable_selected_key_hides_historical_documents_and_titles(self):
+        context, plan, _ = self.historical_secret_documents()
+        self.item.title = "current-context-secret"
+        self.item.save(update_fields=["title"])
+        urls = [
+            reverse("runner_context_detail", args=[self.run_id, context["id"]]),
+            reverse("runner_plan_document", args=[self.run_id, plan["id"]]),
+            reverse("runner_plan_detail", args=[self.run_id]),
+            reverse("runner_plan_history"),
+        ]
+        with override_settings(NQ_CREDENTIAL_KEY=""):
+            for url in urls:
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                self.assertNotContains(response, "historic-context-secret")
+                self.assertNotContains(response, "current-context-secret")
+                self.assertContains(response, "unavailable")
+            self.assertEqual(self.save_context().status_code, 400)
+        self.assertEqual(
+            ContextSnapshot.objects.get(pk=context["id"]).document, context["document"]
+        )
+
+    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    def test_unselected_credential_is_not_decrypted_for_document_reporting(self):
+        context = self.save_context().json()["context"]
+        self.select_rotated_credential()
+        unrelated = Credential(
+            name="Unrelated invalid backend",
+            provider="codex",
+            kind="token",
+            encrypted_payload="not-ciphertext",
+        )
+        unrelated.save()
+        response = self.client.get(
+            reverse("runner_context_detail", args=[self.run_id, context["id"]])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["context"]["unavailable"])
+
+    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    def test_credential_matching_a_response_field_preserves_response_structure(self):
+        credential = Credential(
+            name="Response field credential", provider="codex", kind="token"
+        )
+        credential.set_secret("document")
+        credential.save()
+        run = Run.objects.get(pk=self.run_id)
+        run.configuration_snapshot = {
+            "effective": {"research_credential_id": credential.pk}
+        }
+        run.save(update_fields=["configuration_snapshot"])
+        response = self.save_context()
+        self.assertEqual(response.status_code, 200)
+        context = response.json()["context"]
+        self.assertIn("document", context)
+        self.assertFalse(context["presentation_only"])
+        self.assertEqual(context["document"], ContextSnapshot.objects.get().document)

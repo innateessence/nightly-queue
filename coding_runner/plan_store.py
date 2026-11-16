@@ -58,6 +58,10 @@ class ContextPlanStore:
             },
             operation_id,
         )["context"]
+        if saved.get("presentation_only") or saved.get("unavailable"):
+            raise ValueError(
+                "Saved context is only a redacted presentation and cannot be used."
+            )
         if saved["digest"] != digest(saved["document"]):
             raise ValueError("Saved context digest does not match its document.")
         saved["sources"] = sources
@@ -77,9 +81,14 @@ class ContextPlanStore:
             context["id"],
             context["inspected_base_commit"],
         )
-        return self._post(
+        saved = self._post(
             "plans", {"document": document, "reason": reason}, operation_id
         )["plan"]
+        if saved.get("presentation_only") or saved.get("unavailable"):
+            raise ValueError(
+                "Saved plan is only a redacted presentation and cannot be used."
+            )
+        return saved
 
     def handoff(
         self,
@@ -96,6 +105,14 @@ class ContextPlanStore:
             try:
                 previous = self.client.request("GET", path)
                 saved = previous["context"]
+                documents = [saved, previous["plan"]]
+                if any(
+                    entry.get("presentation_only") or entry.get("unavailable")
+                    for entry in documents
+                ):
+                    raise ValueError(
+                        "Saved handoff is only a redacted presentation and cannot be used."
+                    )
                 validate_context(saved["document"], item)
                 if saved["inspected_base_commit"] != base_commit:
                     raise ValueError(
@@ -118,8 +135,17 @@ class ContextPlanStore:
             issue_client=issue_client,
             resolved_base_branch=resolved_base_branch,
         )
-        return self._post(
+        saved = self._post(
             "handoff",
             {"context_id": current["id"], "base_commit": base_commit},
             operation_id,
         )
+        documents = [saved["context"], saved["plan"]]
+        if any(
+            entry.get("presentation_only") or entry.get("unavailable")
+            for entry in documents
+        ):
+            raise ValueError(
+                "Saved handoff is only a redacted presentation and cannot be used."
+            )
+        return saved

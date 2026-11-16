@@ -22,8 +22,11 @@ missing fields, malformed data, unavailable pages, duplicate comments, changed
 comment counts, and excessive responses/pages fail closed. An unavailable
 context is never replaced by an empty discussion or an older snapshot.
 
-Requests have a 15-second default socket/deadline bound, a 4 MiB page/discussion
-bound, and at most 1,000 pages. GitHub does not provide an atomic multi-page
+Requests have a 15-second default absolute deadline including DNS, headers, and
+body reads, a 4 MiB page/discussion
+bound, and at most 1,000 pages. A timed-out transport retains the client request
+lock until its daemon worker exits; overlapping calls fail without spawning
+additional workers. GitHub does not provide an atomic multi-page
 snapshot: a changed count triggers a retry, while an edit occurring during a fetch
 may only be seen by the required subsequent refresh. No retry launches a model or
 executes discussion content.
@@ -78,10 +81,21 @@ writes are bounded to 4 MiB; plans to 256 KiB. Configure the runtime HTTP
 `Client(..., max_bytes=8388608)` for full bounded context documents and wrappers.
 List APIs exclude document bodies so ordinary metadata reads stay small.
 
-Documents containing claim tokens, the current bearer credential, or sensitive
-JSON keys are rejected before persistence, preserving actual context and source
-digests. Other request metadata is redacted. Backend credentials are never fetched
-by these APIs.
+Documents containing claim tokens, the current bearer credential, sensitive JSON
+keys, or current/historical snapshot-selected credential material are rejected
+before persistence, preserving actual context and source digests. Revision reasons
+are redacted. Selected credential decryption occurs only after run authorization
+in a transaction; document mutations additionally verify the active claim.
+Unselected credentials are never decrypted for document reporting.
+
+Historical APIs and operator pages return redacted presentation copies, retaining
+the original immutable stored documents and digests. A changed displayed document
+is marked `presentation_only: true` and cannot be used for research or handoff.
+If the selected credential key/material is unavailable, API documents return
+`unavailable: true` and a fixed hidden-content message; the operator UI also hides
+item titles and summaries. The store and implementation gate reject redacted or
+unavailable documents. Metadata list responses remain bounded and scrub revision
+reasons. Operator pages use `Cache-Control: no-store`.
 Operator pages escape issue/comment/research text and do not render it as HTML.
 The existing private-LAN UI access model is unchanged.
 

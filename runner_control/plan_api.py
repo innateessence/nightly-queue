@@ -9,13 +9,14 @@ from nightly_queue.api import read_body, string_field
 from .api import run_response
 from .auth import runner_api_view
 from .services import owned_run, redact_payload, uuid_field
+from .plan_presentation import present_payload
 from . import plan_services
 
 MAX_CONTEXT_BYTES = 4 * 1024 * 1024
 MAX_PLAN_BYTES = 256 * 1024
 
 
-def document_data(entry, *, include_document=True):
+def document_data(entry, *, include_document=True, bearer=""):
     result = {
         "id": str(entry.pk),
         "operation_id": str(entry.operation_id),
@@ -39,7 +40,23 @@ def document_data(entry, *, include_document=True):
             context_id=str(entry.context_id),
             supersedes=str(entry.supersedes_id) if entry.supersedes_id else None,
         )
-    return result
+    values, error = present_payload(entry.run, list(result.values()), bearer=bearer)
+    if error:
+        return {
+            "document": None,
+            "reason": error,
+            "presentation_only": True,
+            "unavailable": True,
+        }
+    safe = dict(zip(result, values))
+    safe["redacted"] = safe != result
+    safe["presentation_only"] = include_document and safe["document"] != entry.document
+    safe["unavailable"] = False
+    return safe
+
+
+def request_bearer(request):
+    return request.headers.get("Authorization", "").split()[-1]
 
 
 def document_body(request, fields, limit):
@@ -84,7 +101,12 @@ def document_page(request, run, kind):
     entries = entries[:10]
     return JsonResponse(
         {
-            kind: [document_data(entry, include_document=False) for entry in entries],
+            kind: [
+                document_data(
+                    entry, include_document=False, bearer=request_bearer(request)
+                )
+                for entry in entries
+            ],
             "has_more": more,
             "next_after": getattr(entries[-1], field) if more else None,
         }
@@ -96,7 +118,12 @@ def context_detail(request, run_id, document_id):
     def operation():
         run = owned_run(request.runner_identity, run_id)
         return JsonResponse(
-            {"context": document_data(get_object_or_404(run.contexts, pk=document_id))}
+            {
+                "context": document_data(
+                    get_object_or_404(run.contexts, pk=document_id),
+                    bearer=request_bearer(request),
+                )
+            }
         )
 
     return run_response(operation)
@@ -107,7 +134,12 @@ def plan_detail(request, run_id, document_id):
     def operation():
         run = owned_run(request.runner_identity, run_id)
         return JsonResponse(
-            {"plan": document_data(get_object_or_404(run.plans, pk=document_id))}
+            {
+                "plan": document_data(
+                    get_object_or_404(run.plans, pk=document_id),
+                    bearer=request_bearer(request),
+                )
+            }
         )
 
     return run_response(operation)
@@ -147,7 +179,11 @@ def contexts(request, run_id):
     }
     return run_response(
         lambda: JsonResponse(
-            {"context": document_data(plan_services.save_context(**kwargs))}
+            {
+                "context": document_data(
+                    plan_services.save_context(**kwargs), bearer=request_bearer(request)
+                )
+            }
         )
     )
 
@@ -172,14 +208,20 @@ def plans(request, run_id):
         "reason": string_field(data, "reason", max_length=2000),
     }
     return run_response(
-        lambda: JsonResponse({"plan": document_data(plan_services.save_plan(**kwargs))})
+        lambda: JsonResponse(
+            {
+                "plan": document_data(
+                    plan_services.save_plan(**kwargs), bearer=request_bearer(request)
+                )
+            }
+        )
     )
 
 
-def handoff_data(plan, context):
+def handoff_data(plan, context, *, bearer=""):
     return {
-        "plan": document_data(plan),
-        "context": document_data(context),
+        "plan": document_data(plan, bearer=bearer),
+        "context": document_data(context, bearer=bearer),
         "actions_require_approval": True,
     }
 
@@ -189,7 +231,7 @@ def handoff_detail(request, run_id, operation_id):
     def operation():
         run = owned_run(request.runner_identity, run_id)
         plan, context = plan_services.saved_handoff(run, operation_id)
-        return JsonResponse(handoff_data(plan, context))
+        return JsonResponse(handoff_data(plan, context, bearer=request_bearer(request)))
 
     return run_response(operation)
 
@@ -212,6 +254,6 @@ def handoff(request, run_id):
 
     def operation():
         plan, context = plan_services.handoff(**kwargs)
-        return JsonResponse(handoff_data(plan, context))
+        return JsonResponse(handoff_data(plan, context, bearer=request_bearer(request)))
 
     return run_response(operation)

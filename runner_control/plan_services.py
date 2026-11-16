@@ -4,6 +4,8 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from credentials.redaction import redact_run_payload
+
 from coding_runner.context import ContextError, digest, discussion_digest
 from coding_runner.plans import revision, validate_context, validate_plan
 from work_queue.api import item_data
@@ -34,6 +36,15 @@ def checked(operation):
         return operation()
     except ContextError as exc:
         raise ValidationError({"document": str(exc)}) from None
+
+
+def require_safe_document(run, document):
+    if redact_run_payload(run, document) != document:
+        raise ValidationError(
+            {
+                "document": "Saved documents must not contain selected credential material."
+            }
+        )
 
 
 def previous_operation(model, run, operation_id, document, reason, **extra):
@@ -70,6 +81,14 @@ def save_context(
     resolved_base_branch,
 ):
     run = locked_run(runner, run_id, claim_token)
+    require_safe_document(run, document)
+    reason = redact_run_payload(run, reason)
+    if redact_run_payload(run, resolved_base_branch) != resolved_base_branch:
+        raise ValidationError(
+            {
+                "resolved_base_branch": "Base branch contains selected credential material."
+            }
+        )
     checked(lambda: revision(base_commit))
     if not resolved_base_branch.strip() or (
         run.item.base_branch and resolved_base_branch != run.item.base_branch
@@ -120,12 +139,15 @@ def save_context(
 @transaction.atomic
 def save_plan(*, runner, run_id, claim_token, operation_id, document, reason):
     run = locked_run(runner, run_id, claim_token)
+    require_safe_document(run, document)
+    reason = redact_run_payload(run, reason)
     previous = previous_operation(PlanVersion, run, operation_id, document, reason)
     if previous is not None:
         return previous
     latest_context = run.contexts.last()
     if latest_context is None:
         raise RunConflict("Save complete context before a plan.")
+    require_safe_document(run, latest_context.document)
     checked(
         lambda: validate_plan(
             document,
@@ -156,6 +178,7 @@ def save_plan(*, runner, run_id, claim_token, operation_id, document, reason):
     return plan
 
 
+@transaction.atomic
 def valid_handoff(run, *, require_refresh=True):
     plan = run.plans.last()
     current = run.contexts.last()
@@ -163,6 +186,9 @@ def valid_handoff(run, *, require_refresh=True):
         raise RunConflict(
             "Implementation requires a saved valid plan and complete context."
         )
+    require_safe_document(run, plan.document)
+    require_safe_document(run, plan.context.document)
+    require_safe_document(run, current.document)
     if run.plan_reference != str(plan.pk) or run.context_reference != str(current.pk):
         raise RunConflict("Context or plan reference is not the latest saved version.")
     checked(
