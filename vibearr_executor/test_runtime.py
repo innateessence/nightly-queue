@@ -1,3 +1,5 @@
+import os
+import stat
 import tempfile
 import threading
 import unittest
@@ -54,6 +56,25 @@ class RuntimeContractTests(unittest.TestCase):
         self.runtime.close()
         self.runtime = Runtime(self.directory, self.profiles)
         self.assertEqual(self.runtime.prepare(self.manifest), first)
+
+    def test_prepare_input_permissions_ignore_restrictive_service_umask(self):
+        previous = os.umask(0o077)
+        try:
+            self.runtime.prepare(self.manifest)
+        finally:
+            os.umask(previous)
+        operation = self.runtime.path(self.manifest["operation_id"])
+        inputs = operation / "input"
+        for path, expected in (
+            (operation, 0o700),
+            (inputs, 0o755),
+            (inputs / "source.tar", 0o444),
+            (inputs / "context", 0o444),
+            (inputs / "secret", 0o600),
+            (operation / "record.json", 0o600),
+        ):
+            with self.subTest(path=path.name):
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), expected)
 
     def test_changed_manifest_conflicts(self):
         self.runtime.prepare(self.manifest)
