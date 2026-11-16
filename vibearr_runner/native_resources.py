@@ -165,21 +165,63 @@ class NativeResources:
 
     def reconcile(self, run_id, executor, *, stop=False):
         self.bind(run_id, executor)
+        if stop:
+            return self.stop_all(run_id, executor)
         self.verify_dispatched(run_id, executor)
         value = self.load(run_id)
         operations = []
         builds = []
         for operation_id, entry in value["operations"].items():
-            action = executor.stop if stop else executor.status
-            operations.append(action(operation_id))
+            operations.append(executor.status(operation_id))
         for build_id in value["builds"]:
-            builds.append(executor.dependencies(build_id, "stop" if stop else "status"))
+            builds.append(executor.dependencies(build_id, "status"))
             operations.append(executor.status(build_id))
-        if stop:
+        return {"operations": operations, "builds": builds}
+
+    def stop_all(self, run_id, executor):
+        value = self.load(run_id)
+        operations, builds, errors = [], [], []
+        for identity in value["operations"]:
+            try:
+                if callable(getattr(executor, "termination_receipt", None)):
+                    self.verify_presence(value, identity, executor)
+                elif (
+                    identity in value.get("dispatched", {})
+                    and executor.status(identity).get("state") == "not-started"
+                ):
+                    raise ReconciliationRequired(
+                        "A dispatched native record is missing; never recreate its record."
+                    )
+                operations.append(executor.stop(identity))
+            except Exception as exc:
+                errors.append(exc)
+        for identity in value["builds"]:
+            try:
+                observed = executor.dependencies(identity, "status")
+                if (
+                    observed.get("run_id") != run_id
+                    or observed.get("build_id") != identity
+                ):
+                    raise ReconciliationRequired(
+                        "Dependency cleanup belongs to another owned run/build."
+                    )
+                builds.append(executor.dependencies(identity, "stop"))
+                operations.append(executor.status(identity))
+            except Exception as exc:
+                errors.append(exc)
+        try:
             self.stop_pending(value, executor)
+        except Exception as exc:
+            errors.append(exc)
+        if errors:
+            raise ReconciliationRequired(
+                "Owned native termination remains uncertain: " + str(errors[0])
+            ) from None
         return {"operations": operations, "builds": builds}
 
     def stop_pending(self, value, executor):
+        if not value.get("pending") and not value.get("pending_builds"):
+            return
         from vibearr_executor.client import ExecutorRejected
 
         for key in ("pending", "pending_builds"):
@@ -245,3 +287,46 @@ class NativeResources:
         self.save(value)
         if set(value["removed"]) == {"workspace", "logs"}:
             self.path(run_id).unlink()
+
+
+def suspend_owned(journal, state, *, ownership_lost, executor=None):
+    from .processes import ProcessTracker
+
+    native = state.get("native")
+    if native and ownership_lost:
+        native["ownership_lost"] = True
+        journal.save(state)
+    errors = []
+    try:
+        ProcessTracker(journal, state).recover()
+    except Exception as exc:
+        errors.append(exc)
+    accounts = state.get("native_preflight", {}).get("accounts", {})
+    pending = [entry for entry in accounts.values() if entry.get("pending")]
+    run_ids = {entry["request"]["run_id"] for entry in pending}
+    if native:
+        run_ids.add(native["run_id"])
+    if run_ids:
+        if executor is None:
+            from vibearr_executor.client import Client
+
+            executor = Client.from_environment()
+        resources = NativeResources(journal.directory)
+        for run_id in run_ids:
+            try:
+                if ownership_lost:
+                    resources.reconcile(run_id, executor, stop=True)
+                    for entry in pending:
+                        if entry["request"]["run_id"] == run_id:
+                            entry["pending"] = False
+                else:
+                    resources.controls(run_id, executor, pause=True)
+            except Exception as exc:
+                errors.append(exc)
+    if native and not ownership_lost:
+        native["paused"] = True
+    journal.save(state)
+    if errors:
+        raise ReconciliationRequired(
+            "Owned native suspension remains uncertain: " + str(errors[0])
+        ) from None

@@ -139,3 +139,69 @@ class NativeResourceTests(unittest.TestCase):
         receipt["manifest_digest"] = "0" * 64
         with self.assertRaisesRegex(ReconciliationRequired, "frozen executor"):
             self.store.verify_dispatched(self.run, executor)
+
+    def test_unknown_first_record_does_not_prevent_stopping_another_owned_operation(
+        self,
+    ):
+        from unittest.mock import Mock
+
+        executor = Executor()
+        executor.status = Mock(
+            side_effect=lambda identity: {
+                "state": "not-started" if identity == self.operation else "running"
+            }
+        )
+        executor.stop = Mock(
+            return_value={"state": "exited", "descendants_terminated": True}
+        )
+        self.store.bind(self.run, executor)
+        self.store.operation(self.run, self.manifest, kind="agent")
+        self.store.dispatch(self.run, self.operation)
+        other = str(uuid4())
+        self.store.operation(
+            self.run, {"run_id": self.run, "operation_id": other}, kind="validation"
+        )
+        self.store.dispatch(self.run, other)
+        with self.assertRaises(ReconciliationRequired):
+            self.store.reconcile(self.run, executor, stop=True)
+        executor.stop.assert_called_once_with(other)
+
+    def test_ownership_loss_stops_original_operation_when_profile_configuration_is_missing(
+        self,
+    ):
+        import importlib.util
+        from unittest.mock import Mock, patch
+        from vibearr_runner.journal import Journal
+        from vibearr_runner.lifecycle import Lifecycle
+
+        if importlib.util.find_spec("vibearr_executor") is None:
+            self.skipTest(
+                "Install the native-runtime extra for owned cancellation tests"
+            )
+        executor = Executor()
+        executor.status = Mock(return_value={"state": "running"})
+        executor.stop = Mock(
+            return_value={"state": "exited", "descendants_terminated": True}
+        )
+        with Journal(Path(self.temporary.name) / "journal") as journal:
+            resources = NativeResources(journal.directory)
+            resources.bind(self.run, executor)
+            resources.operation(self.run, self.manifest, kind="agent")
+            resources.dispatch(self.run, self.operation)
+            state = journal.load()
+            state["native"] = {"run_id": self.run}
+            lifecycle = Lifecycle(None, journal, None, lambda: False)
+            with (
+                patch(
+                    "vibearr_executor.client.Client.from_environment",
+                    return_value=executor,
+                ),
+                patch(
+                    "vibearr_runner.native_validation.load_validation_profile",
+                    side_effect=OSError("missing profile"),
+                ) as profile,
+            ):
+                lifecycle.suspend_owned(state, ownership_lost=True)
+            profile.assert_not_called()
+            self.assertTrue(state["native"]["ownership_lost"])
+            executor.stop.assert_called_once_with(self.operation)

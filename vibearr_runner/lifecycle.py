@@ -66,9 +66,9 @@ class Lifecycle:
             return False
 
     def suspend_owned(self, state, *, ownership_lost=False):
-        engine = self.native_engine()
-        engine.state = state
-        engine.suspend_owned(ownership_lost=ownership_lost)
+        from .native_resources import suspend_owned
+
+        suspend_owned(self.journal, state, ownership_lost=ownership_lost)
 
     def secret(self, run_id, claim_token, purpose, **limits):
         result = self.client.request(

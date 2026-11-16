@@ -179,6 +179,7 @@ class Queue:
         self.artifacts = []
         self.finishes = []
         self.fail_source = False
+        self.default_branch = "main"
 
     def request(self, method, path, payload=None):
         if path.endswith("/source/refresh/"):
@@ -189,7 +190,7 @@ class Queue:
                 "repository": {
                     "repository_id": 17,
                     "repository_url": "https://github.com/owner/repo.git",
-                    "default_branch": "main",
+                    "default_branch": self.default_branch,
                     "owner_id": 1,
                 },
             }
@@ -327,7 +328,13 @@ class NativeLifecycleTests(unittest.TestCase):
         )
         github = patch(
             "vibearr_runner.native_github.NativeGitHub.repository",
-            return_value=({"repository_url": self.workspace.repository_url}, {}),
+            return_value=(
+                {
+                    "repository_url": self.workspace.repository_url,
+                    "default_branch": "main",
+                },
+                {},
+            ),
         )
         github.start()
         self.addCleanup(github.stop)
@@ -445,3 +452,11 @@ class NativeLifecycleTests(unittest.TestCase):
         self.assertEqual(
             git(["rev-list", "--count", "HEAD"], self.workspace.checkout), "1"
         )
+
+    def test_default_branch_change_stops_before_importing_the_candidate(self):
+        self.advance("import_candidate")
+        self.queue.default_branch = "next"
+        self.state["native"]["source_checked_at"] = 0
+        self.engine().step(self.state)
+        self.assertEqual(self.queue.finishes[0]["outcome"], "failed")
+        self.assertIn("default branch changed", self.queue.finishes[0]["error_summary"])

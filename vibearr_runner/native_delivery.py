@@ -33,10 +33,11 @@ class NativeDelivery:
             raise ReconciliationRequired(
                 "Repository namespace changed; refresh source authority before publication."
             )
-        if (
-            identity["default_branch"]
-            != self.native["context"]["document"]["repository"]["base_branch"]
-        ):
+        frozen = self.native.get(
+            "repository_at_checkout", self.native["context"]["document"]["repository"]
+        )
+        expected_default = frozen.get("default_branch", frozen.get("base_branch"))
+        if identity["default_branch"] != expected_default:
             raise DeliveryError(
                 "Repository default branch changed; retry with a fresh task context."
             )
@@ -304,8 +305,10 @@ class NativeDelivery:
     def reconcile_publications(self):
         if not self.data.get("intents"):
             return []
+
         def checkpoint():
             return not self.host.host.stop.is_set()
+
         token = current_execution.set((time.monotonic() + 60, checkpoint, checkpoint))
         try:
             return self._reconcile_publications()

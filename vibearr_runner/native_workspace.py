@@ -1,8 +1,6 @@
 """Verified file import and recoverable commits in the trusted checkout."""
 
-from dataclasses import asdict, replace
 import hashlib
-import json
 import os
 from pathlib import Path
 import shutil
@@ -196,19 +194,3 @@ def commit_candidate(workspace, *, base_tree, operation_id, title, journal, stat
     record.update(commit_sha=head, phase="committed")
     journal.save(state)
     return head
-
-
-def update_repository(workspace, repository_url):
-    if workspace.repository_url == repository_url:
-        return workspace
-    from .context import repository_path
-
-    repository_path(repository_url)
-    updated = replace(workspace, repository_url=repository_url)
-    git(["remote", "set-url", "origin", repository_url], workspace.checkout)
-    metadata = {**asdict(updated), "directory": str(updated.directory)}
-    atomic_bytes(
-        updated.directory / "workspace.json",
-        json.dumps(metadata, sort_keys=True).encode(),
-    )
-    return updated

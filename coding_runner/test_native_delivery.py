@@ -1,4 +1,5 @@
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -262,3 +263,13 @@ class NativePublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ReconciliationRequired, "unowned"):
             self.complete()
         self.assertEqual(self.host.finishes, 0)
+
+    def test_explicit_base_branch_can_differ_from_the_repository_default(self):
+        self.host.native["repository_at_checkout"] = {"default_branch": "main"}
+        self.host.native["candidate"]["workspace"]["base_branch"] = "release"
+        self.host.native["context"]["document"]["repository"]["base_branch"] = "release"
+        self.host.workspace_value = replace(
+            self.host.workspace_value, resolved_base_branch="release"
+        )
+        self.assertEqual(self.complete(), "reporting_pending")
+        self.assertEqual(self.github.pull_request["base"], "release")

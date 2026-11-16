@@ -218,6 +218,12 @@ class NativePreflight:
                     "Authentication operation is running or awaiting exact-operation reconciliation."
                 )
                 return True
+            if observed.get("descendants_terminated") is not True:
+                entry["reason"] = (
+                    "Authentication descendant termination is unconfirmed; retain the original operation."
+                )
+                self.journal.save(state)
+                return True
             entry["pending"] = False
             try:
                 entry["proof"] = adapter.authentication_result(session)
@@ -293,7 +299,10 @@ class NativePreflight:
                     )
                     continue
                 observed = adapter.reconcile(session)
-                if observed.get("state") != "exited":
+                if (
+                    observed.get("state") != "exited"
+                    or observed.get("descendants_terminated") is not True
+                ):
                     continue
                 entry["pending"] = False
                 try:

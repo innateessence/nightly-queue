@@ -64,6 +64,7 @@ class Adapter:
         self.state = "not-started"
         self.starts = []
         self.prepared = []
+        self.terminated = True
 
     def diagnostics(self, policy, grant, *, model, proof=None):
         return {
@@ -92,7 +93,7 @@ class Adapter:
         )
 
     def reconcile(self, session):
-        return {"state": self.state}
+        return {"state": self.state, "descendants_terminated": self.terminated}
 
     def start(self, session):
         saved = self.journal.load()["native_preflight"]["accounts"]
@@ -237,3 +238,11 @@ class NativePreflightTests(unittest.TestCase):
         self.preflight.select(self.configuration, self.state)
         self.assertEqual(self.executor.stopped, [request["operation_id"]])
         self.assertEqual(self.adapter.prepared, [])
+
+    def test_exited_probe_without_descendant_proof_keeps_the_original_fence(self):
+        self.preflight.select(self.configuration, self.state)
+        self.adapter.state = "exited"
+        self.adapter.terminated = False
+        self.assertEqual(self.preflight.select(self.configuration, self.state), [])
+        self.assertTrue(self.preflight.pending_accounts(self.state["native_preflight"]))
+        self.assertEqual(len(self.adapter.starts), 1)
