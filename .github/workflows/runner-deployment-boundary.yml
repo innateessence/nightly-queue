@@ -38,11 +38,14 @@ jobs:
             -e NQ_RUNNER_SANDBOX_POLICY_DIGEST="$policy_digest" \
             -e NQ_RUNNER_SOURCE_REVISION="$GITHUB_SHA" \
             coding-runner -m coding_runner.verify --boundary --evidence /qualification-output/runner-boundary.json
+          docker compose -f "$RUNNER_POLICY" run --rm --no-deps --entrypoint cat \
+            --volume "$RUNNER_TEMP/runner-boundary:/qualification-output:ro" \
+            coding-runner /qualification-output/runner-boundary.json > "$RUNNER_TEMP/runner-boundary.json"
       - name: Upload actual deployment boundary evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: runner-deployment-boundary
-          path: ${{ runner.temp }}/runner-boundary/runner-boundary.json
+          path: ${{ runner.temp }}/runner-boundary.json
           if-no-files-found: error
           retention-days: 7
       - name: Record qualification scope
