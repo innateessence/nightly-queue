@@ -6,6 +6,7 @@ PROOF_PROTOCOL = "structured-proposals-v1"
 TRANSPORTS = {
     "codex": "codex-responses-structured-proposals-v1",
     "claude": "claude-messages-structured-proposals-v1",
+    "opencode": "opencode-provider-structured-proposals-v1",
 }
 
 

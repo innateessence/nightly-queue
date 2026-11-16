@@ -21,6 +21,7 @@ from .backends import (
     Progress,
 )
 from .client import APIError
+from .backend_transports import qualification_matches
 from .gates import UsageReading
 from .proposal_backend import ProcessTransport, parse_proposal
 from .opencode_connection import validate_connection, valid_model
@@ -102,6 +103,17 @@ def parse_response(value: dict[str, Any], stage: str, provider: str) -> BackendE
     return parse_proposal(message["content"], stage)
 
 
+def validate_response_model(value: dict[str, Any], model: str, provider: str) -> None:
+    reported = value.get("response", {}).get("model")
+    matches = reported == model
+    if provider == "ollama" and ":" not in model:
+        matches = matches or reported == model + ":latest"
+    if not matches:
+        raise BackendOutputError(
+            "Inference response did not identify the selected model."
+        )
+
+
 class OpenCodeBackend:
     def __init__(
         self,
@@ -145,6 +157,14 @@ class OpenCodeBackend:
                 ),
                 CAPABILITIES,
             )
+        try:
+            version = self.credentials(account).get("credential", {}).get("version")
+            if valid_model(account.get("model")) and qualification_matches(
+                self.credentials, account, version
+            ):
+                return BackendReadiness(True, True, (), CAPABILITIES)
+        except (BackendError, APIError):
+            pass
         return BackendReadiness(
             False,
             False,
@@ -152,23 +172,25 @@ class OpenCodeBackend:
             CAPABILITIES,
         )
 
-    def probe_authentication(self, account: dict[str, Any]) -> bool:
+    def probe_payload(self, account: dict[str, Any]) -> dict[str, Any]:
         if not valid_model(account.get("model")):
-            return False
+            raise BackendError("Select an explicit inference model identifier.")
+        return {
+            "operation": "probe",
+            "connection": self._connection(account),
+            "model": account["model"],
+            "timeout": 5,
+        }
+
+    def probe_authentication(self, account: dict[str, Any]) -> bool:
         try:
-            connection = self._connection(account)
             value = self.transport.exchange(
-                {
-                    "operation": "probe",
-                    "connection": connection,
-                    "model": account["model"],
-                    "timeout": 5,
-                },
+                self.probe_payload(account),
                 timeout=6,
                 checkpoint=lambda: True,
                 stop=threading.Event(),
             )
-            return value == {"probe": {"authenticated": True, "model_available": True}}
+            return value == {"authenticated_model": account["model"]}
         except BackendError:
             return False
 
@@ -261,6 +283,7 @@ class OpenCodeBackend:
             payload, timeout=request.timeout_seconds, checkpoint=checkpoint, stop=stop
         )
         event = parse_response(value, stage, provider)
+        validate_response_model(value, request.model, provider)
         progress(
             BackendEvent("model_finished", {"stage": stage, "proposal": event.kind})
         )

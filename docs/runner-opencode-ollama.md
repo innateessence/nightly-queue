@@ -65,7 +65,18 @@ a plan or model tool permission does not grant it. File reads/patches retain the
 shared path/digest validation. Schedule, pause, cancellation and timeout controls
 apply through the same process transport and stage journal as Codex and Claude.
 An ambiguous in-flight inference outcome requires operator reconciliation; restart
-does not repeat it automatically.
+does not repeat it automatically. The controlled-release CLI now stops recorded
+children and reconciles owned state before any new authentication probe or stage.
+A lost controlled-claim response can recover only its original authorized item
+and UUID; an absent lookup retains the original intent because an earlier HTTP
+request could still commit. Explicit retry checks current gates and uses that same
+UUID. Ordinary
+queue claims cannot be replayed by this harness. Normal runner claim retries also
+recheck current schedule, pause and usage gates while preserving their original
+UUID and interval. The retry context ignores only its matching reconciliation
+marker; it cannot bypass another pending claim or the remaining gates.
+Completed reporting preserves
+the local claim proof for explicit result recording.
 
 Remaining account allowance is unsupported for every connection provider,
 including local Ollama. Token counts, costs, local inference and an available
@@ -117,7 +128,23 @@ redacted authentication errors, timeout/pause termination, strict proposals,
 approval/source changes, ambiguous recovery, mixed providers/accounts and reserve
 blocking. Controlled verification can make a nonbillable model-list GET probe;
 it requires the selected model to appear, and never invokes inference. A probe
-alone does not qualify an integration.
+alone does not qualify an integration. Normal readiness requires exact live
+qualification for the selected account, model, connection secret version, provider
+transport, code and deployment. Endpoint/provider changes rotate the encrypted
+connection version and invalidate earlier qualification.
+
+Hosted traces use `receipt_kind: provider_response_id` with the real response ID.
+Ollama does not return that kind of ID: its trusted worker instead hashes the
+actual bounded raw HTTP response bytes and records
+`receipt_kind: local_response_digest`, `response_digest`, selected model,
+connection version, normalized endpoint and inference provider; a reported Ollama
+version is retained when present. Strict completion/model/proposal validation
+precedes recording. The server resolves only the authorized selected connection
+at that exact version and permits this local receipt only when the stored
+provider is Ollama. It rejects forged provider flags, endpoint changes and
+invented provider IDs. The receipt is bound to the existing deployment/protocol
+qualification evidence and cannot independently verify vendor-side history.
+Replay fixtures and metadata probes never qualify live execution.
 
 The pinned optional image was actually built, then started in an isolated test
 network with its own temporary model volume, UID 10001, read-only root, dropped

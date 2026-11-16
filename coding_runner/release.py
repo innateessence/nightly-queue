@@ -509,7 +509,7 @@ def main() -> int:
             for entry in configuration["credentials"]
         }
 
-        def traced_factory(factory, capabilities, probe_transport):
+        def traced_factory(factory, capabilities, probe_transport, probe_payload=None):
             def traced_backend(credentials):
                 from .qualification_trace import ModelTraceTransport
 
@@ -521,11 +521,15 @@ def main() -> int:
                         if not checkpoint():
                             return None
                         response = probe_transport().exchange(
-                            {
-                                "probe_model": account["model"],
-                                "token": backend._token(account),
-                                "timeout": 10,
-                            },
+                            (
+                                probe_payload(backend, account)
+                                if probe_payload is not None
+                                else {
+                                    "probe_model": account["model"],
+                                    "token": backend._token(account),
+                                    "timeout": 10,
+                                }
+                            ),
                             timeout=10,
                             checkpoint=checkpoint,
                             stop=threading.Event(),
@@ -551,6 +555,12 @@ def main() -> int:
                 return backend
 
             return traced_backend
+
+        from .opencode_backend import (
+            CAPABILITIES as OPENCODE_CAPABILITIES,
+            OpenCodeBackend,
+            OpenCodeProcessTransport,
+        )
 
         from .delivery import DeliveryStage, GitHubDeliveryClient, SupervisorGit
 
@@ -597,6 +607,12 @@ def main() -> int:
                     ),
                     "claude": traced_factory(
                         ClaudeBackend, CLAUDE_CAPABILITIES, ClaudeProcessTransport
+                    ),
+                    "opencode": traced_factory(
+                        OpenCodeBackend,
+                        OPENCODE_CAPABILITIES,
+                        OpenCodeProcessTransport,
+                        lambda backend, account: backend.probe_payload(account),
                     ),
                 }
             ),

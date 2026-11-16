@@ -1,5 +1,6 @@
 """Trusted inference worker, without tools, redirects, plugins or repository access."""
 
+import hashlib
 import http.client
 import json
 import runpy
@@ -77,13 +78,16 @@ def main() -> None:
                 and isinstance(model, str)
                 and model + ":latest" in names
             )
-            print(
-                json.dumps(
-                    {"probe": {"authenticated": True, "model_available": available}}
-                )
-            )
+            print(json.dumps({"authenticated_model": model if available else None}))
             return
-        print(json.dumps({"response": value}))
+        result = {"response": value}
+        if provider == "ollama":
+            receipt = {"response_digest": hashlib.sha256(raw).hexdigest()}
+            reported_version = value.get("ollama_version")
+            if isinstance(reported_version, str) and len(reported_version) <= 100:
+                receipt["ollama_version"] = reported_version
+            result["receipt"] = receipt
+        print(json.dumps(result))
     except Exception:
         print(json.dumps({"error": "transport"}))
     finally:

@@ -65,8 +65,20 @@ def response(kind="read", data=None, provider="ollama"):
     )
     message = {"role": "assistant", "content": content}
     if provider == "ollama":
-        return {"response": {"message": message, "done": True, "done_reason": "stop"}}
-    return {"response": {"choices": [{"message": message, "finish_reason": "stop"}]}}
+        return {
+            "response": {
+                "model": "qwen3-coder:30b",
+                "message": message,
+                "done": True,
+                "done_reason": "stop",
+            }
+        }
+    return {
+        "response": {
+            "model": "qwen3-coder:30b",
+            "choices": [{"message": message, "finish_reason": "stop"}],
+        }
+    }
 
 
 class OpenCodeContractTests(AdapterContract, unittest.TestCase):
@@ -106,6 +118,7 @@ class OpenCodeContractTests(AdapterContract, unittest.TestCase):
 
         self.backend.credentials = lambda account: grant(account, "anthropic")
         self.transport.exchange.return_value = anthropic_response()
+        self.transport.exchange.return_value["response"]["model"] = self.request.model
         self.run_stage()
         body = self.transport.exchange.call_args.args[0]["request"]
         self.assertEqual(body["tools"], [])
@@ -617,3 +630,208 @@ class HostedWorkerTests(unittest.TestCase):
             opencode_worker.main()
         factory.assert_not_called()
         self.assertEqual(json.loads(output.getvalue()), {"error": "transport"})
+
+
+class OpenCodeQualificationTests(unittest.TestCase):
+    def setUp(self):
+        from .backend_transports import PROOF_PROTOCOL, TRANSPORTS
+
+        self.account = {**ACCOUNT, "model": "qwen3-coder:30b"}
+        self.entry = {
+            **self.account,
+            "secret_version": 1,
+            "transport": TRANSPORTS["opencode"],
+        }
+        self.proof = {
+            "qualified": True,
+            "transport": PROOF_PROTOCOL,
+            "accounts": [self.entry],
+        }
+        self.credentials = Mock(side_effect=grant)
+        self.credentials.qualification.return_value = {
+            **self.entry,
+            "verification": self.proof,
+        }
+        self.backend = OpenCodeBackend(self.credentials)
+
+    def readiness(self, deployment=True):
+        with patch("coding_runner.release.matches_deployment", return_value=deployment):
+            return self.backend.readiness(self.account)
+
+    def test_exact_qualified_deployment_can_enable_candidate(self):
+        self.assertTrue(self.readiness().ready)
+        self.assertTrue(self.readiness().authenticated)
+
+    def test_other_transport_account_model_and_version_are_rejected(self):
+        for key, value in (
+            ("transport", "opencode-native"),
+            ("transport", "claude-messages-structured-proposals-v1"),
+            ("credential_id", 99),
+            ("model", "another-model"),
+            ("backend", "claude"),
+            ("secret_version", 2),
+        ):
+            self.credentials.qualification.return_value = {
+                **self.entry,
+                key: value,
+                "verification": self.proof,
+            }
+            with self.subTest(key=key, value=value):
+                self.assertFalse(self.readiness().ready)
+
+    def test_changed_endpoint_requires_new_connection_version_and_proof(self):
+        changed = grant(ACCOUNT, endpoint="http://127.0.0.1:11435")
+        changed["credential"]["version"] = 2
+        self.credentials.side_effect = lambda account: changed
+        self.assertFalse(self.readiness().ready)
+
+    def test_expired_or_changed_deployment_blocks(self):
+        self.assertFalse(self.readiness(False).ready)
+
+    def test_exact_account_must_appear_in_proof(self):
+        self.proof["accounts"] = []
+        self.assertFalse(self.readiness().ready)
+
+
+class OpenCodeTrackedWorkerTests(unittest.TestCase):
+    run_model = WorkerHTTPTests.run_model
+
+    def setUp(self):
+        from .processes import ProcessTracker, current_tracker
+
+        WorkerHTTPTests.setUp(self)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.journal = Journal(Path(temporary.name) / "journal")
+        self.journal.__enter__()
+        self.addCleanup(self.journal.__exit__)
+        self.state = self.journal.load()
+        self.tracker = ProcessTracker(self.journal, self.state)
+        token = current_tracker.set(self.tracker)
+        self.addCleanup(current_tracker.reset, token)
+
+    def assert_stopped(self):
+        rows = self.journal.load()["processes"]
+        self.assertEqual(len(rows), 1)
+        row = next(iter(rows.values()))
+        self.assertEqual(row["status"], "stopped")
+        self.assertTrue(row["pid"])
+        self.assertTrue(row["start"])
+        self.assertNotIn(TOKEN, json.dumps(rows))
+        self.tracker.recover()
+
+    def test_actual_worker_is_durably_tracked_and_reaped(self):
+        self.assertEqual(self.run_model().kind, "read")
+        self.assert_stopped()
+
+    def test_actual_worker_timeout_is_stopped_before_recovery(self):
+        self.server.delay = 1
+        self.request = replace(self.request, timeout_seconds=0.1)
+        with self.assertRaises(BackendTimeout):
+            self.run_model()
+        self.assert_stopped()
+
+    def test_actual_worker_pause_is_stopped_before_recovery(self):
+        self.server.delay = 1
+        calls = 0
+
+        def checkpoint():
+            nonlocal calls
+            calls += 1
+            return calls < 4
+
+        with self.assertRaises(BackendInterrupted):
+            self.run_model(checkpoint=checkpoint)
+        self.assert_stopped()
+
+    def test_actual_worker_receipt_hashes_raw_http_bytes(self):
+        import hashlib
+
+        selected = json.loads(
+            grant(ACCOUNT, endpoint=self.endpoint)["material"]["secret"]
+        )
+        value = self.backend.transport.exchange(
+            {
+                "connection": selected,
+                "timeout": 3,
+                "request": {"model": self.request.model, "messages": [], "tools": []},
+            },
+            timeout=3,
+            checkpoint=lambda: True,
+            stop=threading.Event(),
+        )
+        raw = json.dumps(self.server.value).encode()
+        self.assertEqual(
+            value["receipt"]["response_digest"], hashlib.sha256(raw).hexdigest()
+        )
+        self.assertNotIn("response_id", value["receipt"])
+        self.assert_stopped()
+
+
+class OpenCodeTraceTests(unittest.TestCase):
+    def test_local_receipt_is_typed_and_bound_without_invented_provider_id(self):
+        from .qualification_trace import ModelTraceTransport
+
+        selected = validate_connection(json.loads(grant(ACCOUNT)["material"]["secret"]))
+        account = {**ACCOUNT, "model": "qwen3-coder:30b"}
+        state = {}
+        value = {
+            **response(),
+            "receipt": {"response_digest": "a" * 64, "ollama_version": "0.40.16"},
+        }
+        transport = ModelTraceTransport(Mock(), state, account, 2)
+        with patch.object(ProcessTransport, "exchange", return_value=value):
+            transport.exchange(
+                {"connection": selected, "request": {"model": account["model"]}}
+            )
+        trace = state["release_evidence"]["model_responses"][0]
+        self.assertEqual(trace["receipt_kind"], "local_response_digest")
+        self.assertEqual(trace["response_digest"], "a" * 64)
+        self.assertEqual(trace["endpoint"], "http://runner-ollama:11434/api")
+        self.assertEqual(trace["secret_version"], 2)
+        self.assertEqual(trace["ollama_version"], "0.40.16")
+        self.assertNotIn("response_id", trace)
+        self.assertNotIn(TOKEN, json.dumps(trace))
+        self.assertEqual(Path(transport.command()[-1]).name, "opencode_worker.py")
+
+    def test_untyped_or_native_tool_output_cannot_supply_local_receipt(self):
+        from .qualification_trace import ModelTraceTransport
+
+        selected = validate_connection(json.loads(grant(ACCOUNT)["material"]["secret"]))
+        cases = [
+            response(),
+            {
+                **response("shell", {"command": "true"}),
+                "receipt": {"response_digest": "a" * 64},
+            },
+        ]
+        for value in cases:
+            state = {}
+            transport = ModelTraceTransport(Mock(), state, ACCOUNT, 1)
+            with (
+                patch.object(ProcessTransport, "exchange", return_value=value),
+                self.assertRaises(BackendError),
+            ):
+                transport.exchange(
+                    {"connection": selected, "request": {"model": "qwen3-coder:30b"}}
+                )
+            self.assertNotIn("release_evidence", state)
+
+    def test_wrong_reported_model_cannot_supply_local_receipt(self):
+        from .qualification_trace import ModelTraceTransport
+
+        value = {**response(), "receipt": {"response_digest": "a" * 64}}
+        value["response"]["model"] = "wrong-model"
+        state = {}
+        transport = ModelTraceTransport(Mock(), state, ACCOUNT, 1)
+        with (
+            patch.object(ProcessTransport, "exchange", return_value=value),
+            self.assertRaises(BackendOutputError),
+        ):
+            transport.exchange(
+                {
+                    "connection": {"provider": "ollama"},
+                    "request": {"model": "qwen3-coder:30b"},
+                }
+            )
+        self.assertNotIn("release_evidence", state)
