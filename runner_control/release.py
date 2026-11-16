@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from .models import ReleaseQualification, Run
 from .services import RunConflict, json_digest, lock_controller
+from coding_runner.release_evidence import verify_boundary_workflow
 
 TRANSPORT = "codex-responses-structured-proposals-v1"
 CONTROL_FIELDS = {
@@ -130,6 +131,10 @@ def authorize(runner, repository_url, environment_digest, code_revision, note):
     projects = [
         row for row in document["projects"] if row["repository_url"] == repository_url
     ]
+    if any(row["backend"] != "codex" for row in accounts(document)):
+        raise ValidationError(
+            "This controlled harness currently supports the Codex structured-proposal API transport."
+        )
     if not projects or any(not row["structurally_valid"] for row in projects):
         raise ValidationError(
             "The designated test project must have complete runner configuration."
@@ -366,6 +371,25 @@ def complete(entry_id, runner, report):
         raise RunConflict(
             "The runner must observe safe resume after restoring controls."
         )
+    from credentials.models import Credential
+
+    reference = success.configuration_snapshot.get("effective", {}).get(
+        "repository_credential_id"
+    )
+    credential = Credential.objects.filter(
+        pk=reference, provider="github", kind="token", revoked_at__isnull=True
+    ).first()
+    if credential is None:
+        raise RunConflict(
+            "Select a current repository credential with Actions artifact read permission."
+        )
+    try:
+        workflow = verify_boundary_workflow(boundary, credential.get_secret()["secret"])
+    except Exception:
+        raise RunConflict(
+            "The deployment workflow and downloaded artifact could not be independently verified."
+        ) from None
+    entry.evidence["verified_workflow"] = workflow
     entry.evidence["live_report"] = report
     entry.qualified_at = timezone.now()
     entry.expires_at = timezone.now() + timedelta(days=7)

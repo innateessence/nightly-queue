@@ -29,8 +29,22 @@ jobs:
           docker compose -f "$RUNNER_POLICY" config --format json > "$deployment_config"
           python3 -c 'import json,os,sys; config=json.load(open(sys.argv[1])); assert config["services"]["coding-runner"]["image"] == os.environ["RUNNER_IMAGE"]' "$deployment_config"
           rm "$deployment_config"
-          docker compose -f "$RUNNER_POLICY" run --rm --no-deps --entrypoint python coding-runner -m coding_runner.verify --boundary
-          docker compose -f "$RUNNER_POLICY" run --rm --no-deps --entrypoint python coding-runner -m coding_runner.release --probe
+          mkdir -p "$RUNNER_TEMP/runner-boundary"
+          chmod 0777 "$RUNNER_TEMP/runner-boundary"
+          policy_digest=$(sha256sum "$RUNNER_POLICY" | cut -d ' ' -f 1)
+          docker compose -f "$RUNNER_POLICY" run --rm --no-deps --entrypoint python \
+            --volume "$RUNNER_TEMP/runner-boundary:/qualification-output" \
+            -e NQ_RUNNER_IMAGE_DIGEST="${RUNNER_IMAGE##*@}" \
+            -e NQ_RUNNER_SANDBOX_POLICY_DIGEST="$policy_digest" \
+            -e NQ_RUNNER_SOURCE_REVISION="$GITHUB_SHA" \
+            coding-runner -m coding_runner.verify --boundary --evidence /qualification-output/runner-boundary.json
+      - name: Upload actual deployment boundary evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runner-deployment-boundary
+          path: ${{ runner.temp }}/runner-boundary/runner-boundary.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Record qualification scope
         env:
           RUNNER_IMAGE: ${{ inputs.image }}

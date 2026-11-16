@@ -1,12 +1,13 @@
 # nightly-queue
 
 Queue work for your GitHub projects. Django stores tasks and imports issues.
-A dedicated `coding-runner` Docker Compose service is planned to execute queued
-work with Codex, Claude Code, or OpenCode and deliver pull requests.
-It will read the full GitHub issue discussion, research a solution, and save an
-implementation plan before handing the task to the code runner. Runner behavior
-and credential selections will be configured in the web UI.
-See the [coding runner architecture and implementation plan](docs/coding-runner.md).
+A dedicated, recoverable `coding-runner` service implements context, planning,
+implementation, validation, and PR delivery through separately scoped HTTP APIs.
+Settings, runs, approvals, retention, and diagnostics are available in the private-LAN
+web UI. Normal execution remains opt-in and blocked until real controlled release
+verification passes. The current Codex API candidate is not a verified native CLI
+integration. See [operations and live qualification](docs/runner-operations.md) and
+[architecture](docs/coding-runner.md).
 
 ## Run locally
 
@@ -181,7 +182,7 @@ Use `python -m nq` to run without installing. Submissions are never retried auto
 
 ## Coding runner architecture
 
-The planned `coding-runner` service will:
+The release-gated `coding-runner` service implements:
 
 1. Claim a task and read the current GitHub issue and all comments, including every
    page of the discussion. Manual tasks use their title and instructions.
@@ -201,35 +202,34 @@ pages provide explicit inherit/replace/clear overrides plus setup and validation
 Beat and its worker continue to own scheduled issue discovery. Issue sync and
 coding execution have separate schedules. The Celery greeting task remains a demo.
 
-Processing will be gated by both the allowed schedule and the global usage
+Processing is gated by both the allowed schedule and the global usage
 reserve. For example, **40% minimum remaining usage** allows queue work only while
 more than 40% of each participating backend account's allowance remains. At 40% or
 less, processing stops at a safe checkpoint across all projects, with no new
-claims or model work. The UI will show remaining usage and the blocking reason;
+claims or model work. The UI shows remaining usage and the blocking reason;
 missing or unsupported usage readings block processing when enforcement is enabled.
 An in-flight call may cross the threshold before it can pause. Processing resumes
 when usage is above the reserve and the schedule permits it. See the
 [schedule and usage policy](docs/coding-runner.md#processing-schedule-and-global-usage-reserve)
 for account/window handling and recovery.
 
-The runner will use the existing HTTP API at `http://nightly-queue:8000` on the
-Compose network, with its own workspace and secret configuration. It will not
+The runner uses its scoped control HTTP API at `http://nightly-queue:8000` on the
+Compose network, with its own workspace and secret configuration. It does not
 connect directly to PostgreSQL or mount the live application's source directory.
-Runner credentials will be managed through the web UI and selected separately
-from the issue-import token. The existing API does not expose stored project
-credentials; scoped runner credential delivery must be implemented. Queue
+Runner credentials are managed through the web UI and selected separately
+from the issue-import token. Scoped secret delivery requires selected credentials, current ownership, and explicit preflight grants; ordinary queue responses contain no secrets. Queue
 connectivity/authentication, encryption keys, and container/volume wiring remain
 deployment configuration. Commands arriving as untrusted issue or research data
 require user confirmation before execution, surfaced through the web UI.
 
-Runner settings, effective configuration, selected-account inventory, and atomic
-claim snapshots are implemented; see [configuration schema and behavior](docs/runner-settings.md).
-Execution defaults disabled and remains release-gated even when enabled is saved.
-The service, comment retrieval, research/planning handoff, credential delivery,
-and recovery behavior require their separate implementation branches.
-See [the implementation plan](docs/coding-runner.md) for scope and acceptance criteria.
-The [feature-branch backlog](docs/runner-feature-branches.md) compares the current
-code with that architecture and lays out implementation dependencies and checks.
+Runner settings, immutable context/plan handoff, approvals, isolated workspaces,
+backend proposal mediation, validation, delivery, fenced recovery, and retention
+are implemented. See [operations](docs/runner-operations.md) for bootstrap, upgrades,
+permissions, backup, diagnostics, cleanup, and controlled live qualification.
+The configured hardened production container currently cannot create the required
+sandbox namespaces in this environment; live model authentication/integration also
+needs a designated authorized test repository and paid backend calls. No live
+release was qualified. Portable CI success does not change that status.
 
 ## Issue discovery operations
 
@@ -271,7 +271,7 @@ remain visible but cannot be claimed. Existing `/auto/` bookmarks redirect to th
 main queue. The merge migration preserves item IDs, issue metadata, and execution
 history.
 
-The planned runner will:
+An explicitly enabled and qualified runner will:
 
 1. Run only when enabled, within the configured processing schedule, and above the
    global remaining-usage reserve when that control is enabled.
@@ -296,11 +296,13 @@ Claims are atomic. Only the current token can finish a running item. Invalid
 input returns 400, wrong tokens 401, missing items 404, wrong methods 405, and
 stale claims or repeated completion 409.
 
-Interrupted items currently stay running. Stop the old runner execution and agent, then select
-**Requeue failed/interrupted work** in admin. This clears the old token and
-attempt results while preserving checkout settings and the branch. There is no
-automatic recovery. If a claim or finish request times out, inspect the item in
-admin before retrying.
+Runner-owned interrupted work keeps its claim and private journal. Restart the same
+owner and volume to reconcile before advancing. A delivered PR with pending
+completion reporting resumes reporting without a second PR. For a missing volume
+or unknown external outcome, stop the old supervisor and children and inspect the
+saved evidence; do not assume lease expiry grants ownership. Admin requeue fences
+the obsolete run and must follow operator reconciliation. See the detailed
+[recovery procedure](docs/runner-operations.md#history-controls-and-recovery).
 
 ## Development
 
@@ -336,6 +338,6 @@ mypy . --config-file mypy.ini
 `bash test.sh` runs the Docker-based checks. CI runs the same script for non-draft
 pull requests; see [the workflow](.github/workflows/test.yml).
 
-The optional read-only runner supervisor is documented in [runner service setup](docs/runner-service.md). Execution remains disabled pending the controlled release checks.
+The optional release-gated runner supervisor is documented in [runner service setup](docs/runner-service.md). Execution remains disabled pending the controlled release checks.
 
 Processing schedule, allowance adapter, durable counter, and gate evidence contracts are documented in [runner execution gates](docs/runner-execution-gates.md). Live execution remains disabled.

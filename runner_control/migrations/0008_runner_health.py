@@ -7,7 +7,7 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("runner_control", "0006_runner_operations"),
+        ("runner_control", "0007_runner_operations"),
     ]
 
     operations = [

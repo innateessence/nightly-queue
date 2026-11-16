@@ -104,6 +104,41 @@ class MaintenanceTests(unittest.TestCase):
         self.maintenance(self.state, {})
         self.assertTrue(directory.exists())
 
+    def test_acknowledgement_compacts_bulk_state_after_durable_confirmation(self):
+        other = str(uuid4())
+        for key in ("research", "implementation", "budgets"):
+            self.state[key] = {
+                self.run_id: {"large": "x" * 1000000},
+                other: {"active": True},
+            }
+        self.state["gates"] = {
+            "attempts": {self.run_id: "current", other: "current"},
+            "counts": {"current": 2, "old": 9},
+            "interval_ends": {
+                "current": "2999-01-01T00:00:00+00:00",
+                "old": "2000-01-01T00:00:00+00:00",
+            },
+            "pending_claim": {"run_id": other, "interval_id": "current"},
+        }
+        self.maintenance.acknowledge(self.state, self.run_id, str(uuid4()), "f" * 64)
+        recovered = self.journal.load()
+        self.assertNotIn(self.run_id, recovered["research"])
+        self.assertTrue(recovered["research"][other]["active"])
+        self.assertEqual(recovered["gates"]["counts"], {"current": 2})
+        self.assertEqual(recovered["gates"]["pending_claim"]["run_id"], other)
+        self.assertLess(self.journal.path.stat().st_size, 10000)
+
+    def test_failed_acknowledgement_preserves_bulk_recovery_state(self):
+        self.state["research"] = {self.run_id: {"pending_model": "preserve"}}
+        self.client.request.side_effect = InvalidResponse("Lost acknowledgement")
+        with self.assertRaises(InvalidResponse):
+            self.maintenance.acknowledge(
+                self.state, self.run_id, str(uuid4()), "f" * 64
+            )
+        self.assertEqual(
+            self.state["research"][self.run_id]["pending_model"], "preserve"
+        )
+
     def test_raw_log_is_private_and_only_summary_is_published(self):
         run_id, execution_id = str(uuid4()), str(uuid4())
         published = []

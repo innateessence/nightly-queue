@@ -38,6 +38,7 @@ def deployment_environment() -> dict[str, Any]:
     return {
         "image_digest": os.environ.get("NQ_RUNNER_IMAGE_DIGEST", "unbound"),
         "kernel": platform.release(),
+        "source_revision": os.environ.get("NQ_RUNNER_SOURCE_REVISION", "unbound"),
         "python": platform.python_version(),
         "architecture": platform.machine(),
         "uid": os.getuid(),
@@ -78,8 +79,10 @@ def matches_deployment(proof: dict[str, Any]) -> bool:
         SandboxUnavailable,
     ):
         return False
-    return expires > datetime.now(UTC) and all(
-        proof.get(key) == value for key, value in binding.items()
+    return (
+        expires.tzinfo is not None
+        and expires > datetime.now(UTC)
+        and all(proof.get(key) == value for key, value in binding.items())
     )
 
 
@@ -172,6 +175,22 @@ class ControlledRelease:
             )
         return lifecycle.step(state)
 
+    def candidate_readiness(self, state, account, capabilities, probe):
+        from .backends import BackendReadiness
+
+        entry = self.authorization()
+        run = state.get("run") or {}
+        if run.get("item", {}).get("repository_url") != entry["repository_url"]:
+            raise InvalidResponse(
+                "Controlled authentication probe is outside the authorized owned run."
+            )
+        model = account.get("model")
+        if not isinstance(model, str) or not model or probe() != model:
+            raise InvalidResponse(
+                "The selected live backend model authentication probe failed."
+            )
+        return BackendReadiness(True, True, (), capabilities)
+
     def observe_pr(self, state, github):
         entry = self.authorization()
         delivery = state.get("delivery") or {}
@@ -198,32 +217,35 @@ class ControlledRelease:
             self.journal.save(state)
         return len(observations)
 
-    def boundary(self, state, workflow_run_url):
-        self.authorization()
-        command = [sys.executable, "-m", "coding_runner.verify", "--boundary"]
-        result = subprocess.run(
-            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600
+    def boundary(self, state, workflow_run_url, evidence_path):
+        entry = self.authorization()
+        if evidence_path.stat().st_size > 65536:
+            raise InvalidResponse("Boundary evidence exceeds its limit.")
+        evidence = json.loads(evidence_path.read_text())
+        evidence["workflow_run_url"] = workflow_run_url
+        for key in ("code_revision", "environment_digest"):
+            if evidence.get(key) != entry[key]:
+                raise InvalidResponse(
+                    "Boundary artifact does not match this deployment authorization."
+                )
+        run = state.get("run") or {}
+        grant = self.client.request(
+            "POST",
+            "/api/v1/runner/secrets/",
+            {
+                "scope": "run",
+                "run_id": run["run"]["id"],
+                "claim_token": run["item"]["claim_token"],
+                "purpose": "repository",
+            },
         )
-        evidence = {
-            "command": ["python", "-m", "coding_runner.verify", "--boundary"],
-            "exit_code": result.returncode,
-            "output_digest": hashlib.sha256(result.stdout).hexdigest(),
-            "workflow_run_url": workflow_run_url,
-            "environment": deployment_environment(),
-        }
-        from .run_logs import RunLogs
+        from .release_evidence import verify_boundary_workflow
 
-        RunLogs.write(
-            self.journal.directory / "release-boundary.log",
-            result.stdout[: 4 * 1024 * 1024],
-        )
+        verification = verify_boundary_workflow(evidence, grant["material"]["secret"])
         state.setdefault("release_evidence", {})["boundary"] = evidence
+        state["release_evidence"]["workflow"] = verification
         self.journal.save(state)
-        if result.returncode:
-            raise InvalidResponse(
-                "Full deployment boundary acceptance failed; live release remains blocked."
-            )
-        return evidence
+        return verification
 
     def record_result(self, state):
         from .maintenance import Maintenance
@@ -285,6 +307,7 @@ def main() -> int:
     parser.add_argument("--item-id", type=int)
     parser.add_argument("--boundary", action="store_true")
     parser.add_argument("--workflow-run-url", default="")
+    parser.add_argument("--boundary-evidence", type=Path)
     parser.add_argument("--record-result", action="store_true")
     parser.add_argument("--submit-evidence", action="store_true")
     parser.add_argument(
@@ -311,13 +334,24 @@ def main() -> int:
         from .gates import GateEvaluator
         from .backend_registry import BackendRegistry, ScopedCredentials
         from .lifecycle import Lifecycle
-        from .codex_backend import CodexBackend
+        from .codex_backend import CodexBackend, CAPABILITIES, ProcessTransport
+        import threading
 
         gates = GateEvaluator(journal)
         RecoveryCoordinator(client, journal, gates).bind(state)
         harness = ControlledRelease(client, journal, args.qualification)
         if args.boundary:
-            print(json.dumps(harness.boundary(state, args.workflow_run_url)))
+            if not args.boundary_evidence:
+                parser.error(
+                    "--boundary requires the downloaded runner-boundary.json artifact via --boundary-evidence."
+                )
+            print(
+                json.dumps(
+                    harness.boundary(
+                        state, args.workflow_run_url, args.boundary_evidence
+                    )
+                )
+            )
             return 0
         if args.record_result:
             print(harness.record_result(state))
@@ -369,20 +403,37 @@ def main() -> int:
         def traced_backend(credentials):
             from .qualification_trace import ModelTraceTransport
 
-            def transport_for(account):
-                return ModelTraceTransport(
-                    journal, state, account, versions[account["credential_id"]]
-                )
+            class ControlledCodex(CodexBackend):
+                def readiness(self, account):
+                    def probe():
+                        if not checkpoint():
+                            return None
+                        response = ProcessTransport().exchange(
+                            {
+                                "probe_model": account["model"],
+                                "token": self._token(account),
+                                "timeout": 10,
+                            },
+                            timeout=10,
+                            checkpoint=checkpoint,
+                            stop=threading.Event(),
+                        )
+                        return response.get("authenticated_model")
 
-            backend = CodexBackend(credentials)
-            original_run = backend._run
+                    return harness.candidate_readiness(
+                        state, account, CAPABILITIES, probe
+                    )
 
-            def traced_run(stage, request, progress, checkpoint, stop):
-                backend.transport = transport_for(request.account)
-                return original_run(stage, request, progress, checkpoint, stop)
+                def _run(self, stage, request, progress, checkpoint, stop):
+                    self.transport = ModelTraceTransport(
+                        journal,
+                        state,
+                        request.account,
+                        versions[request.account["credential_id"]],
+                    )
+                    return super()._run(stage, request, progress, checkpoint, stop)
 
-            backend._run = traced_run
-            return backend
+            return ControlledCodex(credentials)
 
         from .delivery import DeliveryStage, GitHubDeliveryClient, SupervisorGit
 

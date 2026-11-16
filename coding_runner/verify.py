@@ -2,6 +2,9 @@
 
 import argparse
 import json
+import io
+import hashlib
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,6 +59,7 @@ def boundary_suite():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--boundary", action="store_true")
+    parser.add_argument("--evidence", type=Path)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as temporary:
         try:
@@ -82,7 +86,24 @@ def main():
                 )
             )
     suite = boundary_suite() if args.boundary else portable_suite()
-    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+        result = unittest.TextTestRunner(stream=output, verbosity=2).run(suite)
+    text = output.getvalue()
+    print(text)
+    if args.evidence and args.boundary and result.wasSuccessful():
+        from .release import deployment_binding, deployment_environment
+        from .run_logs import RunLogs
+
+        report = {
+            **deployment_binding(),
+            "environment": deployment_environment(),
+            "command": ["python", "-m", "coding_runner.verify", "--boundary"],
+            "exit_code": 0,
+            "tests_run": result.testsRun,
+            "output_digest": hashlib.sha256(text.encode()).hexdigest(),
+        }
+        RunLogs.write(args.evidence, json.dumps(report, sort_keys=True).encode())
     return 0 if result.wasSuccessful() else 1
 
 

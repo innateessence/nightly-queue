@@ -48,7 +48,14 @@ class Lifecycle:
     def ready(self, configuration):
         if configuration.get("execution_ready") is not True:
             return False
-        for account in configuration["accounts"]:
+        from .release import matches_deployment
+
+        proof = configuration.get("release_verification", {})
+        if not matches_deployment(proof):
+            return False
+        if proof.get("runner_id") != self.journal.load().get("runner_id"):
+            return False
+        for account in proof.get("accounts", []):
             if self.stop.is_set():
                 return False
             backend = self.backends.create(
@@ -347,6 +354,23 @@ class Lifecycle:
         executor = self.executor_factory(
             broker, sources, self.checkpoint, read_only=stage_name == "research"
         )
+
+        if isinstance(executor, ApprovedExecutor):
+            from .run_logs import RunLogs
+
+            def publish_log(summary):
+                client.request(
+                    "POST",
+                    f"/api/v1/runner/runs/{run_id}/artifacts/",
+                    {
+                        "operation_id": summary["execution_id"],
+                        "claim_token": token,
+                        "kind": "execution_log",
+                        "data": summary,
+                    },
+                )
+
+            executor.observer = RunLogs(self.journal.directory / "logs", publish_log)
 
         def progress(event):
             self.progress(state, stage_name, {"event": event.kind, **event.data})

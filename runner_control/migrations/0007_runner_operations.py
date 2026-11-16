@@ -8,7 +8,7 @@ import uuid
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("runner_control", "0005_contextsnapshot_planversion_and_more"),
+        ("runner_control", "0006_recovery_ownership"),
     ]
 
     operations = [

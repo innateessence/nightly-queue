@@ -3,7 +3,8 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from cryptography.fernet import Fernet
 from django.urls import reverse
 from django.utils import timezone
 
@@ -22,6 +23,7 @@ from .models import (
 from .release import complete
 from .retention import acknowledge, plan, purge_run, workspace_removed
 from .services import RunConflict
+from .test_support import provision_controller
 
 
 class RetentionTests(TestCase):
@@ -29,6 +31,7 @@ class RetentionTests(TestCase):
         self.runner = RunnerIdentity.objects.create(
             name="operations", token_digest=token_digest("test-token")
         )
+        provision_controller(self)
         self.project = Project.objects.create(
             name="Test", repository_url="https://github.com/example/test"
         )
@@ -228,6 +231,7 @@ class RetentionTests(TestCase):
         self.assertIsNone(entry.qualified_at)
 
 
+@override_settings(NQ_CREDENTIAL_KEY=Fernet.generate_key().decode("ascii"))
 class ReleaseEvidenceTests(TestCase):
     def setUp(self):
         from .configuration import configuration_document
@@ -238,6 +242,7 @@ class ReleaseEvidenceTests(TestCase):
         self.runner = RunnerIdentity.objects.create(
             name="release-test", token_digest=token_digest("fixture-token")
         )
+        provision_controller(self)
         self.environment = {
             "image_digest": "sha256:" + "1" * 64,
             "operator_policy": "2" * 64,
@@ -264,13 +269,28 @@ class ReleaseEvidenceTests(TestCase):
                 ],
             },
         )
+        from credentials.models import Credential
+
+        credential = Credential(name="Fixture GitHub", provider="github", kind="token")
+        credential.set_secret("fixture-test-token")
+        credential.save()
+        self.credential = credential
+        self.workflow_check = patch(
+            "runner_control.release.verify_boundary_workflow",
+            return_value={"run_id": 1, "artifact_id": 1, "conclusion": "success"},
+        )
+        self.workflow_check.start()
+        self.addCleanup(self.workflow_check.stop)
         self.success = Run.objects.create(
             runner=self.runner,
             state="completed",
             result_status="succeeded",
             finished_at=timezone.now(),
             result_url="https://github.com/example/test/pull/1",
-            configuration_snapshot={"repository_url": self.entry.repository_url},
+            configuration_snapshot={
+                "repository_url": self.entry.repository_url,
+                "effective": {"repository_credential_id": self.credential.pk},
+            },
         )
         self.failure = Run.objects.create(
             runner=self.runner,
@@ -278,7 +298,10 @@ class ReleaseEvidenceTests(TestCase):
             result_status="failed",
             finished_at=timezone.now(),
             error_summary="Validation failed with exit code 2; protected log run/execution",
-            configuration_snapshot={"repository_url": self.entry.repository_url},
+            configuration_snapshot={
+                "repository_url": self.entry.repository_url,
+                "effective": {"repository_credential_id": self.credential.pk},
+            },
         )
         context = self.success.contexts.create(
             operation_id=uuid.uuid4(),
