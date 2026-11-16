@@ -27,10 +27,20 @@ class MemoryAPI:
         self.owned = None
         self.claim_template = None
 
-    def request(self, method, path, payload=None):
+    def request(self, method, path, payload=None, **limits):
         self.calls.append((method, path, copy.deepcopy(payload)))
         endpoint = path.rstrip("/").split("/")[-1]
         if method == "GET":
+            from ..client import NotFoundError
+
+            if "/operations/" in path:
+                if endpoint not in self.operations:
+                    raise NotFoundError()
+                return {"response": copy.deepcopy(self.operations[endpoint])}
+            if "/handoff/" in path:
+                if endpoint not in self.operations:
+                    raise NotFoundError()
+                return copy.deepcopy(self.operations[endpoint])
             return {"context": self.contexts[endpoint]}
         operation = payload.get("operation_id")
         if operation and operation in self.operations and endpoint != "approvals":
@@ -67,6 +77,8 @@ class MemoryAPI:
                 operation, {"id": str(uuid4()), "action": payload["action"]}
             )
             result = {"approval": {**approval, "decision": self.decision}}
+        elif endpoint == "secrets":
+            result = {"material": {"secret": "test-issue-token"}}
         elif endpoint == "consume":
             result = {"permit": True, "execution_id": payload["execution_id"]}
         elif endpoint == "finish":
@@ -179,7 +191,8 @@ class RepositoryGit:
     def __init__(self):
         self.pushes = 0
 
-    def push(self, workspace, commit):
+    def push(self, workspace, commit, *, checkpoint=lambda: True):
+        checkpoint()
         self.pushes += 1
         self.commit = commit
 
@@ -299,6 +312,76 @@ class LifecycleRecoveryTests(WorkspaceFixture, unittest.TestCase):
         self.journal.save(self.state)
         self.state = self.journal.load()
 
+    def imported_item(self):
+        from ..test_context import ITEM
+
+        self.state["run"]["item"].update(
+            source="github", issue_repository=ITEM["issue_repository"], issue_number=7
+        )
+
+    def test_initial_context_pagination_shares_frozen_research_budget(self):
+        from unittest.mock import patch
+        from ..budgets import ActiveBudget
+        from ..context import GitHubContextClient
+        from ..recovery import ReconciliationRequired
+        from ..test_context import issue, comment
+
+        self.imported_item()
+        controls = self.state["run"]["run"]["configuration_snapshot"]["global"]
+        controls.update(task_timeout_seconds=1, research_timeout_seconds=1)
+        clock = [0.0]
+        issue_client = GitHubContextClient("test-issue-token")
+        link = '<https://api.github.com/repos/original/issues/issues/7/comments?per_page=100&page=2>; rel="next"'
+        pages = [(issue(comments=2), ""), ([comment()], link), ([comment(2)], "")]
+
+        def page(*args, **kwargs):
+            clock[0] += 0.6
+            return pages.pop(0)
+
+        def budget(*args):
+            return ActiveBudget(*args, clock=lambda: clock[0])
+
+        with (
+            patch("coding_runner.lifecycle.ActiveBudget", side_effect=budget),
+            patch(
+                "coding_runner.lifecycle.GitHubContextClient", return_value=issue_client
+            ),
+            patch("coding_runner.context.time.monotonic", side_effect=lambda: clock[0]),
+            patch.object(issue_client, "_get", side_effect=page) as fetch,
+            self.assertRaisesRegex(ReconciliationRequired, "budget"),
+        ):
+            self.step()
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(len(pages), 1)
+        self.assertNotIn("context", self.state)
+        self.assertEqual(self.state["run"]["item"]["claim_token"], "claim")
+        self.assertEqual(self.state["budgets"][self.run_id]["total"], 1.2)
+        self.assertEqual(self.backend.research_calls, 0)
+
+    def test_initial_context_gate_closure_stops_before_comment_fetch(self):
+        from unittest.mock import patch
+        from ..context import GitHubContextClient
+        from ..test_context import issue
+
+        self.imported_item()
+        issue_client = GitHubContextClient("test-issue-token")
+
+        def page(*args, **kwargs):
+            self.allowed = False
+            return issue(), ""
+
+        with (
+            patch(
+                "coding_runner.lifecycle.GitHubContextClient", return_value=issue_client
+            ),
+            patch.object(issue_client, "_get", side_effect=page) as fetch,
+        ):
+            self.assertEqual(self.step(), "wait")
+        self.assertEqual(fetch.call_count, 1)
+        self.assertNotIn("context", self.state)
+        self.assertEqual(self.backend.research_calls, 0)
+        self.assertGreater(self.state["budgets"][self.run_id]["stages"]["research"], 0)
+
     def test_actual_stages_reach_human_approval_and_resume_without_model_repeat(self):
         self.until("approval")
         calls = (self.backend.research_calls, self.backend.implementation_calls)
@@ -322,6 +405,37 @@ class LifecycleRecoveryTests(WorkspaceFixture, unittest.TestCase):
         self.assertEqual(self.step(), "wait")
         self.assertEqual(self.state["delivery_ready"], validated)
         self.assertEqual(self.github.creates, 0)
+
+    def test_approval_poll_retains_claim_without_charging_preparation_budget(self):
+        self.until("approval")
+        before = copy.deepcopy(self.state["budgets"][self.run_id])
+        self.restart()
+        self.assertEqual(self.step(), "approval")
+        self.assertEqual(self.state["budgets"][self.run_id], before)
+        self.assertEqual(self.state["run"]["item"]["claim_token"], "claim")
+
+    def test_validated_delivery_does_not_require_remaining_implementation_budget(self):
+        self.until("approval")
+        self.api.decision = "approved"
+        self.until("delivery_ready")
+        budget = self.state["budgets"][self.run_id]
+        budget["stages"]["implementation"] = budget["limits"]["stages"][
+            "implementation"
+        ]
+        self.restart()
+        self.assertEqual(self.step(), "finished")
+        self.assertEqual(self.github.creates, 1)
+
+    def test_validation_resume_does_not_require_remaining_implementation_budget(self):
+        self.until("approval")
+        budget = self.state["budgets"][self.run_id]
+        budget["stages"]["implementation"] = budget["limits"]["stages"][
+            "implementation"
+        ]
+        self.api.decision = "approved"
+        self.restart()
+        self.until("delivery_ready")
+        self.assertEqual(self.state["delivery_ready"]["validation"][0]["exit_code"], 0)
 
     def test_delivered_pr_with_lost_finish_restarts_reporting_only(self):
         self.until("approval")
@@ -403,6 +517,7 @@ class LifecycleRecoveryTests(WorkspaceFixture, unittest.TestCase):
 
     def test_base_change_blocks_resume_and_preserves_checkout(self):
         self.until("approval")
+        self.api.decision = "approved"
         before = (self.workspace.checkout / "README.md").read_bytes()
         owner = self
 

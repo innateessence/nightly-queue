@@ -9,9 +9,15 @@ from typing import Any
 from uuid import uuid4
 
 from .journal import Journal, JournalError
+from .backends import BackendInterrupted
+from .budgets import BudgetExceeded
 
 current_tracker: contextvars.ContextVar[Any] = contextvars.ContextVar(
     "runner_process_tracker", default=None
+)
+
+current_execution: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "runner_process_execution_limits", default=None
 )
 
 
@@ -142,7 +148,8 @@ def reaped(process):
 def run(
     arguments, *, input=None, capture_output=False, timeout=None, check=False, **kwargs
 ):
-    if not current_tracker.get():
+    execution = current_execution.get()
+    if not current_tracker.get() and execution is None:
         return subprocess.run(
             arguments,
             input=input,
@@ -155,13 +162,51 @@ def run(
         kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if input is not None:
         kwargs["stdin"] = subprocess.PIPE
+    if execution:
+        kwargs["start_new_session"] = True
+        deadline, local_checkpoint, checkpoint = execution
+        if not local_checkpoint() or checkpoint() is not True:
+            raise BackendInterrupted(
+                "Git preparation interrupted by execution controls."
+            )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BudgetExceeded("Git preparation exhausted its active budget.")
+        timeout = remaining if timeout is None else min(timeout, remaining)
     with popen(arguments, **kwargs) as process:
         try:
-            stdout, stderr = process.communicate(input, timeout=timeout)
+            if execution is None:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            else:
+                expires = time.monotonic() + timeout
+                pending_input = input
+                while True:
+                    if not local_checkpoint():
+                        raise BackendInterrupted(
+                            "Git preparation interrupted by execution controls."
+                        )
+                    remaining = expires - time.monotonic()
+                    if remaining <= 0:
+                        if time.monotonic() >= deadline:
+                            raise BudgetExceeded(
+                                "Git preparation exhausted its active budget."
+                            )
+                        raise subprocess.TimeoutExpired(arguments, timeout)
+                    try:
+                        stdout, stderr = process.communicate(
+                            pending_input, timeout=min(0.1, remaining)
+                        )
+                        break
+                    except subprocess.TimeoutExpired:
+                        pending_input = None
         except BaseException:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.wait()
-            reaped(process)
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            finally:
+                process.wait()
+                reaped(process)
             raise
         reaped(process)
         result = subprocess.CompletedProcess(
@@ -169,4 +214,8 @@ def run(
         )
         if check:
             result.check_returncode()
+        if execution and (not local_checkpoint() or checkpoint() is not True):
+            raise BackendInterrupted(
+                "Git preparation interrupted by execution controls."
+            )
         return result

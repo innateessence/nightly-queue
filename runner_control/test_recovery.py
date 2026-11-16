@@ -211,6 +211,37 @@ class OperationLookupTests(TestCase):
         self.assertEqual(recovered.status_code, 200)
         self.assertEqual(recovered.json()["response"], response.json())
 
+    def test_operation_lookup_redacts_current_bearer_from_saved_document(self):
+        from coding_runner.context import manual_context
+        from coding_runner.test_plans import BASE
+        from .test_plans import ContextPlanAPITests
+
+        document = manual_context(self.claimed)
+        future_token = "future-runner-token"
+        document["title"] = future_token
+        self.item.title = future_token
+        self.item.save(update_fields=["title"])
+        response = ContextPlanAPITests.post(
+            self,
+            "runner_contexts",
+            {
+                "document": document,
+                "base_commit": BASE,
+                "resolved_base_branch": "main",
+                "reason": "Inspect",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        context = response.json()["context"]
+        RunnerIdentity.objects.filter(pk=self.runner.pk).update(
+            token_digest=token_digest(future_token)
+        )
+        self.client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {future_token}"
+        recovered = self.lookup(context["operation_id"])
+        self.assertEqual(recovered.status_code, 200)
+        self.assertNotIn(future_token, recovered.content.decode())
+        self.assertTrue(recovered.json()["response"]["context"]["presentation_only"])
+
     def test_plan_operation_recovers_exact_response(self):
         from coding_runner.test_plans import proposed_plan
         from .test_plans import ContextPlanAPITests

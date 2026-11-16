@@ -278,7 +278,9 @@ class ApprovalTests(TestCase):
         credential = self.selected_credential("selected-private-secret")
         Credential.objects.filter(pk=credential.pk).update(encrypted_payload="invalid")
         RunnerIdentity.objects.create(
-            name="foreign", token_digest=token_digest("foreign-token")
+            name="foreign",
+            token_digest=token_digest("foreign-token"),
+            controller_digest=token_digest(CONTROLLER_SECRET),
         )
         self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer foreign-token"
         self.assertEqual(self.request_approval().status_code, 404)

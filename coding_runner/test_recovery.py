@@ -22,13 +22,17 @@ class Queue:
         self.lost = False
         self.configuration_document = copy.deepcopy(CONFIG)
 
-    def request(self, method, path, payload=None):
+    def request(self, method, path, payload=None, **limits):
         self.calls.append((method, path, copy.deepcopy(payload)))
-        if method == "GET" and "/operations/" in path:
+        if method == "GET" and ("/operations/" in path or "/handoff/" in path):
             operation = path.rstrip("/").split("/")[-1]
             if operation not in self.results:
                 raise NotFoundError()
-            return {"response": self.results[operation]}
+            return (
+                {"response": self.results[operation]}
+                if "/operations/" in path
+                else self.results[operation]
+            )
         if path.endswith("/runs/claim/"):
             if self.claim_response is None:
                 self.claim_response = {
@@ -322,6 +326,35 @@ class MetadataRecoveryTests(RecoveryFixture, unittest.TestCase):
             "document": {"title": "one"},
         }
 
+    def test_recovery_lookup_and_replay_share_fresh_timeout_without_journaling_options(
+        self,
+    ):
+        clock = [10.0]
+        options = []
+        request = self.client.request
+
+        def bounded(method, path, payload=None, **limits):
+            options.append(limits)
+            clock[0] += 0.25
+            return request(method, path, payload)
+
+        self.state["request"] = {
+            "path": self.endpoint,
+            "payload": self.payload,
+            "status": "pending",
+        }
+        with (
+            patch(
+                "coding_runner.recovery.time.monotonic", side_effect=lambda: clock[0]
+            ),
+            patch.object(self.client, "request", side_effect=bounded),
+        ):
+            self.durable.recover(timeout=1, checkpoint=lambda: True)
+        self.assertEqual([entry["timeout"] for entry in options], [1, 0.75])
+        saved = self.journal.load()["request"]
+        self.assertEqual(set(saved), {"path", "payload", "status", "response"})
+        self.assertEqual(saved["payload"], self.payload)
+
     def test_identical_metadata_retry_is_one_write(self):
         first = self.durable.request("POST", self.endpoint, self.payload)
         second = self.durable.request("POST", self.endpoint, self.payload)
@@ -404,6 +437,81 @@ class MetadataRecoveryTests(RecoveryFixture, unittest.TestCase):
                 self.assertEqual(len(calls), 1)
 
 
+class DocumentRecoveryTests(RecoveryFixture, unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import Mock
+        from .recovery import DurableContextPlanStore
+        from .test_plans import BASE, saved_context
+
+        self.create_recovery()
+        self.base = BASE
+        self.context = saved_context()
+        self.operation_id = str(uuid4())
+        self.sources = Mock()
+        client = DurableClient(self.client, self.journal, self.state)
+        self.store = DurableContextPlanStore(client, self.run_id, "claim", self.sources)
+
+    def pending(self, endpoint, result):
+        path = f"/api/v1/runner/runs/{self.run_id}/{endpoint}/"
+        payload = {
+            "claim_token": "claim",
+            "operation_id": self.operation_id,
+            "base_commit": self.base,
+        }
+        self.state["request"] = {"path": path, "payload": payload, "status": "pending"}
+        self.client.results[self.operation_id] = result
+
+    def test_pending_context_recovery_rejects_redacted_presentation(self):
+        import time
+        from .test_context import ITEM
+
+        self.pending(
+            "contexts", {"context": {**self.context, "presentation_only": True}}
+        )
+        with self.assertRaisesRegex(ReconciliationRequired, "presentation"):
+            self.store.refresh(
+                {**ITEM, "source": "manual"}, self.base, deadline=time.monotonic() + 1
+            )
+        self.sources.register.assert_not_called()
+
+    def test_pending_handoff_recovery_rejects_redacted_plan(self):
+        from .test_context import ITEM
+
+        self.pending(
+            "handoff", {"context": self.context, "plan": {"presentation_only": True}}
+        )
+        with self.assertRaisesRegex(ReconciliationRequired, "presentation"):
+            self.store.handoff(
+                {**ITEM, "source": "manual"}, self.base, timeout_seconds=1
+            )
+        self.sources.register.assert_not_called()
+
+    def test_handoff_original_operation_read_avoids_another_refresh(self):
+        from .test_context import ITEM
+
+        expected = {"context": self.context, "plan": {"id": "saved-plan"}}
+        self.client.results[self.operation_id] = expected
+        result = self.store.handoff(
+            {**ITEM, "source": "manual"},
+            self.base,
+            operation_id=self.operation_id,
+            timeout_seconds=1,
+            checkpoint=lambda: True,
+            inflight_checkpoint=lambda: True,
+        )
+        self.assertEqual(result, expected)
+        self.assertEqual(
+            self.client.calls,
+            [
+                (
+                    "GET",
+                    f"/api/v1/runner/runs/{self.run_id}/handoff/{self.operation_id}/",
+                    None,
+                )
+            ],
+        )
+
+
 class ProcessRecoveryTests(RecoveryFixture, unittest.TestCase):
     def setUp(self):
         self.create_recovery()
@@ -416,6 +524,81 @@ class ProcessRecoveryTests(RecoveryFixture, unittest.TestCase):
         self.addCleanup(child.wait)
         self.addCleanup(tracker.recover)
         return tracker, child
+
+    def test_preparation_process_stops_at_aggregate_active_deadline(self):
+        import time
+        from .budgets import BudgetExceeded
+        from .processes import current_execution, run
+
+        tracker = ProcessTracker(self.journal, self.state)
+        context = current_tracker.set(tracker)
+        execution = current_execution.set(
+            (time.monotonic() + 0.1, lambda: True, lambda: True)
+        )
+        started = time.monotonic()
+        try:
+            with self.assertRaises(BudgetExceeded):
+                run(
+                    [sys.executable, "-c", "import time; time.sleep(60)"],
+                    capture_output=True,
+                    timeout=120,
+                )
+        finally:
+            current_execution.reset(execution)
+            current_tracker.reset(context)
+        self.assertLess(time.monotonic() - started, 0.7)
+        self.assertTrue(
+            all(row["status"] == "stopped" for row in self.state["processes"].values())
+        )
+
+    def test_preparation_process_stops_and_reaps_on_local_shutdown(self):
+        import threading
+        import time
+        from .backends import BackendInterrupted
+        from .processes import current_execution, run
+
+        stopped = threading.Event()
+        tracker = ProcessTracker(self.journal, self.state)
+        context = current_tracker.set(tracker)
+        execution = current_execution.set(
+            (time.monotonic() + 10, lambda: not stopped.is_set(), lambda: True)
+        )
+        timer = threading.Timer(0.05, stopped.set)
+        started = time.monotonic()
+        try:
+            timer.start()
+            with self.assertRaises(BackendInterrupted):
+                run(
+                    [sys.executable, "-c", "import time; time.sleep(60)"],
+                    capture_output=True,
+                )
+        finally:
+            timer.cancel()
+            current_execution.reset(execution)
+            current_tracker.reset(context)
+        self.assertLess(time.monotonic() - started, 0.7)
+        self.assertTrue(
+            all(row["status"] == "stopped" for row in self.state["processes"].values())
+        )
+
+    def test_execution_limits_without_tracker_still_stop_an_owned_process_group(self):
+        import time
+        from .budgets import BudgetExceeded
+        from .processes import current_execution, run
+
+        execution = current_execution.set(
+            (time.monotonic() + 0.1, lambda: True, lambda: True)
+        )
+        started = time.monotonic()
+        try:
+            with self.assertRaises(BudgetExceeded):
+                run(
+                    [sys.executable, "-c", "import time; time.sleep(60)"],
+                    capture_output=True,
+                )
+        finally:
+            current_execution.reset(execution)
+        self.assertLess(time.monotonic() - started, 0.7)
 
     def test_process_disappearing_during_stat_read_is_already_stopped(self):
         from .processes import identity

@@ -57,7 +57,13 @@ An old heartbeat is never accepted as proof of process termination.
 Every stage and every model/action checkpoint re-reads current global controls
 and verifies remote ownership. Schedule, reserve, capacity, and approval waits
 retain the claim and validation state. Waiting between steps consumes no active
-budget. An interrupted active segment remains blocked for conservative operator
+budget. Approval polling happens before workspace preparation and does not charge
+active time. Workspace and pending metadata preparation consume the total budget;
+they do not require remaining implementation time after validation starts. Initial
+context fetching and metadata recovery propagate fresh aggregate deadlines and
+local stop checks without serializing callbacks or monotonic deadlines. Tracked
+Git preparation stops and confirms child termination at its active deadline.
+An interrupted active segment remains blocked for conservative operator
 accounting; its elapsed budget is never silently reset, including across reboot.
 
 Metadata uploads use durable operation UUIDs and exact request bodies.

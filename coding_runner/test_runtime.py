@@ -111,6 +111,64 @@ class ClientTests(ServerCase):
         self.client.request_lock.release()
         self.assertEqual(set(callback_threads), {threading.get_ident()})
 
+    def test_durable_interrupted_mutation_reconciles_exact_pending_request_over_http(
+        self,
+    ):
+        from coding_runner.recovery import DurableClient
+
+        run_id, operation = str(uuid4()), str(uuid4())
+        path = f"/api/v1/runner/runs/{run_id}/contexts/"
+        lookup = f"/api/v1/runner/runs/{run_id}/operations/{operation}/"
+        payload = {
+            "operation_id": operation,
+            "claim_token": "private-test-claim",
+            "document": {"title": "original"},
+        }
+        response = {"context": {"id": str(uuid4())}}
+        self.server.responses[path] = (200, response)
+        self.server.responses[lookup] = (200, {"response": response})
+        self.server.release_mutation = threading.Event()
+        self.client.timeout = 15
+        stopped = threading.Event()
+
+        def stop_after_send():
+            deadline = time.monotonic() + 2
+            while not self.server.calls and time.monotonic() < deadline:
+                time.sleep(0.005)
+            stopped.set()
+
+        stopper = threading.Thread(target=stop_after_send, daemon=True)
+        with Journal(self.path) as journal:
+            state = journal.load()
+            durable = DurableClient(self.client, journal, state)
+            try:
+                stopper.start()
+                started = time.monotonic()
+                with self.assertRaises(AmbiguousRequest):
+                    durable.request(
+                        "POST",
+                        path,
+                        payload,
+                        timeout=2,
+                        checkpoint=lambda: not stopped.is_set(),
+                    )
+                self.assertLess(time.monotonic() - started, 0.7)
+                pending = journal.load()["request"]
+                self.assertEqual(
+                    pending, {"path": path, "payload": payload, "status": "pending"}
+                )
+            finally:
+                self.server.release_mutation.set()
+                stopper.join(2)
+            self.assertTrue(self.client.request_lock.acquire(timeout=2))
+            self.client.request_lock.release()
+            restored = journal.load()
+            DurableClient(self.client, journal, restored).recover(
+                timeout=1, checkpoint=lambda: True
+            )
+            self.assertEqual(restored["request"]["response"], response)
+        self.assertEqual(self.server.calls, [("POST", path), ("GET", lookup)])
+
     def test_full_handoff_gates_can_use_same_client_between_requests(self):
         from unittest.mock import Mock
         from coding_runner.plan_store import ContextPlanStore

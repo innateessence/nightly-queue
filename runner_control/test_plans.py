@@ -442,7 +442,9 @@ class ContextPlanAPITests(TestCase):
             .operation_id
         )
         RunnerIdentity.objects.create(
-            name="other-reader", token_digest=token_digest("other-reader-token")
+            name="other-reader",
+            token_digest=token_digest("other-reader-token"),
+            controller_digest=token_digest(CONTROLLER_SECRET),
         )
         self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer other-reader-token"
         self.assertEqual(

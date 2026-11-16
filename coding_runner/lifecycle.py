@@ -1,14 +1,15 @@
 import threading
+import time
 from uuid import uuid4
 
-from .approvals import ApprovalBroker, ApprovalRequired
+from .approvals import ActionSpec, ApprovalBroker, ApprovalRequired
 from .backend_registry import BackendRegistry, ScopedCredentials
 from .backends import BackendError, BackendInterrupted
 from .budgets import ActiveBudget, BudgetExceeded
-from .context import GitHubContextClient
+from .context import ContextError, ContextInterrupted, GitHubContextClient
 from .implementation import ImplementationStage
 from .journal import Journal
-from .processes import ProcessTracker, current_tracker
+from .processes import ProcessTracker, current_execution, current_tracker
 from .recovery import DurableClient, DurableContextPlanStore, ReconciliationRequired
 from .research import ResearchStage
 from .sandbox import ApprovedExecutor, probe_sandbox
@@ -48,6 +49,8 @@ class Lifecycle:
         if configuration.get("execution_ready") is not True:
             return False
         for account in configuration["accounts"]:
+            if self.stop.is_set():
+                return False
             backend = self.backends.create(
                 account["backend"], ScopedCredentials(self.client)
             )
@@ -70,12 +73,14 @@ class Lifecycle:
             project["errors"] for project in configuration["projects"]
         ):
             return False
+        if self.stop.is_set():
+            return False
         probe = self.journal.directory / "sandbox-probe"
         probe.mkdir(mode=0o700, exist_ok=True)
         probe_sandbox(probe)
         return True
 
-    def secret(self, run_id, claim_token, purpose):
+    def secret(self, run_id, claim_token, purpose, **limits):
         result = self.client.request(
             "POST",
             "/api/v1/runner/secrets/",
@@ -85,6 +90,7 @@ class Lifecycle:
                 "claim_token": claim_token,
                 "purpose": purpose,
             },
+            **limits,
         )
         token = result.get("material", {}).get("secret")
         if not isinstance(token, str) or not token:
@@ -147,6 +153,8 @@ class Lifecycle:
         )
 
     def step(self, state):
+        if self.stop.is_set():
+            return "wait"
         run = state["run"]
         if run["run"].get("cancellation_requested_at"):
             return self.cancel(state)
@@ -171,34 +179,46 @@ class Lifecycle:
         except ApprovalRequired as exc:
             self.progress(state, "waiting", wait_reason=str(exc))
             return "approval"
-        except BackendInterrupted:
+        except (BackendInterrupted, ContextInterrupted):
             return "wait"
-        except (BackendError, BudgetExceeded, WorkspaceError) as exc:
+        except (BackendError, BudgetExceeded, WorkspaceError, ContextError) as exc:
             raise ReconciliationRequired(str(exc)) from None
         finally:
             current_tracker.reset(context_token)
+
+    def waiting_for_approval(self, state, client, run_id, token):
+        stage = "implementation" if state.get("saved_plan") else "research"
+        pending = state.get(stage, {}).get(run_id, {}).get("pending") or {}
+        if (
+            pending.get("kind") != "action"
+            or pending.get("started")
+            or pending.get("execution_started")
+        ):
+            return False
+        operation = state.get("request")
+        path = f"/api/v1/runner/runs/{run_id}/approvals/"
+        if operation and operation["path"] != path:
+            return False
+        action = ActionSpec.from_data(pending["data"]["action"])
+        broker = ApprovalBroker(client, run_id, token)
+        approval = broker.request(action, pending["operation_id"])
+        if approval["decision"] == "approved":
+            return False
+        self.progress(
+            state,
+            "waiting",
+            {"approval_id": approval["id"], "decision": approval["decision"]},
+            "approval",
+        )
+        return True
 
     def _step(self, state, run_id):
         run = state["run"]
         item, snapshot = run["item"], run["run"]["configuration_snapshot"]
         token = item["claim_token"]
         client = DurableClient(self.client, self.journal, state)
-        client.recover()
-        if isinstance(self.workspaces, WorkspaceManager):
-            from .delivery import SupervisorGit
-
-            repository_token = self.secret(run_id, token, "repository")
-            repository_git = SupervisorGit(token=repository_token)
-            self.workspaces.remote_git = (
-                lambda arguments, cwd=None: repository_git.command(
-                    arguments, item["repository_url"], self.journal.directory, cwd
-                )
-            )
-        workspace = self.workspaces.prepare(run_id, item)
-        if hasattr(self.workspaces, "inspect_base"):
-            self.workspaces.inspect_base(workspace)
-        sources = SourceStore(workspace.directory / "sources")
-        store = DurableContextPlanStore(client, run_id, token, sources)
+        if self.waiting_for_approval(state, client, run_id, token):
+            return "approval"
         controls = snapshot["global"]
         limits = {
             stage: controls[f"{stage}_timeout_seconds"]
@@ -207,6 +227,59 @@ class Lifecycle:
         budget = ActiveBudget(
             self.journal, state, run_id, controls["task_timeout_seconds"], limits
         )
+
+        def local_checkpoint():
+            return not self.stop.is_set() and budget.checkpoint()
+
+        def checkpoint():
+            return local_checkpoint() and self.checkpoint() is True
+
+        if (state.get("request") or {}).get("status") == "pending":
+            budget.run(
+                None,
+                lambda remaining: client.recover(
+                    timeout=remaining, checkpoint=local_checkpoint
+                ),
+            )
+
+        def prepare(remaining):
+            execution = current_execution.set(
+                (time.monotonic() + remaining, local_checkpoint, checkpoint)
+            )
+            try:
+                if isinstance(self.workspaces, WorkspaceManager):
+                    from .delivery import SupervisorGit
+
+                    if not checkpoint():
+                        raise BackendInterrupted(
+                            "Workspace preparation is waiting at a control checkpoint."
+                        )
+                    repository_token = self.secret(
+                        run_id,
+                        token,
+                        "repository",
+                        timeout=budget.remaining(None),
+                        checkpoint=local_checkpoint,
+                    )
+                    repository_git = SupervisorGit(token=repository_token)
+                    self.workspaces.remote_git = (
+                        lambda arguments, cwd=None: repository_git.command(
+                            arguments,
+                            item["repository_url"],
+                            self.journal.directory,
+                            cwd,
+                        )
+                    )
+                workspace = self.workspaces.prepare(run_id, item)
+                if hasattr(self.workspaces, "inspect_base"):
+                    self.workspaces.inspect_base(workspace)
+                return workspace
+            finally:
+                current_execution.reset(execution)
+
+        workspace = budget.run(None, prepare)
+        sources = SourceStore(workspace.directory / "sources")
+        store = DurableContextPlanStore(client, run_id, token, sources)
         delivery = state.get("delivery")
         if delivery or state.get("delivery_ready"):
             if self.delivery_factory:
@@ -228,20 +301,41 @@ class Lifecycle:
             if result["status"] == "failed":
                 return self.fail(state, result["error"])
             return result["status"]
-        issue = (
-            GitHubContextClient(self.secret(run_id, token, "issue"))
-            if item["source"] != "manual"
-            else None
-        )
+        issue = None
+        if item["source"] != "manual":
+            issue_token = budget.run(
+                "research",
+                lambda remaining: self.secret(
+                    run_id,
+                    token,
+                    "issue",
+                    timeout=remaining,
+                    checkpoint=local_checkpoint,
+                ),
+            )
+            issue = GitHubContextClient(issue_token)
         broker = ApprovalBroker(client, run_id, token)
         if not state.get("context"):
             self.progress(state, "context")
-            saved = store.refresh(
-                item,
-                workspace.base_revision,
-                issue_client=issue,
-                resolved_base_branch=workspace.resolved_base_branch,
-            )
+            try:
+                saved = budget.run(
+                    "research",
+                    lambda remaining: store.refresh(
+                        item,
+                        workspace.base_revision,
+                        issue_client=issue,
+                        resolved_base_branch=workspace.resolved_base_branch,
+                        deadline=time.monotonic() + remaining,
+                        checkpoint=checkpoint,
+                        inflight_checkpoint=local_checkpoint,
+                    ),
+                )
+            except ContextInterrupted:
+                if budget.remaining("research") <= 0:
+                    raise BudgetExceeded(
+                        "Initial context exhausted its active research budget."
+                    ) from None
+                raise
             state["context"] = saved
             self.journal.save(state)
             return "continue"

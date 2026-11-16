@@ -38,7 +38,7 @@ class ActiveBudget:
         self.started: float | None = None
         self.stage: str | None = None
 
-    def remaining(self, stage: str) -> float:
+    def remaining(self, stage: str | None) -> float:
         if self.data["active"] is not None and self.started is None:
             raise BudgetExceeded(
                 "Interrupted active budget requires recovery before more execution."
@@ -46,6 +46,8 @@ class ActiveBudget:
         elapsed = 0.0 if self.started is None else max(0.0, self.clock() - self.started)
         stage_elapsed = elapsed if stage == self.stage else 0.0
         total_left = self.limits["total"] - self.data["total"] - elapsed
+        if stage is None:
+            return max(0.0, total_left)
         stage_left = (
             self.limits["stages"][stage]
             - self.data["stages"].get(stage, 0.0)
@@ -54,14 +56,14 @@ class ActiveBudget:
         return max(0.0, min(total_left, stage_left))
 
     def checkpoint(self) -> bool:
-        if self.stage is None:
+        if self.started is None:
             return (
                 self.data["active"] is None
                 and self.data["total"] < self.limits["total"]
             )
         return self.remaining(self.stage) > 0
 
-    def run(self, stage: str, operation: Callable[[float], T]) -> T:
+    def run(self, stage: str | None, operation: Callable[[float], T]) -> T:
         remaining = self.remaining(stage)
         if remaining <= 0:
             raise BudgetExceeded("Active task or stage timeout exhausted.")
@@ -78,7 +80,10 @@ class ActiveBudget:
         finally:
             elapsed = max(0.0, self.clock() - self.started)
             self.data["total"] += elapsed
-            self.data["stages"][stage] = self.data["stages"].get(stage, 0.0) + elapsed
+            if stage is not None:
+                self.data["stages"][stage] = (
+                    self.data["stages"].get(stage, 0.0) + elapsed
+                )
             self.data["active"] = None
             self.started, self.stage = None, None
             self.journal.save(self.state)

@@ -88,16 +88,30 @@ def cancellation(request, run_id):
 def operation_detail(request, run_id, operation_id):
     from .api import evidence_data
     from .approvals import approval_data
-    from .plan_api import document_data
+    from .plan_api import document_data, request_bearer
 
     def operation():
         run = owned_run(request.runner_identity, run_id)
         context = run.contexts.filter(operation_id=operation_id).first()
         if context:
-            return JsonResponse({"response": {"context": document_data(context)}})
+            return JsonResponse(
+                {
+                    "response": {
+                        "context": document_data(
+                            context, bearer=request_bearer(request)
+                        )
+                    }
+                }
+            )
         plan = run.plans.filter(operation_id=operation_id).first()
         if plan:
-            return JsonResponse({"response": {"plan": document_data(plan)}})
+            return JsonResponse(
+                {
+                    "response": {
+                        "plan": document_data(plan, bearer=request_bearer(request))
+                    }
+                }
+            )
         approval = run.approvals.filter(operation_id=operation_id).first()
         if approval:
             return JsonResponse({"response": {"approval": approval_data(approval)}})
@@ -108,8 +122,8 @@ def operation_detail(request, run_id, operation_id):
             plan = run.plans.get(pk=evidence.payload["plan_id"])
             context = run.contexts.get(pk=evidence.payload["context_id"])
             response = {
-                "plan": document_data(plan),
-                "context": document_data(context),
+                "plan": document_data(plan, bearer=request_bearer(request)),
+                "context": document_data(context, bearer=request_bearer(request)),
                 "actions_require_approval": True,
             }
         else:

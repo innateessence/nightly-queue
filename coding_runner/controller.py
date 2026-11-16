@@ -89,7 +89,9 @@ class Controller:
         if remote["run"].get("cancellation_requested_at"):
             self.journal.save(state)
             return False
+        self.check_shutdown()
         configuration = self.client.configuration()
+        self.check_shutdown()
         self.gates.adapters.update(
             self.backends.usage_adapters(
                 configuration["accounts"], ScopedCredentials(self.client)
@@ -98,18 +100,27 @@ class Controller:
         decision = self.gates.evaluate(
             configuration, state, checkpoint="stage", run_id=run_id
         )
+        self.check_shutdown()
         self.client.gate_report(decision.data())
+        self.check_shutdown()
         return decision.allowed
 
     def reconcile(self, state: dict[str, Any]) -> None:
         self.check_shutdown()
-        RecoveryCoordinator(self.client, self.journal, self.gates).reconcile(state)
+        RecoveryCoordinator(
+            self.client, self.journal, self.gates, check_shutdown=self.check_shutdown
+        ).reconcile(state)
 
     def cycle(self, state, configuration):
+        self.check_shutdown()
         self.state = state
-        recovery = RecoveryCoordinator(self.client, self.journal, self.gates)
+        recovery = RecoveryCoordinator(
+            self.client, self.journal, self.gates, check_shutdown=self.check_shutdown
+        )
         recovery.bind(state)
+        self.check_shutdown()
         recovery.reconcile(state)
+        self.check_shutdown()
         lifecycle = self.lifecycle_factory(
             self.client, self.journal, self.backends, self.checkpoint, stop=self.stop
         )
@@ -139,17 +150,22 @@ class Controller:
                 self.journal.save(state)
                 return "completed"
             return lifecycle.step(state)
+        self.check_shutdown()
         if self.maintenance and self.maintenance(state, configuration) is not True:
             return "wait"
+        self.check_shutdown()
         self.gates.adapters.update(
             self.backends.usage_adapters(
                 configuration["accounts"], ScopedCredentials(self.client)
             )
         )
         decision = self.gates.evaluate(configuration, state, checkpoint="claim")
+        self.check_shutdown()
         self.client.gate_report(decision.data())
+        self.check_shutdown()
         if not decision.allowed or not lifecycle.ready(configuration):
             return "wait"
+        self.check_shutdown()
         run_id = str(uuid4())
         self.gates.prepare_claim(state, run_id, decision)
         payload = {
@@ -157,6 +173,7 @@ class Controller:
             "configuration_revision": configuration["revision"],
         }
         self.journal.prepare(state, run_id, "claim", payload)
+        self.check_shutdown()
         result = self.client.request("POST", "/api/v1/runner/runs/claim/", payload)
         recovery.accept_claim(state, result)
         return "claimed" if state.get("run") else "empty"
@@ -170,6 +187,7 @@ class Controller:
         while not self.stop.is_set():
             try:
                 configuration = self.probe(state)
+                self.check_shutdown()
                 if check:
                     operation = state.get("operation")
                     if operation and operation.get("status") == "pending":
