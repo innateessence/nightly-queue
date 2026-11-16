@@ -163,6 +163,8 @@ class Controller:
 
     def run(self, check: bool = False) -> None:
         state = self.journal.load()
+        if state.get("controller_secret"):
+            self.client.controller_secret = state["controller_secret"]
         self.state = state
         delay = 1
         while not self.stop.is_set():

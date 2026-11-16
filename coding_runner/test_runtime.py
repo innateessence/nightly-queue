@@ -382,9 +382,11 @@ class ClientTests(ServerCase):
         self.server.responses[path] = (200, {"run": {"state": "active"}})
         with Journal(self.path) as journal:
             state = journal.load()
+            state["controller_secret"] = "a" * 64
             journal.prepare(state, run_id, "claim", {"run_id": run_id})
         with Journal(self.path) as journal:
             Controller(self.client, journal).run(check=True)
+            self.assertEqual(self.client.controller_secret, "a" * 64)
             self.assertEqual(
                 journal.load()["operation"]["reconciliation"]["run"]["state"], "active"
             )
