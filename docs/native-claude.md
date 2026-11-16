@@ -174,7 +174,8 @@ python -m vibearr_runner.claude_acceptance \
   --evidence /var/lib/vibearr/claude-acceptance.json
 ```
 
-This makes three bounded real native calls: edit/test with executor restart and
+The state directory must be new and empty, and an existing evidence file is
+never overwritten. This makes three bounded real native calls: edit/test with executor restart and
 duplicate-start reconciliation, cancellation during foreground tool activity,
 and selected-account auth proof. It verifies the export using an independent
 offline test and checks project hook/MCP markers stayed inert. It fails on

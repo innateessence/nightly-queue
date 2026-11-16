@@ -5,8 +5,10 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
+import stat
 import time
 from uuid import uuid4
 
@@ -307,8 +309,23 @@ def main():
     parser.add_argument("--model", required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     args = parser.parse_args()
-    if args.credential_file.stat().st_mode & 0o077:
-        parser.error("Native credential file must be private (mode 0600).")
+    metadata = args.credential_file.lstat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_mode & 0o077
+        or metadata.st_uid != os.getuid()
+    ):
+        parser.error(
+            "Native credential file must be an owned private regular file (mode 0600)."
+        )
+    if args.state.is_symlink() or args.state.exists() and any(args.state.iterdir()):
+        parser.error(
+            "Use a new empty owned state directory, separate from every running executor."
+        )
+    if args.evidence.exists() or args.evidence.is_symlink():
+        parser.error(
+            "Choose a new evidence file; existing files are never overwritten."
+        )
     credential = {
         "credential": {"id": 1, "provider": "claude", "kind": args.kind, "version": 1},
         "material": {"secret": args.credential_file.read_text().strip()},
@@ -321,7 +338,9 @@ def main():
         model=args.model,
     )
     content = json.dumps(report, sort_keys=True).encode() + b"\n"
-    args.evidence.write_bytes(content)
+    with args.evidence.open("xb") as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        stream.write(content)
     print(
         json.dumps(
             {

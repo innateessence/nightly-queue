@@ -1,6 +1,9 @@
 import importlib.util
 import json
+from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from .native_conformance import ExecutorFixture, NativeAdapterConformance
@@ -289,3 +292,61 @@ class ClaudeEventTests(unittest.TestCase):
         )
         self.assertTrue(parser.completed)
         self.assertTrue(parser.failed)
+
+
+class ClaudeAcceptanceCliTests(unittest.TestCase):
+    def arguments(self, root):
+        key = root / "key"
+        key.write_text("fixture-private-api-key-0123456789")
+        key.chmod(0o600)
+        return [
+            "claude_acceptance",
+            "--image",
+            "sha256:" + "a" * 64,
+            "--database-image",
+            "sha256:" + "b" * 64,
+            "--state",
+            str(root / "state"),
+            "--credential-file",
+            str(key),
+            "--model",
+            "claude-sonnet-5-5",
+            "--evidence",
+            str(root / "evidence.json"),
+        ]
+
+    def test_existing_executor_state_is_rejected_before_qualification_or_model_call(
+        self,
+    ):
+        from vibearr_runner import claude_acceptance
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            arguments = self.arguments(root)
+            (root / "state").mkdir()
+            (root / "state/active-operation").write_text("owned elsewhere")
+            with (
+                patch("sys.argv", arguments),
+                patch.object(claude_acceptance, "acceptance") as live,
+            ):
+                with self.assertRaises(SystemExit) as result:
+                    claude_acceptance.main()
+                self.assertEqual(result.exception.code, 2)
+                live.assert_not_called()
+
+    def test_existing_evidence_is_never_overwritten_or_used_to_start_a_model_call(self):
+        from vibearr_runner import claude_acceptance
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            arguments = self.arguments(root)
+            (root / "evidence.json").write_text("preserve")
+            with (
+                patch("sys.argv", arguments),
+                patch.object(claude_acceptance, "acceptance") as live,
+            ):
+                with self.assertRaises(SystemExit) as result:
+                    claude_acceptance.main()
+                self.assertEqual(result.exception.code, 2)
+                live.assert_not_called()
+            self.assertEqual((root / "evidence.json").read_text(), "preserve")
