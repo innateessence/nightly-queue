@@ -22,6 +22,10 @@ class ConflictError(APIError):
     pass
 
 
+class SupersededSourceError(ConflictError):
+    pass
+
+
 class NotFoundError(APIError):
     pass
 
@@ -165,13 +169,21 @@ class Client:
                 return data
         except HTTPError as exc:
             status = exc.code
-            exc.close()
-            if status == 401 or status == 403:
-                raise AuthenticationError("Runner authentication rejected.") from None
             if status == 409:
+                try:
+                    superseded = self._superseded_source(request, exc)
+                finally:
+                    exc.close()
+                if superseded:
+                    raise SupersededSourceError(
+                        "A newer source observation requires fresh collection."
+                    ) from None
                 raise ConflictError(
                     "Runner operation conflicted; reconcile before retrying."
                 ) from None
+            exc.close()
+            if status == 401 or status == 403:
+                raise AuthenticationError("Runner authentication rejected.") from None
             if status == 404:
                 raise NotFoundError("Runner resource was not found.") from None
             if mutation and status >= 500:
@@ -186,6 +198,28 @@ class Client:
             raise response_error(
                 "Invalid queue response; mutation outcomes require reconciliation."
             ) from None
+
+    def _superseded_source(self, request: Request, error: HTTPError) -> bool:
+        path = urlsplit(request.full_url).path
+        if request.get_method() != "POST" or not path.endswith("/source/refresh/"):
+            return False
+        if (
+            error.headers is None
+            or error.headers.get_content_type() != "application/json"
+        ):
+            return False
+        try:
+            limit = min(self.max_bytes, 4096)
+            content = error.read(limit + 1)
+            if len(content) > limit:
+                return False
+            data = json.loads(content)
+        except (OSError, HTTPException, ValueError, RecursionError):
+            return False
+        return (
+            isinstance(data, dict)
+            and data.get("code") == "source_observation_superseded"
+        )
 
     def identity(self) -> dict[str, Any]:
         return self.request("GET", "/api/v1/runner/identity/")

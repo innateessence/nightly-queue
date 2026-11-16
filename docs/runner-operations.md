@@ -68,6 +68,15 @@ requests retain ownership until backend and child-process termination is confirm
 Pause, schedule, and reserve changes apply at safe checkpoints. Resume those
 controls in Settings; unrelated waits or unknown outcomes still require recovery.
 
+An issue import can supersede an in-flight source read even when repository
+identity is unchanged. The API returns `409 source_observation_superseded` only
+for a newer observation of the same authority. The native supervisor pauses its
+owned operations and collects fresh provider context, with at most three attempts
+and journaled backoff across restarts. Success resumes the same operations without
+extending their deadlines. Exhaustion terminates normally before releasing the
+claim. Changed repository/owner/default branch, permissions, and other source
+rejections retain their existing fences; a generic conflict is not retry permission.
+
 For a missing or damaged volume, stop the old supervisor and children first.
 Restore the corresponding protected volume backup. An active server run with no
 matching journal or private controller proof fails closed; neither elapsed time,

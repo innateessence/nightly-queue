@@ -2,7 +2,7 @@ import copy
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from threading import Barrier
+from threading import Barrier, Event
 from unittest.mock import patch
 from uuid import UUID, uuid4, uuid5
 
@@ -975,6 +975,56 @@ class NativeProtocolTests(NativeProtocolMixin, TestCase):
 
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
 class NativeProtocolConcurrencyTests(NativeProtocolMixin, TransactionTestCase):
+    def test_import_can_supersede_inflight_source_read_without_mutating_run(self):
+        from work_queue.services import (
+            accept_repository_observation,
+            repository_authority_state,
+        )
+
+        started, imported = Event(), Event()
+        observation = {
+            "repository_id": 123,
+            "owner_id": 456,
+            "repository_url": self.project.repository_url,
+            "default_branch": "main",
+        }
+
+        def importer():
+            try:
+                self.assertTrue(started.wait(5))
+                current = Project.objects.get(pk=self.project.pk)
+                accept_repository_observation(
+                    project=current,
+                    repository=observation,
+                    expected=repository_authority_state(current),
+                )
+            finally:
+                connections.close_all()
+                imported.set()
+
+        def provider(*args, **kwargs):
+            started.set()
+            self.assertTrue(imported.wait(5))
+            return observation
+
+        original = copy.deepcopy(self.run.source_snapshot)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(importer)
+            with patch("work_queue.github.repository_metadata", side_effect=provider):
+                response = self.post(
+                    "runner_refresh_source",
+                    {"claim_token": str(self.claim), "mode": "initial"},
+                )
+            future.result(timeout=10)
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(response.json()["code"], "source_observation_superseded")
+        self.run.refresh_from_db()
+        self.project.refresh_from_db()
+        self.assertEqual(self.run.source_snapshot, original)
+        self.assertEqual(self.run.state, "active")
+        self.assertEqual(self.project.github_authority_version, 1)
+        self.assertFalse(self.run.evidence.exists())
+
     def parallel(self, first, second):
         barrier = Barrier(2)
 
@@ -1095,6 +1145,79 @@ class NativeProtocolConcurrencyTests(NativeProtocolMixin, TransactionTestCase):
 
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
 class NativeHTTPTests(NativeProtocolMixin, TestCase):
+    def test_changed_owner_is_not_a_retryable_source_observation(self):
+        from work_queue.services import (
+            accept_repository_observation,
+            repository_authority_state,
+        )
+
+        old = {
+            "repository_id": 123,
+            "owner_id": 456,
+            "repository_url": self.project.repository_url,
+            "default_branch": "main",
+        }
+
+        def newer_owner(*args, **kwargs):
+            current = Project.objects.get(pk=self.project.pk)
+            accept_repository_observation(
+                project=current,
+                repository={**old, "owner_id": 789},
+                expected=repository_authority_state(current),
+            )
+            return old
+
+        with patch("work_queue.github.repository_metadata", side_effect=newer_owner):
+            response = self.post(
+                "runner_refresh_source",
+                {"claim_token": str(self.claim), "mode": "initial"},
+            )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertNotIn("code", response.json())
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.github_owner_id, 789)
+
+    def test_identical_import_observation_requests_fresh_source_collection(self):
+        from work_queue.services import (
+            accept_repository_observation,
+            repository_authority_state,
+        )
+
+        observation = {
+            "repository_id": 123,
+            "owner_id": 456,
+            "repository_url": self.project.repository_url,
+            "default_branch": "main",
+        }
+
+        def newer_import(*args, **kwargs):
+            current = Project.objects.get(pk=self.project.pk)
+            accept_repository_observation(
+                project=current,
+                repository=observation,
+                expected=repository_authority_state(current),
+            )
+            return observation
+
+        original_source = copy.deepcopy(self.run.source_snapshot)
+        with patch("work_queue.github.repository_metadata", side_effect=newer_import):
+            response = self.post(
+                "runner_refresh_source",
+                {"claim_token": str(self.claim), "mode": "initial"},
+            )
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(response.json()["code"], "source_observation_superseded")
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.source_snapshot, original_source)
+        self.assertEqual(self.run.state, "active")
+        self.assertFalse(self.run.evidence.exists())
+        with patch("work_queue.github.repository_metadata", return_value=observation):
+            fresh = self.post(
+                "runner_refresh_source",
+                {"claim_token": str(self.claim), "mode": "initial"},
+            )
+        self.assertEqual(fresh.status_code, 200, fresh.content)
+
     def test_native_initial_source_http_observes_manual_repository(self):
         observation = {
             "repository_id": 123,
