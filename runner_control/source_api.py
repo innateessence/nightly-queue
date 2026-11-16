@@ -4,7 +4,10 @@ from django.views.decorators.debug import sensitive_variables
 
 from vibearr_app.api import read_body
 from work_queue.github import GitHubAPIError
-from work_queue.services import refresh_issue_for_launch
+from work_queue.services import (
+    refresh_issue_for_launch,
+    RepositoryObservationSuperseded,
+)
 
 from .api import run_response
 from .auth import runner_api_view
@@ -51,6 +54,14 @@ def refresh_source(request, run_id):
                 runner=request.runner_identity,
                 run_id=run_id,
                 mode=mode,
+            )
+        except RepositoryObservationSuperseded:
+            return JsonResponse(
+                {
+                    "code": "source_observation_superseded",
+                    "error": "A newer repository observation superseded this read; collect fresh source context.",
+                },
+                status=409,
             )
         except GitHubAPIError:
             return JsonResponse(
