@@ -12,7 +12,7 @@ from .journal import Journal
 from .processes import ProcessTracker, current_execution, current_tracker
 from .recovery import DurableClient, DurableContextPlanStore, ReconciliationRequired
 from .research import ResearchStage
-from .sandbox import ApprovedExecutor, probe_sandbox
+from .sandbox import ApprovedExecutor
 from .workspaces import SourceStore, WorkspaceError, WorkspaceManager
 
 
@@ -46,46 +46,8 @@ class Lifecycle:
         )
 
     def ready(self, configuration):
-        if configuration.get("execution_ready") is not True:
-            return False
-        from .release import matches_deployment
-
-        proof = configuration.get("release_verification", {})
-        if not matches_deployment(proof):
-            return False
-        if proof.get("runner_id") != self.journal.load().get("runner_id"):
-            return False
-        for account in proof.get("accounts", []):
-            if self.stop.is_set():
-                return False
-            backend = self.backends.create(
-                account["backend"], ScopedCredentials(self.client)
-            )
-            readiness = backend.readiness(account)
-            caps = readiness.capabilities
-            valid = (
-                readiness.ready
-                and readiness.authenticated
-                and caps.research
-                and caps.implementation
-            )
-            if (
-                not valid
-                or caps.native_tools
-                or caps.transport != "structured_proposals"
-                or not caps.graceful_interrupt
-            ):
-                return False
-        if not configuration["accounts"] or any(
-            project["errors"] for project in configuration["projects"]
-        ):
-            return False
-        if self.stop.is_set():
-            return False
-        probe = self.journal.directory / "sandbox-probe"
-        probe.mkdir(mode=0o700, exist_ok=True)
-        probe_sandbox(probe)
-        return True
+        # Native runtime/adapter qualification replaces the retired proposal path.
+        return False
 
     def secret(self, run_id, claim_token, purpose, **limits):
         result = self.client.request(
@@ -174,6 +136,13 @@ class Lifecycle:
             )["status"]
         if state.get("failure"):
             return self.fail(state, state["failure"])
+        if (
+            run["run"].get("configuration_snapshot", {}).get("execution_kind")
+            == "native"
+        ):
+            raise ReconciliationRequired(
+                "Native task dispatch is not installed; legacy proposals cannot execute native work."
+            )
         if not self.checkpoint():
             return "wait"
         context_token = current_tracker.set(ProcessTracker(self.journal, state))

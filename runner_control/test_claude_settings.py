@@ -45,7 +45,7 @@ class ClaudeSettingsTests(TestCase):
 
     def test_project_inherited_claude_backend_rejects_bad_model(self):
         RunnerSettings.objects.update(
-            research_backend="claude", research_model="claude-sonnet-5-5"
+            implementation_backend="claude", implementation_model="claude-sonnet-5-5"
         )
         project = Project.objects.create(
             name="Claude", repository_url="https://github.com/example/repo"
@@ -53,7 +53,7 @@ class ClaudeSettingsTests(TestCase):
         ProjectRunnerSettings.objects.create(
             project=project,
             overrides={
-                "research_model": {
+                "implementation_model": {
                     "mode": "replace",
                     "value": "https://untrusted/model",
                 }
@@ -63,7 +63,8 @@ class ClaudeSettingsTests(TestCase):
         errors = document["projects"][0]["errors"]
         self.assertTrue(
             any(
-                error["field"] == "research_model" and error["code"] == "invalid_model"
+                error["field"] == "implementation_model"
+                and error["code"] == "invalid_model"
                 for error in errors
             )
         )
@@ -76,7 +77,7 @@ class ClaudeSettingsTests(TestCase):
                 form.fields[f"{stage}_model"].widget.attrs["list"],
                 "runner-claude-models",
             )
-            self.assertIn("Messages API", form.fields[f"{stage}_model"].help_text)
+            self.assertIn("Native adapters", form.fields[f"{stage}_model"].help_text)
 
     def test_project_model_choices_are_independent(self):
         form = ProjectRunnerSettingsForm()
