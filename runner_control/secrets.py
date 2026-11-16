@@ -5,7 +5,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_variables
 
 from credentials.models import Credential, RunnerPreflightGrant
-from nightly_queue.api import read_body, string_field
+from vibearr_app.api import read_body, string_field
 
 from .auth import runner_api_view
 from .configuration import configuration_document
@@ -124,11 +124,11 @@ def secret_document(data, runner):
                 )
         except ImproperlyConfigured:
             unavailable(
-                "Credential encryption is unavailable; configure NQ_CREDENTIAL_KEY."
+                "Credential encryption is unavailable; configure VIBEARR_CREDENTIAL_KEY."
             )
         except ValidationError:
             unavailable(
-                "Unable to decrypt or validate the selected credential; replace it or check NQ_CREDENTIAL_KEY."
+                "Unable to decrypt or validate the selected credential; replace it or check VIBEARR_CREDENTIAL_KEY."
             )
         return {
             "schema_version": 1,

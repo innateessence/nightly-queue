@@ -1,6 +1,6 @@
 from django.db import transaction
 
-from coding_runner.policy import ExecutionPolicy, PolicyError
+from vibearr_runner.policy import ExecutionPolicy, PolicyError
 
 from .configuration import effective_project_configuration
 from .models import Run

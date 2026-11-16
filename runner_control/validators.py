@@ -83,7 +83,7 @@ def validate_json_text(value):
 
 
 def validate_execution_policy(value):
-    from coding_runner.policy import ExecutionPolicy, PolicyError
+    from vibearr_runner.policy import ExecutionPolicy, PolicyError
 
     try:
         ExecutionPolicy.from_data(value)
@@ -135,7 +135,7 @@ def validate_overrides(value):
 
 def validate_backend_model(backend, model):
     if backend == "opencode" and model:
-        from coding_runner.opencode_connection import valid_model
+        from vibearr_runner.opencode_connection import valid_model
 
         if not valid_model(model):
             raise ValidationError(

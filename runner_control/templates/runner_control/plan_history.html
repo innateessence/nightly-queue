@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Runs · Nightly{% endblock %}
+{% block title %}Runs · vibearr{% endblock %}
 {% block heading %}<section class="page-heading"><div><p class="eyebrow">CODING RUNNER</p><h1>Run history</h1><p class="subtitle">Stages, waits, plans, approvals, validation, and delivery evidence.</p></div></section>{% endblock %}
 {% block content %}
 <section class="panel plan-section"><h2>Whole queue status</h2><p>{{ configuration.execution_ready|yesno:"Release qualified,Release verification blocks normal execution" }} · Enabled {{ configuration.global.enabled|yesno:"yes,no" }} · Paused {{ configuration.global.paused|yesno:"yes,no" }}</p><p>{{ configuration.readiness_reason }}</p>{% for health in health_reports %}{% if health.presentation_error %}<p role="status">{{ health.presentation_error }}</p>{% else %}<p>{{ health.runner.name }} storage · {{ health.report.free_bytes|filesizeformat }} free · Updated {{ health.received_at }} · Removed {{ health.report.removed }} · Missing {{ health.report.missing }} · Busy {{ health.report.busy }}</p>{% if health.report.blocking_reason %}<p role="status">{{ health.report.blocking_reason }}</p>{% endif %}{% endif %}{% endfor %}{% include "runner_control/_gates.html" %}<p><a href="{% url 'api_settings' %}">Manage schedule, reserve, credentials and retention</a></p></section>

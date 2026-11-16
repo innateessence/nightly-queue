@@ -7,8 +7,8 @@ from django.db import transaction
 
 from credentials.models import Credential
 from projects.models import Project
-from coding_runner.policy import ExecutionPolicy
-from coding_runner.native_evidence import native_evidence_contract
+from vibearr_runner.policy import ExecutionPolicy
+from vibearr_runner.native_evidence import native_evidence_contract
 
 from .settings_models import ProjectRunnerSettings, RunnerSettings
 from .validators import OVERRIDE_FIELDS, validate_backend_model

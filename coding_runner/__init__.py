@@ -1,1 +1,1 @@
-"""Standalone HTTP supervisor; execution remains disabled."""
+"""Compatibility package; use vibearr_runner."""

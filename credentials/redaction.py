@@ -56,7 +56,7 @@ def selected_credential_values(references):
     except (ImproperlyConfigured, ValidationError, ValueError, TypeError, KeyError):
         raise ValidationError(
             {
-                "credential": "Unable to redact selected credentials; check NQ_CREDENTIAL_KEY and credential material."
+                "credential": "Unable to redact selected credentials; check VIBEARR_CREDENTIAL_KEY and credential material."
             }
         ) from None
     return sorted({value for value in values if value}, key=len, reverse=True)

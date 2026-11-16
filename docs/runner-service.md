@@ -10,16 +10,16 @@ reconciliation if a journal operation is pending). The normal loop refreshes
 configuration without consuming work.
 
 Provision the separate runner identity with `manage.py provision_runner`, following
-its `--token-env` help. Put the same secret in the supervisor's `NQ_RUNNER_API_TOKEN`;
-`NQ_API_TOKEN` remains the independent general CLI credential. Configure bootstrap
+its `--token-env` help. Put the same secret in the supervisor's `VIBEARR_RUNNER_API_TOKEN`;
+`VIBEARR_API_TOKEN` remains the independent general CLI credential. Configure bootstrap
 values in an untracked environment file. Do not pass the database password,
 credential encryption key, issue-import secrets, or backend credentials to the
 supervisor.
 
 ```sh
-docker compose --profile runner build coding-runner
-docker compose --profile runner run --rm --no-deps coding-runner --check
-docker compose --profile runner up -d coding-runner
+docker compose --profile runner build vibearr-runner
+docker compose --profile runner run --rm --no-deps vibearr-runner --check
+docker compose --profile runner up -d vibearr-runner
 ```
 
 The queue application must be running and its migrations applied first. The
@@ -38,7 +38,9 @@ before controller ownership is released.
 
 ## State and recovery contract
 
-`runner-data` is the dedicated persistent volume at `/var/lib/coding-runner`.
+`runner-data` is the dedicated persistent volume at the configured state path.
+Fresh installs use `/var/lib/vibearr`; upgrades retain `/var/lib/coding-runner`
+unless explicitly migrated. See the [upgrade guide](vibearr-upgrade.md).
 The directory is mode 0700, and journal files are 0600. Journal writes flush the
 new file, replace atomically, then sync the directory. A process-held `flock`
 prevents a second controller from sharing that volume, including another
@@ -60,11 +62,11 @@ routine recovery action.
 
 ## Deployment boundary
 
-The separately built Python 3.12 image copies only `coding_runner/`, uses UID/GID
+The separately built Python 3.12 image copies `vibearr_runner/` and its `coding_runner/` compatibility package, uses UID/GID
 10001, pins its base digest and Git/GitHub CLI package versions, and does not
-install Django or the application requirements. `coding_runner/pyproject.toml`
+install Django or the application requirements. `vibearr_runner/pyproject.toml`
 is its independent dependency manifest; runtime dependencies are standard library
-only. `nq` retains its existing independent packaging and imports.
+only. `vibearr` is independently packaged; `nq` remains its compatibility command/import.
 
 Compose mounts only the named runner volume and an ephemeral `/tmp`. The
 filesystem is read-only, all Linux capabilities are dropped, privilege escalation
@@ -83,7 +85,7 @@ python3.12 -m unittest coding_runner.test_runtime
 python3.12 -m unittest nq.test_cli
 docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
   --cap-drop ALL --security-opt no-new-privileges:true \
-  --entrypoint python nightly-queue-coding-runner \
+  --entrypoint python vibearr-runner \
   -m unittest coding_runner.test_runtime
 ```
 

@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import JsonResponse
 
-from nightly_queue.api import api_view, read_body, string_field
+from vibearr_app.api import api_view, read_body, string_field
 from projects.api import project_data
 
 from .forms import QueueItemForm

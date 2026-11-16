@@ -6,11 +6,11 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from coding_runner.backend_transports import PROOF_PROTOCOL, TRANSPORTS
+from vibearr_runner.backend_transports import PROOF_PROTOCOL, TRANSPORTS
 
 from .models import ReleaseQualification, Run
 from .services import RunConflict, json_digest, lock_controller
-from coding_runner.release_evidence import valid_response_id, verify_boundary_workflow
+from vibearr_runner.release_evidence import valid_response_id, verify_boundary_workflow
 
 TRANSPORT = "codex-responses-structured-proposals-v1"
 CONTROL_FIELDS = {
@@ -268,7 +268,10 @@ def complete(entry_id, runner, report):
         )
     if (
         boundary.get("command")
-        != ["python", "-m", "coding_runner.verify", "--boundary"]
+        not in [
+            ["python", "-m", "vibearr_runner.verify", "--boundary"],
+            ["python", "-m", "coding_runner.verify", "--boundary"],
+        ]
         or boundary.get("exit_code") != 0
         or not boundary.get("output_digest")
     ):
@@ -443,7 +446,7 @@ def verify_model_responses(responses, required_accounts):
 
 def verify_opencode_receipt(row, required_accounts):
     from credentials.models import Credential
-    from coding_runner.opencode_connection import (
+    from vibearr_runner.opencode_connection import (
         validate_connection,
         valid_receipt_text,
     )

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# This script is intended to serve as the standard for how we test things before merging any branches for `nightly-queue`
+# This script is intended to serve as the standard for how we test things before merging any branches for `vibearr`
 # Typical usage is simply `bash test.sh`
 # If you supply any args, they are passed directly to `manage.py test` to run specific tests, e.g. `bash test.sh work_queue.tests`
 
@@ -11,7 +11,7 @@
 export COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 # These are the compose SERVICE names (not container names) so that
 # `docker compose exec <service>` works.
-DJANGO_SERVICE="nightly-queue"
+DJANGO_SERVICE="vibearr"
 WORKER_SERVICE="celery-worker"
 
 # Just fancy versions of echo
@@ -93,13 +93,13 @@ function run_tests() {
 
 function run_runner_checks() {
   local runner_image
-  runner_image="${COMPOSE_PROJECT_NAME:-nightly-queue}-runner-check"
+  runner_image="${COMPOSE_PROJECT_NAME:-vibearr}-runner-check"
   testing "independent runner image and portable runtime/Git/recovery acceptance"
-  docker build -f coding_runner/Dockerfile -t "$runner_image" . || fail "runner image build"
+  docker build -f vibearr_runner/Dockerfile -t "$runner_image" . || fail "runner image build"
   docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true \
     --network none --tmpfs /tmp:rw,nosuid,size=512m \
     --tmpfs /var/lib/coding-runner:rw,uid=10001,gid=10001,mode=700 \
-    --entrypoint python "$runner_image" -m coding_runner.verify || fail "runner checks"
+    --entrypoint python "$runner_image" -m vibearr_runner.verify || fail "runner checks"
   pass "portable runner image acceptance; full deployment boundary qualification is separate"
 }
 

@@ -6,8 +6,8 @@ from django.utils import timezone
 
 from credentials.redaction import redact_run_payload
 
-from coding_runner.context import ContextError, digest, discussion_digest
-from coding_runner.plans import revision, validate_context, validate_plan
+from vibearr_runner.context import ContextError, digest, discussion_digest
+from vibearr_runner.plans import revision, validate_context, validate_plan
 from work_queue.api import item_data
 
 from .models import ContextSnapshot, PlanVersion
