@@ -1,6 +1,7 @@
 """One owned merge, followed by idempotent provider completion reporting."""
 
 from datetime import datetime, timedelta, timezone
+import time
 from uuid import uuid4
 
 from .delivery import DeliveryError, DeliveryUnknown, DeliveryRejected
@@ -79,6 +80,12 @@ class NativeMerge:
     def step(self):
         if self.data.get("dispatched") or self.data.get("merge"):
             return self.reconcile()
+        if self.data.get("deadline") and datetime.now(
+            timezone.utc
+        ) >= datetime.fromisoformat(self.data["deadline"]):
+            raise DeliveryError("Required remote checks exceeded the bounded CI wait.")
+        if time.time() < self.data.get("next_poll_at", 0):
+            return "wait"
         if not self.host.checkpoint(force_source=True):
             return "wait"
         profile = merge_profile(
@@ -125,17 +132,11 @@ class NativeMerge:
                 context_digest=self.native["context"]["digest"],
             )
         except MergeWait as exc:
-            self.host.status("waiting", reason=str(exc), validation_status="passed")
-            return "wait"
+            return self.wait(str(exc))
         except MergeRepair as exc:
             return self.repair("ci_repair", str(exc))
         if raw.get("mergeable") is None:
-            self.host.status(
-                "waiting",
-                reason="Provider mergeability is still being calculated.",
-                validation_status="passed",
-            )
-            return "wait"
+            return self.wait("Provider mergeability is still being calculated.")
         if raw.get("mergeable") is not True or raw.get("mergeable_state") != "clean":
             return self.repair(
                 "ci_repair", "Provider reports a conflict or blocked merge."
@@ -192,12 +193,9 @@ class NativeMerge:
                 return self.repair(
                     "base_update", "Base moved during independent server authorization."
                 )
-            self.host.status(
-                "waiting",
-                reason="Provider authorization changed; reread current checks and AI reviews.",
-                validation_status="passed",
+            return self.wait(
+                "Provider authorization changed; reread current checks and configured gates."
             )
-            return "wait"
         if not self.host.checkpoint(force_source=True):
             return "wait"
         self.host.status(
@@ -215,6 +213,15 @@ class NativeMerge:
             # Only observation resolves ownership; this mutation is never replayed.
             pass
         return "continue"
+
+    def wait(self, reason):
+        interval = self.host.snapshot.get("global", {}).get(
+            "polling_interval_seconds", 30
+        )
+        self.data["next_poll_at"] = time.time() + max(15, min(300, interval))
+        self.host.save()
+        self.host.status("waiting", reason=reason, validation_status="passed")
+        return "wait"
 
     def reconcile(self):
         github = self.client(reconciliation=True)

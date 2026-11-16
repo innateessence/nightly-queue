@@ -239,8 +239,7 @@ class NativeDelivery:
         try:
             return NativeMerge(self.host).step()
         except MergeWait as exc:
-            self.host.status("waiting", reason=str(exc), validation_status="passed")
-            return "wait"
+            return NativeMerge(self.host).wait(str(exc))
         except MergeRepair as exc:
             return NativeMerge(self.host).repair("ci_repair", str(exc))
 

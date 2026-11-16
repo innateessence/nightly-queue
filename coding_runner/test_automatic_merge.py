@@ -474,6 +474,26 @@ class MergeHost:
 
 
 class MergeLifecycleTests(unittest.TestCase):
+    def test_cached_ci_wait_does_not_force_source_or_provider_reads(self):
+        host = MergeHost()
+        host.native["merge"] = {"next_poll_at": 4102444800.0}
+        with (
+            patch.object(NativeMerge, "client") as provider,
+            patch.object(host, "checkpoint") as source,
+        ):
+            self.assertEqual(NativeMerge(host).step(), "wait")
+        provider.assert_not_called()
+        source.assert_not_called()
+
+    def test_cached_ci_wait_still_enforces_original_deadline(self):
+        host = MergeHost()
+        host.native["merge"] = {
+            "next_poll_at": 4102444800.0,
+            "deadline": "2000-01-01T00:00:00+00:00",
+        }
+        with self.assertRaises(DeliveryError):
+            NativeMerge(host).step()
+
     def test_base_change_after_paused_unstarted_intent_releases_only_that_fence(self):
         host = MergeHost()
         host.native["candidate"] = {"workspace": workspace()}
