@@ -30,6 +30,7 @@ class ContextPlanStore:
         base_commit: str,
         *,
         issue_client: GitHubContextClient | None = None,
+        resolved_base_branch: str | None = None,
         reason: str = "Refresh discussion and inspect base before handoff",
         operation_id: str | None = None,
     ) -> dict[str, Any]:
@@ -42,15 +43,23 @@ class ContextPlanStore:
                 "Complete current issue context is required; no issue client is configured."
             )
         validate_context(document, item)
+        resolved = resolved_base_branch or item.get("base_branch")
+        if not resolved:
+            raise ValueError("Record the supervisor-resolved remote default branch.")
+        sources = register_context_sources(document, self.sources)
         saved = self._post(
             "contexts",
-            {"document": document, "base_commit": base_commit, "reason": reason},
+            {
+                "document": document,
+                "base_commit": base_commit,
+                "resolved_base_branch": resolved,
+                "reason": reason,
+            },
             operation_id,
         )["context"]
         if saved["digest"] != digest(saved["document"]):
             raise ValueError("Saved context digest does not match its document.")
-        # The authoritative server document includes redaction applied before saving.
-        register_context_sources(saved["document"], self.sources)
+        saved["sources"] = sources
         return saved
 
     def save_plan(
@@ -77,10 +86,16 @@ class ContextPlanStore:
         base_commit: str,
         *,
         issue_client: GitHubContextClient | None = None,
+        resolved_base_branch: str | None = None,
         operation_id: str | None = None,
     ) -> dict[str, Any]:
         # Refresh failure propagates; an older empty or complete snapshot is never substituted.
-        current = self.refresh(item, base_commit, issue_client=issue_client)
+        current = self.refresh(
+            item,
+            base_commit,
+            issue_client=issue_client,
+            resolved_base_branch=resolved_base_branch,
+        )
         return self._post(
             "handoff",
             {"context_id": current["id"], "base_commit": base_commit},

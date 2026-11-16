@@ -1,6 +1,10 @@
 """Versioned, strictly structured handoff documents. A plan grants no permission."""
 
 import re
+import json
+import os
+import tempfile
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -140,6 +144,7 @@ def validate_plan(
         "original_issue",
         "checkout",
         "inspected_base_commit",
+        "resolved_base_branch",
     }
     plan = exact(value, keys, "plan")
     if type(plan["schema_version"]) is not int or plan["schema_version"] != 1:
@@ -153,6 +158,12 @@ def validate_plan(
     original = context["issue"]["url"] if context["issue"] else None
     if plan["original_issue"] != original or plan["checkout"] != context["checkout"]:
         raise ContextError("Plan must preserve issue and checkout identity.")
+    text(plan["resolved_base_branch"], "resolved base branch")
+    if (
+        context["checkout"]["base_branch"]
+        and plan["resolved_base_branch"] != context["checkout"]["base_branch"]
+    ):
+        raise ContextError("Resolved base must preserve the requested branch.")
     if revision(plan["inspected_base_commit"]) != base_commit:
         raise ContextError("Plan base commit does not match its inspected context.")
     for key in ("problem", "expected_behavior", "approach"):
@@ -220,12 +231,42 @@ def register_context_sources(
 
     sources = []
     if context["issue"] is None:
-        entries = [("operator", "manual-task", context)]
+        entries = [
+            (
+                "operator",
+                "manual-task",
+                {key: value for key, value in context.items() if key != "fetched_at"},
+            )
+        ]
     else:
         entries = [("issue", context["issue"]["url"], context["issue"])]
         entries.extend(
             ("comment", comment["url"], comment) for comment in context["comments"]
         )
+    directory = getattr(store, "directory", None)
+    if isinstance(directory, Path):
+        manifest = directory / "context-sources.json"
+        previous = json.loads(manifest.read_text()) if manifest.exists() else []
+        current = [[kind, reference] for kind, reference, _ in entries]
+        for kind, reference in previous:
+            if [kind, reference] not in current:
+                store.register(
+                    kind,
+                    reference,
+                    canonical_bytes({"removed_from_current_context": True}),
+                )
+        descriptor, temporary = tempfile.mkstemp(
+            prefix="context-sources-", dir=directory
+        )
+        try:
+            with os.fdopen(descriptor, "w") as stream:
+                json.dump(current, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, manifest)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
     for kind, reference, content in entries:
         actual_digest = store.register(kind, reference, canonical_bytes(content))
         sources.append({"kind": kind, "reference": reference, "digest": actual_digest})

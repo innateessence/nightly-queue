@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
 
 from nightly_queue.api import read_body, string_field
 
@@ -12,19 +13,21 @@ MAX_CONTEXT_BYTES = 4 * 1024 * 1024
 MAX_PLAN_BYTES = 256 * 1024
 
 
-def document_data(entry):
+def document_data(entry, *, include_document=True):
     result = {
         "id": str(entry.pk),
         "operation_id": str(entry.operation_id),
-        "document": entry.document,
         "digest": entry.digest,
         "reason": entry.reason,
         "created_at": entry.created_at.isoformat(),
     }
+    if include_document:
+        result["document"] = entry.document
     if hasattr(entry, "sequence"):
         result.update(
             sequence=entry.sequence,
             inspected_base_commit=entry.inspected_base_commit,
+            resolved_base_branch=entry.resolved_base_branch,
             discussion_digest=entry.discussion_digest,
             changes=entry.changes,
         )
@@ -52,24 +55,70 @@ def document_body(request, fields, limit):
     return safe
 
 
+def document_page(request, run, kind):
+    try:
+        after = int(request.GET.get("after", "0"))
+        if not 0 <= after < 2**31:
+            raise ValueError
+    except ValueError:
+        raise ValidationError(
+            {"after": "Send a nonnegative document cursor."}
+        ) from None
+    field = "sequence" if kind == "contexts" else "version"
+    entries = list(
+        getattr(run, kind).filter(**{field + "__gt": after}).order_by(field)[:11]
+    )
+    more = len(entries) > 10
+    entries = entries[:10]
+    return JsonResponse(
+        {
+            kind: [document_data(entry, include_document=False) for entry in entries],
+            "has_more": more,
+            "next_after": getattr(entries[-1], field) if more else None,
+        }
+    )
+
+
+@runner_api_view("GET")
+def context_detail(request, run_id, document_id):
+    def operation():
+        run = owned_run(request.runner_identity, run_id)
+        return JsonResponse(
+            {"context": document_data(get_object_or_404(run.contexts, pk=document_id))}
+        )
+
+    return run_response(operation)
+
+
+@runner_api_view("GET")
+def plan_detail(request, run_id, document_id):
+    def operation():
+        run = owned_run(request.runner_identity, run_id)
+        return JsonResponse(
+            {"plan": document_data(get_object_or_404(run.plans, pk=document_id))}
+        )
+
+    return run_response(operation)
+
+
 @runner_api_view("GET", "POST")
 def contexts(request, run_id):
     if request.method == "GET":
         return run_response(
-            lambda: JsonResponse(
-                {
-                    "contexts": [
-                        document_data(entry)
-                        for entry in owned_run(
-                            request.runner_identity, run_id
-                        ).contexts.all()
-                    ]
-                }
+            lambda: document_page(
+                request, owned_run(request.runner_identity, run_id), "contexts"
             )
         )
     data = document_body(
         request,
-        ["claim_token", "operation_id", "document", "base_commit", "reason"],
+        [
+            "claim_token",
+            "operation_id",
+            "document",
+            "base_commit",
+            "resolved_base_branch",
+            "reason",
+        ],
         MAX_CONTEXT_BYTES,
     )
     kwargs = {
@@ -79,6 +128,9 @@ def contexts(request, run_id):
         "operation_id": data["operation_id"],
         "document": data.get("document"),
         "base_commit": string_field(data, "base_commit", max_length=64),
+        "resolved_base_branch": string_field(
+            data, "resolved_base_branch", max_length=200
+        ),
         "reason": string_field(data, "reason", max_length=2000),
     }
     return run_response(
@@ -92,15 +144,8 @@ def contexts(request, run_id):
 def plans(request, run_id):
     if request.method == "GET":
         return run_response(
-            lambda: JsonResponse(
-                {
-                    "plans": [
-                        document_data(entry)
-                        for entry in owned_run(
-                            request.runner_identity, run_id
-                        ).plans.all()
-                    ]
-                }
+            lambda: document_page(
+                request, owned_run(request.runner_identity, run_id), "plans"
             )
         )
     data = document_body(

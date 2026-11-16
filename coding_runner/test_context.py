@@ -1,0 +1,186 @@
+import copy
+import io
+import json
+import unittest
+from unittest.mock import patch
+
+from .context import (
+    ContextError,
+    GitHubContextClient,
+    discussion_digest,
+    manual_context,
+)
+from .plans import validate_context
+
+
+ITEM = {
+    "source": "github",
+    "issue_repository": "https://github.com/original/issues.git",
+    "issue_number": 7,
+    "repository_url": "https://github.com/checkout/code.git",
+    "base_branch": "main",
+    "branch_name": "task-7",
+    "title": "Imported old title",
+    "instructions": "Old body",
+    "project": {"repository_url": "https://github.com/changed/project.git"},
+}
+URL = "https://github.com/original/issues/issues/7"
+NOW = "2026-11-15T12:00:00Z"
+
+
+def issue(**changes):
+    result = {
+        "number": 7,
+        "title": "Current title",
+        "body": "Current body",
+        "state": "open",
+        "comments": 0,
+        "user": {"login": "author"},
+        "created_at": NOW,
+        "updated_at": NOW,
+        "html_url": URL,
+    }
+    return {**result, **changes}
+
+
+def comment(identifier=1):
+    return {
+        "id": identifier,
+        "body": "Please consider a regression",
+        "user": {"login": "reviewer"},
+        "created_at": NOW,
+        "updated_at": NOW,
+        "html_url": URL + f"#issuecomment-{identifier}",
+    }
+
+
+class Response(io.BytesIO):
+    status = 200
+
+    def __init__(self, data):
+        super().__init__(json.dumps(data).encode())
+        self.headers = {}
+
+
+class GitHubContextTests(unittest.TestCase):
+    def setUp(self):
+        self.client = GitHubContextClient("selected-issue-read-token")
+
+    def responses(self, *responses):
+        return patch.object(self.client, "_get", side_effect=responses)
+
+    def test_complete_empty_comments_is_explicit(self):
+        with self.responses((issue(), ""), ([], "")):
+            result = self.client.fetch(ITEM)
+        self.assertEqual(result["comments"], [])
+        self.assertEqual(result["title"], "Current title")
+        self.assertEqual(result["issue"]["author"], "author")
+        validate_context(result, ITEM)
+
+    def test_fetches_every_comment_page_from_frozen_issue_repository(self):
+        next_page = "https://api.github.com/repos/original/issues/issues/7/comments?page=2&per_page=100"
+        link = f'<{next_page}>; rel="next"'
+        with self.responses(
+            (issue(comments=2), ""), ([comment()], link), ([comment(2)], "")
+        ) as fetch:
+            result = self.client.fetch(ITEM)
+        self.assertEqual(len(result["comments"]), 2)
+        self.assertEqual(
+            fetch.call_args_list[0].args[0],
+            "https://api.github.com/repos/original/issues/issues/7",
+        )
+        self.assertEqual(fetch.call_args_list[-1].args[0], next_page)
+        self.assertEqual(result["checkout"]["repository_url"], ITEM["repository_url"])
+        self.assertEqual(result["comments"][1]["updated_at"], NOW)
+
+    def test_unavailable_later_page_is_not_an_empty_discussion(self):
+        link = '<https://api.github.com/repos/original/issues/issues/7/comments?per_page=100&page=2>; rel="next"'
+        with self.responses(
+            (issue(comments=2), ""), ([comment()], link), ContextError("Unavailable")
+        ):
+            with self.assertRaises(ContextError):
+                self.client.fetch(ITEM)
+
+    def test_malformed_page_is_not_an_empty_discussion(self):
+        with self.responses((issue(), ""), ({"error": "no comments"}, "")):
+            with self.assertRaises(ContextError):
+                self.client.fetch(ITEM)
+
+    def test_closed_issue_stops_without_comment_request(self):
+        with self.responses((issue(state="closed"), "")) as fetch:
+            with self.assertRaisesRegex(ContextError, "closed"):
+                self.client.fetch(ITEM)
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_null_body_is_a_valid_empty_description(self):
+        with self.responses((issue(body=None), ""), ([], "")):
+            result = self.client.fetch(ITEM)
+        self.assertEqual(result["instructions"], "")
+
+    def test_wrong_body_type_is_rejected(self):
+        with self.responses((issue(body=[]), "")):
+            with self.assertRaises(ContextError):
+                self.client.fetch(ITEM)
+
+    def test_foreign_next_page_is_rejected_before_credentials_are_sent(self):
+        with self.responses(
+            (issue(), ""), ([], '<https://evil.test/comments>; rel="next"')
+        ) as fetch:
+            with self.assertRaisesRegex(ContextError, "pagination"):
+                self.client.fetch(ITEM)
+        self.assertEqual(fetch.call_count, 2)
+
+    def test_foreign_comment_identity_is_rejected(self):
+        wrong = {
+            **comment(),
+            "html_url": "https://github.com/other/repo/issues/7#issuecomment-1",
+        }
+        with self.responses((issue(comments=1), ""), ([wrong], "")):
+            with self.assertRaises(ContextError):
+                self.client.fetch(ITEM)
+
+    def test_missing_page_count_is_rejected(self):
+        with self.responses((issue(comments=2), ""), ([comment()], "")):
+            with self.assertRaisesRegex(ContextError, "incomplete"):
+                self.client.fetch(ITEM)
+
+    def test_duplicate_comment_is_rejected(self):
+        with self.responses((issue(comments=2), ""), ([comment(), comment()], "")):
+            with self.assertRaisesRegex(ContextError, "Duplicate"):
+                self.client.fetch(ITEM)
+
+    def test_manual_context_does_not_make_an_issue_request(self):
+        item = {**ITEM, "source": "manual"}
+        with patch.object(self.client, "_get") as fetch:
+            result = self.client.fetch(item)
+        fetch.assert_not_called()
+        self.assertEqual(result["title"], item["title"])
+        self.assertEqual(result["instructions"], item["instructions"])
+
+    def test_discussion_fingerprint_ignores_fetch_time_but_detects_body_change(self):
+        first = manual_context({**ITEM, "source": "manual"}, fetched_at=NOW)
+        second = {**first, "fetched_at": "2026-11-15T13:00:00Z"}
+        self.assertEqual(discussion_digest(first), discussion_digest(second))
+        changed = {**second, "instructions": "Changed discussion"}
+        self.assertNotEqual(discussion_digest(first), discussion_digest(changed))
+
+    def test_http_client_disables_redirects_and_sends_selected_credential(self):
+        opener = unittest.mock.Mock()
+        opener.open.return_value = Response(issue())
+        self.client.opener = opener
+        data, _ = self.client._get(
+            "https://api.github.com/repos/original/issues/issues/7"
+        )
+        self.assertEqual(data["number"], 7)
+        request = opener.open.call_args.args[0]
+        self.assertEqual(
+            request.get_header("Authorization"), "Bearer selected-issue-read-token"
+        )
+
+    def test_invalid_saved_comment_timestamp_is_rejected(self):
+        with self.responses((issue(comments=1), ""), ([comment()], "")):
+            result = self.client.fetch(ITEM)
+        result = copy.deepcopy(result)
+        result["comments"][0]["updated_at"] = "yesterday"
+        with self.assertRaises(ContextError):
+            validate_context(result, ITEM)

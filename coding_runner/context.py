@@ -159,7 +159,7 @@ class GitHubContextClient:
         count = issue.get("comments")
         if type(count) is not int or count < 0:
             raise ContextError("Invalid issue comment count.")
-        comments = []
+        comments: list[dict[str, Any]] = []
         url = api + "/comments?per_page=100&page=1"
         seen = set()
         total_bytes = len(canonical_bytes(current))

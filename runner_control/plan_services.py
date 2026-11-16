@@ -8,7 +8,7 @@ from coding_runner.context import ContextError, digest, discussion_digest
 from coding_runner.plans import revision, validate_context, validate_plan
 from work_queue.api import item_data
 
-from .models import ContextSnapshot, PlanVersion, Run
+from .models import ContextSnapshot, PlanVersion
 from .services import (
     RunConflict,
     append_evidence,
@@ -58,10 +58,24 @@ def locked_run(runner, run_id, claim_token):
 
 @transaction.atomic
 def save_context(
-    *, runner, run_id, claim_token, operation_id, document, base_commit, reason
+    *,
+    runner,
+    run_id,
+    claim_token,
+    operation_id,
+    document,
+    base_commit,
+    reason,
+    resolved_base_branch,
 ):
     run = locked_run(runner, run_id, claim_token)
     checked(lambda: revision(base_commit))
+    if not resolved_base_branch.strip() or (
+        run.item.base_branch and resolved_base_branch != run.item.base_branch
+    ):
+        raise ValidationError(
+            {"resolved_base_branch": "Record the actual resolved base branch."}
+        )
     checked(lambda: validate_context(document, claimed_item(run)))
     previous = previous_operation(
         ContextSnapshot,
@@ -70,6 +84,7 @@ def save_context(
         document,
         reason,
         inspected_base_commit=base_commit,
+        resolved_base_branch=resolved_base_branch,
     )
     if previous is not None:
         return previous
@@ -80,6 +95,8 @@ def save_context(
     discussion = discussion_digest(document)
     if latest and latest.discussion_digest != discussion:
         changes.append("discussion")
+    if latest and latest.resolved_base_branch != resolved_base_branch:
+        changes.append("resolved_base_branch")
     if latest and latest.inspected_base_commit != base_commit:
         changes.append("base_commit")
     snapshot = ContextSnapshot.objects.create(
@@ -90,6 +107,7 @@ def save_context(
         digest=digest(document),
         discussion_digest=discussion,
         inspected_base_commit=base_commit,
+        resolved_base_branch=resolved_base_branch,
         reason=reason,
         changes=changes,
     )
@@ -101,6 +119,9 @@ def save_context(
 @transaction.atomic
 def save_plan(*, runner, run_id, claim_token, operation_id, document, reason):
     run = locked_run(runner, run_id, claim_token)
+    previous = previous_operation(PlanVersion, run, operation_id, document, reason)
+    if previous is not None:
+        return previous
     latest_context = run.contexts.last()
     if latest_context is None:
         raise RunConflict("Save complete context before a plan.")
@@ -112,9 +133,8 @@ def save_plan(*, runner, run_id, claim_token, operation_id, document, reason):
             latest_context.inspected_base_commit,
         )
     )
-    previous = previous_operation(PlanVersion, run, operation_id, document, reason)
-    if previous is not None:
-        return previous
+    if document["resolved_base_branch"] != latest_context.resolved_base_branch:
+        raise RunConflict("Plan must preserve the inspected resolved base branch.")
     latest = run.plans.last()
     if latest is not None and not reason.strip():
         raise ValidationError(
@@ -157,6 +177,7 @@ def valid_handoff(run, *, require_refresh=True):
     if (
         current.discussion_digest != plan.context.discussion_digest
         or current.inspected_base_commit != plan.context.inspected_base_commit
+        or current.resolved_base_branch != plan.context.resolved_base_branch
     ):
         raise RunConflict(
             "Discussion or base changed; save a revised plan with an assessment reason."

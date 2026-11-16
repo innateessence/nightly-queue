@@ -30,6 +30,7 @@ class ContextSnapshot(ImmutableDocument):
     )
     sequence = models.PositiveIntegerField()
     inspected_base_commit = models.CharField(max_length=64)
+    resolved_base_branch = models.CharField(max_length=200)
     discussion_digest = models.CharField(max_length=64)
     changes = models.JSONField(default=list)
 
