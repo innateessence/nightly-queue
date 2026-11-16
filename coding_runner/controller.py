@@ -14,6 +14,10 @@ from .journal import Journal, JournalError
 logger = logging.getLogger(__name__)
 
 
+class ControllerStopped(Exception):
+    pass
+
+
 class Controller:
     def __init__(
         self, client: Client, journal: Journal, stop: threading.Event | None = None
@@ -23,6 +27,7 @@ class Controller:
         self.stop = stop if stop is not None else threading.Event()
 
     def probe(self, state: dict[str, Any]) -> dict[str, Any]:
+        self.check_shutdown()
         identity = self.client.identity()
         runner = identity.get("runner", {})
         runner_id = runner.get("id") if isinstance(runner, dict) else None
@@ -30,6 +35,7 @@ class Controller:
             raise InvalidResponse("Runner identity response is invalid.")
         if state.get("runner_id") not in {None, runner_id}:
             raise JournalError("Journal belongs to a different runner identity.")
+        self.check_shutdown()
         configuration = self.client.configuration()
         if configuration.get("schema_version") != 1:
             raise InvalidResponse("Runner configuration version is unsupported.")
@@ -38,6 +44,7 @@ class Controller:
             raise InvalidResponse("Runner configuration revision is missing.")
         if not isinstance(configuration.get("global"), dict):
             raise InvalidResponse("Runner global configuration is missing.")
+        self.check_shutdown()
         active = self.client.active()
         if (
             "run" not in active
@@ -57,6 +64,7 @@ class Controller:
         operation = state.get("operation")
         if not operation or operation.get("status") != "pending":
             return
+        self.check_shutdown()
         try:
             result = self.client.reconcile(operation["run_id"])
         except NotFoundError:
@@ -87,6 +95,8 @@ class Controller:
                 self.stop.wait(poll)
             except AuthenticationError:
                 raise
+            except ControllerStopped:
+                return
             except APIError as exc:
                 if check:
                     raise
@@ -97,6 +107,10 @@ class Controller:
                 )
                 self.stop.wait(delay)
                 delay = min(delay * 2, 60)
+
+    def check_shutdown(self) -> None:
+        if self.stop.is_set():
+            raise ControllerStopped
 
 
 def journaled_request(

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import TestCase, main
 from unittest.mock import patch
@@ -17,6 +18,7 @@ from coding_runner.client import (
     Client,
     ConflictError,
     InvalidResponse,
+    UnavailableError,
 )
 from coding_runner.controller import Controller, journaled_request
 from coding_runner.journal import ControllerLocked, Journal, JournalError
@@ -32,6 +34,8 @@ CONFIG = {
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.server.calls.append((self.command, self.path))
+        if self.command == "POST" and hasattr(self.server, "release_mutation"):
+            self.server.release_mutation.wait(2)
         data = self.server.responses.get(self.path, (200, IDENTITY))
         status, body = data
         self.send_response(status)
@@ -70,6 +74,54 @@ class ServerCase(TestCase):
 
 
 class ClientTests(ServerCase):
+    def test_slow_headers_cannot_extend_request_deadline(self):
+        class SlowHeaders(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.request.sendall(b"HTTP/1.0 200 OK\r\nX-Slow: ")
+                try:
+                    for _ in range(20):
+                        self.request.sendall(b"x")
+                        time.sleep(0.05)
+                except OSError:
+                    pass
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), SlowHeaders)
+        server.daemon_threads = True
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = Client(
+                f"http://127.0.0.1:{server.server_port}", "test", timeout=0.2
+            )
+            started = time.monotonic()
+            with self.assertRaises(UnavailableError):
+                client.identity()
+            self.assertLess(time.monotonic() - started, 0.7)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_stalled_transport_blocks_overlapping_requests(self):
+        release = threading.Event()
+
+        def stalled(*args, **kwargs):
+            release.wait()
+            raise TimeoutError
+
+        try:
+            with patch.object(self.client.opener, "open", side_effect=stalled):
+                with self.assertRaises(AmbiguousRequest):
+                    self.client.request("POST", "/api/v1/runner/runs/claim/", {})
+                with self.assertRaises(UnavailableError):
+                    self.client.identity()
+                self.assertEqual(self.client.opener.open.call_count, 1)
+        finally:
+            release.set()
+
     def test_authentication_error_is_explicit_and_redacted(self):
         self.server.responses["/api/v1/runner/identity/"] = (401, {"error": "secret"})
         with self.assertRaises(AuthenticationError) as error:
@@ -100,6 +152,14 @@ class ClientTests(ServerCase):
         with self.assertRaises(AmbiguousRequest):
             self.client.request("POST", "/api/v1/runner/runs/claim/", {})
 
+    def test_excessively_nested_mutation_response_is_ambiguous(self):
+        self.server.responses["/api/v1/runner/runs/claim/"] = (
+            200,
+            b'{"data":' + b"[" * 100000 + b"0" + b"]" * 100000 + b"}",
+        )
+        with self.assertRaises(AmbiguousRequest):
+            self.client.request("POST", "/api/v1/runner/runs/claim/", {})
+
     def test_server_error_after_mutation_is_ambiguous(self):
         self.server.responses["/api/v1/runner/runs/claim/"] = (503, {})
         with self.assertRaises(AmbiguousRequest):
@@ -125,6 +185,36 @@ class ClientTests(ServerCase):
             ("GET", "/api/v1/runner/runs/active/"),
         ]
         self.assertEqual(self.server.calls, calls)
+
+    def test_shutdown_does_not_start_another_probe_request(self):
+        stop = threading.Event()
+        identity = self.client.identity
+
+        def stop_after_identity():
+            response = identity()
+            stop.set()
+            return response
+
+        with Journal(self.path) as journal:
+            with patch.object(self.client, "identity", side_effect=stop_after_identity):
+                Controller(self.client, journal, stop).run(check=True)
+        self.assertEqual(self.server.calls, [("GET", "/api/v1/runner/identity/")])
+
+    def test_shutdown_does_not_start_pending_reconciliation(self):
+        stop = threading.Event()
+        active = self.client.active
+
+        def stop_after_active():
+            response = active()
+            stop.set()
+            return response
+
+        with Journal(self.path) as journal:
+            journal.prepare(journal.load(), str(uuid4()), "claim", {})
+            with patch.object(self.client, "active", side_effect=stop_after_active):
+                Controller(self.client, journal, stop).run(check=True)
+            self.assertEqual(journal.load()["operation"]["status"], "pending")
+        self.assertEqual(len(self.server.calls), 3)
 
     def test_restart_reconciles_pending_mutation_without_repeating_it(self):
         run_id = str(uuid4())
@@ -166,6 +256,30 @@ class ClientTests(ServerCase):
                     "/api/v1/runner/runs/claim/",
                     {},
                 )
+        self.assertEqual(len(self.server.calls), 1)
+
+    def test_late_mutation_response_does_not_clear_pending_journal(self):
+        self.server.release_mutation = threading.Event()
+        run_id = str(uuid4())
+        try:
+            with Journal(self.path) as journal:
+                state = journal.load()
+                with self.assertRaises(AmbiguousRequest):
+                    journaled_request(
+                        self.client,
+                        journal,
+                        state,
+                        run_id,
+                        "claim",
+                        "/api/v1/runner/runs/claim/",
+                        {"run_id": run_id},
+                    )
+                self.server.release_mutation.set()
+                self.assertTrue(self.client.request_lock.acquire(timeout=1))
+                self.client.request_lock.release()
+                self.assertEqual(journal.load()["operation"]["status"], "pending")
+        finally:
+            self.server.release_mutation.set()
         self.assertEqual(len(self.server.calls), 1)
 
     def test_missing_journal_discovers_owned_remote_run(self):

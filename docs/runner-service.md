@@ -29,6 +29,12 @@ rejection stops the process; unavailable queue reads retry with interruptible
 fails. SIGINT/SIGTERM interrupt waits, release ownership, and exit; an in-flight
 HTTP request is bounded by its request deadline/socket timeout. Authentication
 errors are logged without request/response bodies, URLs, or bearer values.
+The controller's deadline includes DNS and response headers. At most one
+transport worker exists per client; a stalled transport blocks further requests
+until it returns, rather than accumulating connections. A timed-out mutation
+remains ambiguous even if its transport completes later. Shutdown is checked
+between probe and reconciliation reads, so only the current request may finish
+before controller ownership is released.
 
 ## State and recovery contract
 

@@ -1,8 +1,9 @@
 import json
 from http.client import HTTPException
 import socket
+import threading
 import time
-from typing import Any
+from typing import Any, NoReturn
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
@@ -60,6 +61,7 @@ class Client:
         self.timeout = timeout
         self.max_bytes = max_bytes
         self.opener = build_opener(ProxyHandler({}), NoRedirects())
+        self.request_lock = threading.Lock()
 
     def request(
         self, method: str, path: str, payload: dict[str, Any] | None = None
@@ -80,6 +82,39 @@ class Client:
         request = Request(self.url + path, data=body, headers=headers, method=method)
         mutation = method != "GET"
         deadline = time.monotonic() + self.timeout
+        if not self.request_lock.acquire(blocking=False):
+            self._unavailable(mutation)
+        finished = threading.Event()
+        outcome: list[Any] = []
+
+        def send():
+            try:
+                outcome.append(self._send(request, mutation, deadline))
+            except Exception as exc:
+                outcome.append(exc)
+            finally:
+                self.request_lock.release()
+                finished.set()
+
+        # Socket timeouts alone do not bound DNS or a peer dripping HTTP headers.
+        worker = threading.Thread(target=send, daemon=True)
+        worker.start()
+        if not finished.wait(max(0, deadline - time.monotonic())):
+            self._unavailable(mutation)
+        result = outcome[0]
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def _unavailable(self, mutation: bool) -> NoReturn:
+        error = AmbiguousRequest if mutation else UnavailableError
+        raise error(
+            "Queue unavailable; mutation outcomes require reconciliation."
+        ) from None
+
+    def _send(
+        self, request: Request, mutation: bool, deadline: float
+    ) -> dict[str, Any]:
         try:
             with self.opener.open(request, timeout=self.timeout) as response:
                 if response.status != 200:
@@ -116,11 +151,8 @@ class Client:
                 ) from None
             raise APIError(f"Runner API returned HTTP {status}.") from None
         except (URLError, TimeoutError, socket.timeout, OSError, HTTPException):
-            error = AmbiguousRequest if mutation else UnavailableError
-            raise error(
-                "Queue unavailable; mutation outcomes require reconciliation."
-            ) from None
-        except (ValueError, InvalidResponse):
+            self._unavailable(mutation)
+        except (ValueError, InvalidResponse, RecursionError):
             response_error = AmbiguousRequest if mutation else InvalidResponse
             raise response_error(
                 "Invalid queue response; mutation outcomes require reconciliation."
