@@ -9,7 +9,7 @@ from projects.models import Project
 from runner_control.settings_models import ProjectRunnerSettings, RunnerSettings
 
 from .forms import CredentialForm
-from .models import Credential
+from .models import Credential, CredentialSecretVersion
 from .test_models import TEST_KEY
 
 
@@ -77,6 +77,78 @@ class BackendCredentialTests(TestCase):
         self.assertEqual(credential.secret_version, 2)
         self.assertEqual(credential.get_secret()["secret"], "rotated-secret")
 
+    def test_stale_metadata_save_preserves_rotation(self):
+        credential = self.make_credential()
+        stale = Credential.objects.get(pk=credential.pk)
+        credential.set_secret("rotated-secret")
+        credential.save()
+        stale.name = "Renamed"
+        stale.save()
+        stale.refresh_from_db()
+        self.assertEqual(stale.get_secret()["secret"], "rotated-secret")
+        self.assertEqual(stale.secret_version, 2)
+
+    def test_stale_partial_metadata_save_preserves_rotation_version(self):
+        credential = self.make_credential()
+        stale = Credential.objects.get(pk=credential.pk)
+        credential.set_secret("rotated-secret")
+        credential.save()
+        stale.name = "Renamed"
+        stale.save(update_fields=["name"])
+        stale.refresh_from_db()
+        self.assertEqual(stale.get_secret()["secret"], "rotated-secret")
+        self.assertEqual(stale.secret_version, 2)
+
+    def test_refreshed_metadata_save_preserves_later_rotation(self):
+        credential = self.make_credential()
+        stale = Credential.objects.get(pk=credential.pk)
+        credential.set_secret("first-rotation")
+        credential.save()
+        stale.refresh_from_db()
+        credential.set_secret("second-rotation")
+        credential.save()
+        stale.name = "Renamed"
+        stale.save()
+        self.assertEqual(stale.get_secret()["secret"], "second-rotation")
+        self.assertEqual(stale.secret_version, 3)
+
+    def test_rotation_retains_only_encrypted_old_material(self):
+        credential = self.make_credential()
+        ciphertext = credential.encrypted_payload
+        credential.set_secret("rotated-secret")
+        credential.save()
+        version = CredentialSecretVersion.objects.get(credential=credential)
+        self.assertEqual(version.version, 1)
+        self.assertEqual(version.encrypted_payload, ciphertext)
+        self.assertNotIn("backend-private-token", version.encrypted_payload)
+        self.assertNotIn("backend-private-token", str(version))
+
+    def test_retained_version_protects_credential_deletion(self):
+        credential = self.make_credential()
+        credential.set_secret("rotated-secret")
+        credential.save()
+        with self.assertRaises(ProtectedError):
+            credential.delete()
+
+    def test_admin_reports_retained_versions_before_deletion(self):
+        from django.contrib.auth import get_user_model
+
+        self.client.force_login(
+            get_user_model().objects.create_superuser("reviewer", password="test")
+        )
+        credential = self.make_credential()
+        credential.set_secret("rotated-secret")
+        credential.save()
+        response = self.client.post(
+            reverse("admin:credentials_credential_delete", args=[credential.pk]),
+            {"post": "yes"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Cannot delete")
+        self.assertTrue(Credential.objects.filter(pk=credential.pk).exists())
+        self.assertNotContains(response, "backend-private-token")
+        self.assertNotContains(response, credential.encrypted_payload)
+
     def test_rename_preserves_version(self):
         credential = self.make_credential()
         credential.name = "Renamed"
@@ -113,6 +185,32 @@ class BackendCredentialTests(TestCase):
         )
         with self.assertRaises(ProtectedError):
             Credential.objects.filter(pk=credential.pk).delete()
+
+    def test_admin_reports_project_override_protection_before_deletion(self):
+        from django.contrib.auth import get_user_model
+
+        self.client.force_login(
+            get_user_model().objects.create_superuser("reviewer", password="test")
+        )
+        credential = self.make_credential()
+        project = Project.objects.create(
+            name="Protected project",
+            repository_url="https://github.com/example/project",
+        )
+        ProjectRunnerSettings.objects.create(
+            project=project,
+            overrides={
+                "research_credential_id": {"mode": "replace", "value": credential.pk}
+            },
+        )
+        response = self.client.post(
+            reverse("admin:credentials_credential_delete", args=[credential.pk]),
+            {"post": "yes"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Cannot delete")
+        self.assertContains(response, "Protected project")
+        self.assertTrue(Credential.objects.filter(pk=credential.pk).exists())
 
     def test_backend_form_sets_provider_before_validating_secret(self):
         form = CredentialForm(

@@ -67,19 +67,42 @@ the latest version, including active runs. Revocation is permanent for that row 
 blocks subsequent deliveries; create/select a new credential to restore access.
 Previously delivered credentials cannot be recalled: stop existing backend processes
 and revoke them at the provider separately. Credential changes lock runner settings
-before credential rows, matching claim snapshot lock ordering. Global selected
+before credential rows, matching claim snapshot lock ordering. Metadata-only saves
+preserve a concurrent rotation and its version. Global selected
 references use PROTECT; project JSON replacement references are protected during
 instance and bulk deletion by a pre-delete check under the settings lock.
 
-Apply credential migrations 0005 and 0006 before deployment. It preserves existing encrypted
-payloads and initializes version 1 with no revocation. No real credentials or live
-backend calls are used by deterministic tests.
+Evidence, progress references, and finish errors redact the owned active run's selected
+credential values before storage or response. This includes raw material, SSH passphrases,
+Codex access/refresh/ID tokens, and OpenCode API keys, while retaining provider and
+endpoint metadata. The helper reads only IDs from the run's immutable effective snapshot;
+it never decrypts unrelated credentials. Missing encryption or invalid selected material
+fails reporting closed with a redacted error. Completed finish retries compare the saved
+input digest and require no secret decryption.
+
+Rotation retains each previous ciphertext, provider/type, and version in the
+credentials-owned `CredentialSecretVersion` table. This permits redacting logs from an
+older backend process and replaying evidence writes after rotation. Retained versions
+are never delivered by the secret endpoint, serialized with runs/configuration, or
+registered for admin browsing. They protect their credential from deletion; Django admin
+shows the blocking references. Retention is indefinite until an operator removes that
+history through trusted maintenance after associated run evidence and backend processes
+no longer need it. Backups must preserve the encryption key and these encrypted records.
+This protects accidental plaintext log echoes; the privileged supervisor still owns the
+boundary against exposing material to agents or external tools.
+
+Apply credential migrations 0005, 0006, and 0007 before deployment. Existing encrypted
+payloads are preserved and initialize at version 1 with no revocation; version history
+is created by subsequent rotations. No real credentials or live backend calls are used
+by deterministic tests.
 
 
-Validation: the PostgreSQL suite passes 482 tests, including 26 selected-secret
-endpoint cases, credential storage/form/UI tests and schema upgrade preservation.
+Validation: the PostgreSQL suite includes selected-secret endpoint cases, credential
+storage/form/UI tests, schema upgrade preservation, old-version report redaction and
+retry reconciliation, and rotation/revocation races against secret delivery.
 Black, Ruff, mypy, Django checks and migration drift checks pass. The standalone
 CLI/runtime suites also pass. The rendered credential UI is recorded in
-[screenshot](screenshots/runner-credentials.png). No live provider login, allowance
+[screenshot](screenshots/runner-credentials.png); the protected deletion response is
+[also captured](screenshots/runner-credential-protection.png). No live provider login, allowance
 probe or backend invocation was performed; execution remains disabled pending the
 separate adapter/sandbox/release verification work.

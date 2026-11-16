@@ -254,6 +254,207 @@ class SelectedSecretTests(TestCase):
             configuration_document()["credentials"][0]["secret_version"], 1
         )
 
+    def test_selected_backend_token_is_redacted_from_saved_plan(self):
+        self.claim()
+        response = self.client.post(
+            reverse("runner_artifact", args=[self.run.pk]),
+            json.dumps(
+                {
+                    "operation_id": str(uuid.uuid4()),
+                    "claim_token": str(self.run.item.claim_token),
+                    "kind": "plan",
+                    "data": {"log": "backend failed using backend-private-secret"},
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertNotIn("backend-private-secret", response.content.decode())
+        self.assertNotIn(
+            "backend-private-secret", json.dumps(self.run.evidence.get().payload)
+        )
+
+    def test_structured_backend_tokens_are_redacted_from_finish_error(self):
+        material = {"provider": "openai", "api_key": "nested-private-api-key"}
+        connection = self.credential(
+            "Connection", "opencode", json.dumps(material), "connection"
+        )
+        self.settings.research_backend = "opencode"
+        self.settings.research_credential = connection
+        self.settings.save()
+        self.claim()
+        response = self.client.post(
+            reverse("runner_finish", args=[self.run.pk]),
+            json.dumps(
+                {
+                    "claim_token": str(self.run.item.claim_token),
+                    "status": "failed",
+                    "error_summary": "request failed with nested-private-api-key",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertNotIn("nested-private-api-key", response.content.decode())
+        self.run.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertNotIn("nested-private-api-key", self.run.error_summary)
+        self.assertNotIn("nested-private-api-key", self.item.error_summary)
+
+    def test_finish_retry_after_redaction_is_idempotent(self):
+        self.claim()
+        data = {
+            "claim_token": str(self.run.item.claim_token),
+            "status": "failed",
+            "error_summary": "backend-private-secret failed",
+        }
+        url = reverse("runner_finish", args=[self.run.pk])
+        first = self.client.post(url, json.dumps(data), content_type="application/json")
+        self.backend.set_secret("rotated-private-secret")
+        self.backend.save()
+        second = self.client.post(
+            url, json.dumps(data), content_type="application/json"
+        )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(first.json(), second.json())
+
+    def test_finish_retry_with_unavailable_key_does_not_decrypt(self):
+        self.claim()
+        data = {
+            "claim_token": str(self.run.item.claim_token),
+            "status": "failed",
+            "error_summary": "backend-private-secret failed",
+        }
+        url = reverse("runner_finish", args=[self.run.pk])
+        first = self.client.post(url, json.dumps(data), content_type="application/json")
+        with override_settings(NQ_CREDENTIAL_KEY=""):
+            second = self.client.post(
+                url, json.dumps(data), content_type="application/json"
+            )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(first.json(), second.json())
+
+    def test_old_delivered_secret_is_redacted_after_rotation(self):
+        self.claim()
+        self.assertEqual(self.run_secret().status_code, 200)
+        self.backend.set_secret("rotated-private-secret")
+        self.backend.save()
+        response = self.client.post(
+            reverse("runner_artifact", args=[self.run.pk]),
+            json.dumps(
+                {
+                    "operation_id": str(uuid.uuid4()),
+                    "claim_token": str(self.run.item.claim_token),
+                    "kind": "plan",
+                    "data": {
+                        "log": "backend-private-secret and rotated-private-secret"
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            self.run.evidence.get().payload, {"log": "[redacted] and [redacted]"}
+        )
+
+    def test_artifact_retry_after_rotation_returns_same_evidence(self):
+        self.claim()
+        data = {
+            "operation_id": str(uuid.uuid4()),
+            "claim_token": str(self.run.item.claim_token),
+            "kind": "plan",
+            "data": {"log": "backend-private-secret failed"},
+        }
+        url = reverse("runner_artifact", args=[self.run.pk])
+        first = self.client.post(url, json.dumps(data), content_type="application/json")
+        self.backend.set_secret("rotated-private-secret")
+        self.backend.save()
+        second = self.client.post(
+            url, json.dumps(data), content_type="application/json"
+        )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(first.json(), second.json())
+        self.assertEqual(self.run.evidence.count(), 1)
+
+    def test_session_tokens_are_redacted_but_provider_metadata_is_preserved(self):
+        material = {
+            "tokens": {
+                "access_token": "session-access-value",
+                "refresh_token": "session-refresh-value",
+                "id_token": "session-id-value",
+                "account_id": "account-metadata",
+            }
+        }
+        session = self.credential("Session", "codex", json.dumps(material), "session")
+        self.settings.research_credential = session
+        self.settings.save()
+        self.claim()
+        response = self.client.post(
+            reverse("runner_artifact", args=[self.run.pk]),
+            json.dumps(
+                {
+                    "operation_id": str(uuid.uuid4()),
+                    "claim_token": str(self.run.item.claim_token),
+                    "kind": "plan",
+                    "data": {
+                        "log": "codex session-access-value session-refresh-value session-id-value account-metadata"
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            self.run.evidence.get().payload,
+            {"log": "codex [redacted] [redacted] [redacted] account-metadata"},
+        )
+
+    def test_report_does_not_decrypt_unselected_credentials(self):
+        Credential.objects.filter(pk=self.unselected.pk).update(
+            encrypted_payload="invalid"
+        )
+        self.claim()
+        response = self.client.post(
+            reverse("runner_progress", args=[self.run.pk]),
+            json.dumps(
+                {
+                    "operation_id": str(uuid.uuid4()),
+                    "claim_token": str(self.run.item.claim_token),
+                    "stage": "research",
+                    "wait_reason": "backend-private-secret failed",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.run.refresh_from_db()
+        self.assertNotIn("backend-private-secret", self.run.wait_reason)
+        self.assertNotIn("backend-private-secret", response.content.decode())
+
+    def test_report_with_unavailable_encryption_fails_closed(self):
+        self.claim()
+        with override_settings(NQ_CREDENTIAL_KEY=""):
+            response = self.client.post(
+                reverse("runner_artifact", args=[self.run.pk]),
+                json.dumps(
+                    {
+                        "operation_id": str(uuid.uuid4()),
+                        "claim_token": str(self.run.item.claim_token),
+                        "kind": "plan",
+                        "data": {"log": "backend-private-secret"},
+                    }
+                ),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("NQ_CREDENTIAL_KEY", response.content.decode())
+        self.assertNotIn("backend-private-secret", response.content.decode())
+        self.assertFalse(self.run.evidence.exists())
+
     def test_arbitrary_id_in_run_request_is_rejected(self):
         self.claim()
         response = self.post(

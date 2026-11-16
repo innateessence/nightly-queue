@@ -43,6 +43,18 @@ class Credential(models.Model):
     class Meta:
         ordering = ["name", "pk"]
 
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        if "encrypted_payload" in field_names:
+            instance._saved_encrypted_payload = instance.encrypted_payload
+        return instance
+
+    def refresh_from_db(self, using=None, fields=None):
+        super().refresh_from_db(using=using, fields=fields)
+        if fields is None or "encrypted_payload" in fields:
+            self._saved_encrypted_payload = self.encrypted_payload
+
     def clean(self):
         super().clean()
         self.name = self.name.strip()
@@ -126,7 +138,7 @@ class Credential(models.Model):
             ) from None
         try:
             value = json.loads(payload)
-            if set(value) != {"secret", "passphrase"}:
+            if not isinstance(value, dict) or set(value) != {"secret", "passphrase"}:
                 raise ValueError
             if not all(isinstance(entry, str) for entry in value.values()):
                 raise ValueError
@@ -145,16 +157,33 @@ class Credential(models.Model):
             original = Credential.objects.select_for_update().filter(pk=self.pk).first()
             if original and original.revoked_at:
                 self.revoked_at = original.revoked_at
-            if original and original.encrypted_payload != self.encrypted_payload:
-                self.secret_version = original.secret_version + 1
-                fields = kwargs.get("update_fields")
-                if fields is not None:
+            fields = kwargs.get("update_fields")
+            writes_payload = fields is None or "encrypted_payload" in fields
+            if original:
+                saved_payload = getattr(self, "_saved_encrypted_payload", None)
+                if not writes_payload or self.encrypted_payload == saved_payload:
+                    self.encrypted_payload = original.encrypted_payload
+                rotated = original.encrypted_payload != self.encrypted_payload
+                self.secret_version = original.secret_version + int(rotated)
+                if rotated:
+                    CredentialSecretVersion.objects.get_or_create(
+                        credential=original,
+                        version=original.secret_version,
+                        defaults={
+                            "encrypted_payload": original.encrypted_payload,
+                            "provider": original.provider,
+                            "kind": original.kind,
+                        },
+                    )
+                if rotated and fields is not None:
                     kwargs["update_fields"] = set(fields) | {
                         "secret_version",
                         "updated_at",
                     }
             self.full_clean()
-            return super().save(*args, **kwargs)
+            result = super().save(*args, **kwargs)
+            self._saved_encrypted_payload = self.encrypted_payload
+            return result
 
     def revoke(self):
         self.revoked_at = timezone.now()
@@ -231,3 +260,21 @@ class RunnerPreflightGrant(models.Model):
 
     def __str__(self):
         return f"{self.runner}: {self.credential}"
+
+
+class CredentialSecretVersion(models.Model):
+    credential = models.ForeignKey(Credential, on_delete=models.PROTECT)
+    version = models.PositiveIntegerField()
+    provider = models.CharField(max_length=20)
+    kind = models.CharField(max_length=20)
+    encrypted_payload = models.TextField(editable=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["credential", "version"], name="credential_secret_version"
+            )
+        ]
+
+    def __str__(self):
+        return f"Credential {self.credential_id}, retained version {self.version}"

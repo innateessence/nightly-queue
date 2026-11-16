@@ -8,6 +8,9 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare
+from django.views.decorators.debug import sensitive_variables
+
+from credentials.redaction import redact_run_payload
 
 from work_queue.models import QueueItem
 from work_queue.services import claim_item, claimable_items, finish_item
@@ -116,6 +119,7 @@ def json_digest(value):
     return hashlib.sha256(encoded).hexdigest()
 
 
+@sensitive_variables()
 def redact_payload(value, secrets, depth=0):
     if depth > 20:
         raise ValidationError({"body": "Reduce JSON nesting to at most 20 levels."})
@@ -171,12 +175,18 @@ def append_evidence(run, operation_id, kind, payload):
 
 
 @transaction.atomic
+@sensitive_variables()
 def record_evidence(
     *, runner, run_id, claim_token, operation_id, kind, payload, progress=None
 ):
     lock_controller(runner)
     run = owned_run(runner, run_id)
     verify_active(run, claim_token)
+    progress_fields = [field for field in (progress or {}) if field != "stage"]
+    values = [progress[field] for field in progress_fields]
+    kind, payload, values = redact_run_payload(run, [kind, payload, values])
+    if progress is not None:
+        progress.update(zip(progress_fields, values))
     evidence, created = append_evidence(run, operation_id, kind, payload)
     if created and progress is not None:
         for field, value in progress.items():
@@ -239,6 +249,7 @@ def validate_success(run, result_url):
 
 
 @transaction.atomic
+@sensitive_variables()
 def finish_run(*, runner, run_id, claim_token, status, result_url="", error_summary=""):
     lock_controller(runner)
     run = owned_run(runner, run_id)
@@ -258,6 +269,8 @@ def finish_run(*, runner, run_id, claim_token, status, result_url="", error_summ
             )
         return run
     verify_active(run, claim_token)
+    result_url, error_summary = redact_run_payload(run, [result_url, error_summary])
+    result.update(result_url=result_url, error_summary=error_summary)
     if status == QueueItem.Status.SUCCEEDED:
         validate_success(run, result_url)
     updated = finish_item(
