@@ -187,7 +187,7 @@ def validate_plan(
     sources = set()
     for source in plan["sources"]:
         exact(source, {"kind", "reference", "digest"}, "source")
-        if source["kind"] not in {
+        if not isinstance(source["kind"], str) or source["kind"] not in {
             "issue",
             "comment",
             "repository",

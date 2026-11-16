@@ -150,6 +150,14 @@ class ContextPlanAPITests(TestCase):
             with self.assertRaises(ValidationError):
                 entry.delete()
 
+    def test_queryset_cannot_rewrite_or_delete_saved_versions(self):
+        self.valid_handoff()
+        for model in [ContextSnapshot, PlanVersion]:
+            with self.assertRaises(ValidationError):
+                model.objects.all().update(reason="Changed later")
+            with self.assertRaises(ValidationError):
+                model.objects.all().delete()
+
     def test_plan_requires_a_saved_complete_context(self):
         self.assertEqual(
             self.post(

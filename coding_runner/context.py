@@ -216,7 +216,11 @@ class GitHubContextClient:
     @staticmethod
     def _entry(entry: dict[str, Any], expected_url: str) -> dict[str, Any]:
         author = entry.get("user")
-        if not isinstance(author, dict) or entry.get("html_url") != expected_url:
+        if (
+            not isinstance(author, dict)
+            or entry.get("html_url") != expected_url
+            or "body" not in entry
+        ):
             raise ContextError("Invalid discussion source or author.")
         return {
             "body": text(
