@@ -90,6 +90,16 @@ def acceptance(client, source, profile, state: Path):
         {"work_queue/test_validation_isolation.py": DATABASE_TEST.encode()},
     )
     cases = []
+    exact_output = state / "exact-candidate"
+    exact_output.mkdir(mode=0o700)
+    exact = run_candidate(client, source, profile, state=exact_output)
+    cases.append({"id": "exact-candidate", **exact})
+    if exact["result"]["state"] != "passed":
+        return {
+            "schema_version": 1,
+            "cases": cases,
+            "result": {"state": "failed", "case": "exact-candidate"},
+        }
     for name in ("passing", "repeated-fresh-database"):
         output = state / name
         output.mkdir(mode=0o700)

@@ -7,14 +7,23 @@ import tempfile
 import unittest
 from uuid import uuid4
 
-from vibearr_executor.artifacts import pack, unpack
-from vibearr_executor.contracts import Conflict, Rejected, digest
-from vibearr_executor.validation_profile import CHECK_IDS, ValidationProfile
+try:
+    from vibearr_executor.artifacts import pack, unpack
+    from vibearr_executor.contracts import Conflict, Rejected, digest
+    from vibearr_executor.validation_profile import CHECK_IDS, ValidationProfile
+
+    SDK_AVAILABLE = True
+except ImportError:
+    SDK_AVAILABLE = False
 from vibearr_runner.native_validation import CandidateSource, ValidationRunner
 from vibearr_runner.native_validation import DependencyBuilder, validation_diagnostics
 from vibearr_runner.policy import ExecutionPolicy
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE,
+    "Install the native-runtime extra for executor-backed validation tests",
+)
 @unittest.skipUnless(
     shutil.which("git"),
     "Exact-tree Git acceptance runs in the independent runner image",
@@ -89,7 +98,12 @@ class ClientFixture:
         self.started = []
 
     def capabilities(self):
+        from vibearr_executor import PROTOCOL_VERSION, QUALIFICATION_VERSION
+
         return {
+            "schema_version": 1,
+            "protocol_version": PROTOCOL_VERSION,
+            "qualification_version": QUALIFICATION_VERSION,
             "qualified": True,
             "accepting_work": True,
             "profiles": [
@@ -141,6 +155,10 @@ class ClientFixture:
         }
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE,
+    "Install the native-runtime extra for executor-backed validation tests",
+)
 class NativeValidationTests(unittest.TestCase):
     def setUp(self):
         requirements = b"Django==4.1.3\n"

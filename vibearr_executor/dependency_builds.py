@@ -209,6 +209,7 @@ class DependencyBuilds:
                 try:
                     image = self.committed_image(record)
                     if image is not None:
+                        self.cleanup_assembly(record)
                         self.adopt_image(record, image)
                         self.start(build_id)
                         record = self.read(build_id)
@@ -242,7 +243,6 @@ class DependencyBuilds:
 
     def run(self, build_id):
         from .qualification import binding
-        from .runtime import durable
 
         try:
             while True:
@@ -269,101 +269,9 @@ class DependencyBuilds:
                         ).timestamp()
                     ):
                         raise TimeoutError("Dependency-build deadline expired.")
-                    state = record["state"]
-                    if state in {"prepared", "setup"}:
-                        observed = self.runtime.start(build_id)
-                        if observed["state"] == "unknown":
-                            raise EngineError(
-                                "Setup outcome is uncertain; reconcile the same build."
-                            )
-                        if observed["state"] != "exited":
-                            record["state"] = "setup"
-                            self.save(record)
-                            time.sleep(0.5)
-                            continue
-                        result = observed.get("result", {})
-                        if (
-                            result.get("exit_code") != 0
-                            or result.get("timed_out")
-                            or result.get("canceled")
-                            or not observed.get("descendants_terminated")
-                            or not result.get("dependency_artifact")
-                        ):
-                            raise Rejected(
-                                "Isolated dependency setup failed; inspect its protected logs."
-                            )
-                        content = (
-                            self.runtime.path(build_id) / "dependencies.tar"
-                        ).read_bytes()
-                        expected = manifest(content)
-                        if (
-                            expected != result["dependency_artifact"]
-                            or expected["requirements_digest"]
-                            != record["requirements_digest"]
-                        ):
-                            raise Rejected(
-                                "Dependency layer differs from the protected setup result."
-                            )
-                        record.update(
-                            state="assembling", dependency_digest=expected["sha256"]
-                        )
-                        self.save(record)
-                        continue
-                    if state == "assembling":
-                        self.assemble(record)
-                        continue
-                    if state == "qualifying":
-                        proof_state = self.path(build_id) / "qualification"
-                        complete = self.path(build_id) / "qualification-exit.json"
-                        processes = self.processes(proof_state)
-                        if complete.exists() and not processes:
-                            if not json.loads(complete.read_bytes()).get(
-                                "success"
-                            ) or not self.qualified(record):
-                                raise Rejected(
-                                    "Derived image failed actual host boundary qualification."
-                                )
-                            record["provenance"] = self.provenance(record)
-                            record["state"] = "ready"
-                            self.save(record)
-                            return
-                        if not processes:
-                            if record.get("qualification_intent"):
-                                raise EngineError(
-                                    "Derived-image qualification outcome is unknown; stop/reconcile this build."
-                                )
-                            profile = self.path(build_id) / "profile.json"
-                            durable(profile, canonical(record["profile"]))
-                            command = [
-                                sys.executable,
-                                "-I",
-                                "-m",
-                                "vibearr_executor.dependency_qualify",
-                                "--state",
-                                str(proof_state),
-                                "--profile",
-                                str(profile),
-                                "--deadline",
-                                str(
-                                    datetime.fromisoformat(
-                                        record["request"]["deadline"]
-                                    ).timestamp()
-                                ),
-                            ]
-                            for address in self.runtime.configured_ips:
-                                command.extend(("--deny-ip", address))
-                            record["qualification_intent"] = True
-                            self.save(record)
-                            with (self.path(build_id) / "qualification.log").open(
-                                "ab"
-                            ) as log:
-                                subprocess.Popen(
-                                    command,
-                                    stdout=log,
-                                    stderr=log,
-                                    start_new_session=True,
-                                )
-                        time.sleep(0.5)
+                    if self.step(record):
+                        return
+                time.sleep(0.5)
         except Exception as exc:
             with self.runtime.lock:
                 record = self.read(build_id)
@@ -377,11 +285,116 @@ class DependencyBuilds:
                 uncertain = active or isinstance(
                     exc, (EngineError, OSError, TimeoutError)
                 )
+                uncertain = (
+                    uncertain
+                    or record["state"] == "qualifying"
+                    and not record.get("qualification_cleanup_confirmed")
+                )
+                uncertain = (
+                    uncertain
+                    or record["state"] == "assembling"
+                    and record.get("assembly_intent", False)
+                )
                 record.update(
                     state="unknown" if uncertain else "failed",
                     wait_reason=str(exc)[:400],
                 )
                 self.save(record)
+
+    def step(self, record):
+        from .runtime import durable
+
+        state = record["state"]
+        build_id = record["request"]["build_id"]
+        if state in {"prepared", "setup"}:
+            observed = self.runtime.start(build_id)
+            if observed["state"] == "unknown":
+                raise EngineError(
+                    "Setup outcome is uncertain; reconcile the same build."
+                )
+            if observed["state"] != "exited":
+                record["state"] = "setup"
+                self.save(record)
+                return False
+            result = observed.get("result", {})
+            if (
+                result.get("exit_code") != 0
+                or result.get("timed_out")
+                or result.get("canceled")
+                or not observed.get("descendants_terminated")
+                or not result.get("dependency_artifact")
+            ):
+                raise Rejected(
+                    "Isolated dependency setup failed; inspect its protected logs."
+                )
+            content = (self.runtime.path(build_id) / "dependencies.tar").read_bytes()
+            expected = manifest(content)
+            if (
+                expected != result["dependency_artifact"]
+                or expected["requirements_digest"] != record["requirements_digest"]
+            ):
+                raise Rejected(
+                    "Dependency layer differs from the protected setup result."
+                )
+            record.update(state="assembling", dependency_digest=expected["sha256"])
+            self.save(record)
+            return False
+        if state == "assembling":
+            self.assemble(record)
+            return False
+        if state == "qualifying":
+            proof_state = self.path(build_id) / "qualification"
+            complete = self.path(build_id) / "qualification-exit.json"
+            processes = self.processes(proof_state)
+            if complete.exists() and not processes:
+                self.cleanup_qualification(record)
+                record["qualification_cleanup_confirmed"] = True
+                self.save(record)
+                if not json.loads(complete.read_bytes()).get(
+                    "success"
+                ) or not self.qualified(record):
+                    raise Rejected(
+                        "Derived image failed actual host boundary qualification."
+                    )
+                record["provenance"] = self.provenance(record)
+                record["state"] = "ready"
+                self.save(record)
+                return True
+            if not processes:
+                if record.get("qualification_intent"):
+                    raise EngineError(
+                        "Derived-image qualification outcome is unknown; stop/reconcile this build."
+                    )
+                profile = self.path(build_id) / "profile.json"
+                durable(profile, canonical(record["profile"]))
+                command = [
+                    sys.executable,
+                    "-I",
+                    "-m",
+                    "vibearr_executor.dependency_qualify",
+                    "--state",
+                    str(proof_state),
+                    "--profile",
+                    str(profile),
+                    "--deadline",
+                    str(
+                        datetime.fromisoformat(
+                            record["request"]["deadline"]
+                        ).timestamp()
+                    ),
+                ]
+                for address in self.runtime.configured_ips:
+                    command.extend(("--deny-ip", address))
+                record["qualification_intent"] = True
+                self.save(record)
+                with (self.path(build_id) / "qualification.log").open("ab") as log:
+                    subprocess.Popen(
+                        command,
+                        stdout=log,
+                        stderr=log,
+                        start_new_session=True,
+                    )
+        return False
 
     def assembly_labels(self, record):
         return {
@@ -452,6 +465,30 @@ class DependencyBuilds:
         record.update(image=image, profile=profile.data(), state="qualifying")
         self.save(record)
 
+    def cleanup_assembly(self, record):
+        current = self.runtime.docker.inspect(record["assembly_name"])
+        if current is None:
+            return
+        labels = self.assembly_labels(record)
+        changed = (
+            record.get("assembly_container_id")
+            and current["Id"] != record["assembly_container_id"]
+        )
+        if (
+            changed
+            or current["Image"] != labels["vibearr.parent-image"]
+            or any(
+                current["Config"].get("Labels", {}).get(key) != value
+                for key, value in labels.items()
+            )
+        ):
+            raise EngineError(
+                "Assembly ownership changed; retain the dependency-build fence."
+            )
+        self.runtime.docker.remove("container", record["assembly_name"])
+        if self.runtime.docker.inspect(record["assembly_name"]) is not None:
+            raise EngineError("Assembly container removal was not confirmed.")
+
     def assemble(self, record):
         content = (
             self.runtime.path(record["request"]["build_id"]) / "dependencies.tar"
@@ -468,6 +505,7 @@ class DependencyBuilds:
         self.save(record)
         image = self.committed_image(record)
         if image is not None:
+            self.cleanup_assembly(record)
             self.adopt_image(record, image)
             return
         if record.get("image_commit_intent"):
@@ -557,7 +595,7 @@ class DependencyBuilds:
                 "Image commit response does not match its unique verified image."
             )
         self.adopt_image(record, image)
-        self.runtime.docker.remove("container", name)
+        self.cleanup_assembly(record)
 
     def qualified(self, record):
         from .qualification import REQUIRED_CHECKS, binding
@@ -641,8 +679,6 @@ class DependencyBuilds:
         }
 
     def stop(self, build_id):
-        from .runtime import Runtime
-
         with self.runtime.lock:
             record = self.read(build_id)
             if record["state"] in {"ready", "canceled"}:
@@ -663,34 +699,37 @@ class DependencyBuilds:
             raise EngineError(
                 "Qualification still owns resources; retain the build fence."
             )
-        if proof_state.exists():
-            for state in [proof_state, *proof_state.glob("image-probe-*")]:
-                configuration = state / "profiles.json"
-                if not configuration.exists():
-                    continue
-                from .contracts import Profile
-
-                profiles = [
-                    Profile.parse(value)
-                    for value in json.loads(configuration.read_bytes())
-                ]
-                recovery = Runtime(
-                    state, profiles, denied_ips=self.runtime.configured_ips
-                )
-                try:
-                    for operation in recovery.operations.iterdir():
-                        recovery.stop(operation.name)
-                finally:
-                    recovery.close()
-        current = self.runtime.docker.inspect(record["assembly_name"])
-        if current is not None:
-            labels = current["Config"].get("Labels", {})
-            if (
-                labels.get("vibearr.executor") != self.runtime.instance
-                or labels.get("vibearr.dependency-build") != build_id
-            ):
-                raise EngineError("Assembly ownership changed; retain the build fence.")
-            self.runtime.docker.remove("container", record["assembly_name"])
+        self.cleanup_qualification(record)
+        if record.get("assembly_intent"):
+            self.cleanup_assembly(record)
         record["state"] = "canceled"
         self.save(record)
         return self.public(record)
+
+    def cleanup_qualification(self, record):
+        from .runtime import Runtime
+        from .contracts import Profile
+
+        proof_state = self.path(record["request"]["build_id"]) / "qualification"
+        if not proof_state.exists():
+            return
+        for state in [proof_state, *proof_state.glob("image-probe-*")]:
+            configuration = state / "profiles.json"
+            if not configuration.exists():
+                continue
+            profiles = [
+                Profile.parse(value) for value in json.loads(configuration.read_bytes())
+            ]
+            recovery = Runtime(state, profiles, denied_ips=self.runtime.configured_ips)
+            try:
+                for operation in recovery.operations.iterdir():
+                    observed = recovery.stop(operation.name)
+                    if (
+                        observed.get("state") != "exited"
+                        or observed.get("descendants_terminated") is not True
+                    ):
+                        raise EngineError(
+                            "Qualification resources remain uncertain; retain the dependency-build fence."
+                        )
+            finally:
+                recovery.close()

@@ -7,6 +7,7 @@ RUN apt-get update \
 COPY vibearr_executor/validation-requirements.txt /opt/validation/requirements.txt
 COPY requirements.txt /opt/validation/project-requirements.txt
 RUN python -m pip install --no-cache-dir -r /opt/validation/requirements.txt
+RUN python -m venv --without-pip --copies /opt/application-python
 COPY vibearr_executor /opt/executor/vibearr_executor
 RUN ln -s /opt/executor/vibearr_executor /usr/local/lib/python3.12/site-packages/vibearr_executor
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1

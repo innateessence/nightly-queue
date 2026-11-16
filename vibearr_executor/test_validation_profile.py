@@ -48,6 +48,10 @@ class ValidationProfileTests(unittest.TestCase):
             changed.executor_profiles()[0].profile_id,
         )
 
+    def test_validation_requires_a_pinned_disposable_database(self):
+        with self.assertRaises(Rejected):
+            replace(self.profile, database_image="")
+
     def provenance(self):
         build = str(uuid4())
         return {

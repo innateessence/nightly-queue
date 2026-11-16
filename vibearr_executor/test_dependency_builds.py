@@ -286,6 +286,64 @@ class DependencyBuildContractTests(unittest.TestCase):
             )
         start.assert_not_called()
 
+    def test_cleanup_does_not_remove_a_replacement_assembly_container(self):
+        record = self.assembly()
+        record["assembly_container_id"] = "original-container"
+        engine = AssemblyEngine(self.profile.image)
+        engine.current = {
+            "Id": "replacement",
+            "Image": self.profile.image,
+            "Config": {
+                "Labels": self.runtime.dependency_builds.assembly_labels(record)
+            },
+        }
+        self.runtime.docker = engine
+        with self.assertRaises(EngineError):
+            self.runtime.dependency_builds.cleanup_assembly(record)
+        self.assertIsNotNone(engine.current)
+
+    def test_binding_change_during_qualification_preserves_unknown_fence(self):
+        self.prepare()
+        record = self.runtime.dependency_builds.read(self.request["build_id"])
+        record["state"] = "qualifying"
+        self.runtime.dependency_builds.save(record)
+        with patch(
+            "vibearr_executor.qualification.binding", return_value={"host": "changed"}
+        ):
+            self.runtime.dependency_builds.run(self.request["build_id"])
+        self.assertEqual(
+            self.runtime.dependency_builds.status(self.request["build_id"])["state"],
+            "unknown",
+        )
+        self.assertTrue(self.runtime.dependency_builds.blocked(str(uuid4())))
+
+    def test_failed_qualification_releases_fence_only_after_resource_cleanup(self):
+        self.prepare()
+        record = self.runtime.dependency_builds.read(self.request["build_id"])
+        record["state"] = "qualifying"
+        self.runtime.dependency_builds.save(record)
+        path = (
+            self.runtime.dependency_builds.path(self.request["build_id"])
+            / "qualification-exit.json"
+        )
+        path.write_text('{"success": false}')
+        with (
+            patch(
+                "vibearr_executor.qualification.binding", return_value={"host": "test"}
+            ),
+            patch.object(self.runtime.dependency_builds, "processes", return_value=[]),
+            patch.object(
+                self.runtime.dependency_builds, "cleanup_qualification"
+            ) as cleanup,
+        ):
+            self.runtime.dependency_builds.run(self.request["build_id"])
+        cleanup.assert_called_once()
+        self.assertEqual(
+            self.runtime.dependency_builds.status(self.request["build_id"])["state"],
+            "failed",
+        )
+        self.assertFalse(self.runtime.dependency_builds.blocked(str(uuid4())))
+
 
 class AssemblyEngine:
     def __init__(self, parent, *, lose_response=False, late=False):

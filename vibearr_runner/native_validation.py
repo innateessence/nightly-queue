@@ -40,6 +40,7 @@ def validation_diagnostics(policy, client=None, profile=None, *, capabilities=No
     try:
         from vibearr_executor.client import Client, ExecutorUnavailable
         from vibearr_executor.contracts import Rejected
+        from vibearr_executor import PROTOCOL_VERSION, QUALIFICATION_VERSION
 
         selected = (
             policy
@@ -52,6 +53,14 @@ def validation_diagnostics(policy, client=None, profile=None, *, capabilities=No
                 "Configured validation recipe differs from the selected execution policy."
             )
         observed = capabilities or (client or Client.from_environment()).capabilities()
+        if (
+            observed.get("schema_version") != 1
+            or observed.get("protocol_version") != PROTOCOL_VERSION
+            or observed.get("qualification_version") != QUALIFICATION_VERSION
+        ):
+            raise Rejected(
+                "The installed executor validation protocol or qualification version is unsupported."
+            )
         if (
             observed.get("qualified") is not True
             or observed.get("accepting_work") is not True
@@ -210,6 +219,11 @@ class ValidationRunner:
         if policy.validation_profile != profile.profile_id:
             raise Rejected("Validation profile differs from the frozen policy.")
         capabilities = self.client.capabilities()
+        diagnostic = validation_diagnostics(
+            policy, self.client, profile, capabilities=capabilities
+        )
+        if not diagnostic["ready"]:
+            raise Rejected(diagnostic["reason"])
         registered = {value["profile_id"]: value for value in capabilities["profiles"]}
         if not capabilities["accepting_work"]:
             raise Rejected("Runtime qualification or capacity blocks validation.")

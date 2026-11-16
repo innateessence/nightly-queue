@@ -60,6 +60,13 @@ class ValidationProfile:
         from .contracts import sha256
 
         sha256(self.dependency_digest)
+        if not isinstance(
+            self.database_image, str
+        ) or not self.database_image.startswith("sha256:"):
+            raise Rejected(
+                "Trusted validation requires a pinned disposable PostgreSQL image."
+            )
+        sha256(self.database_image[7:])
         if (
             self.profile_id != PROFILE_ID
             or type(self.version) is not int

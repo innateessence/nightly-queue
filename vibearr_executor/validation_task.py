@@ -118,7 +118,13 @@ def main() -> int:
         )
         return 0
     return subprocess.run(
-        [sys.executable, "-I", "-S", str(ROOT / "validation_app.py"), check],
+        [
+            "/opt/application-python/bin/python",
+            "-I",
+            "-S",
+            str(ROOT / "validation_app.py"),
+            check,
+        ],
         check=False,
     ).returncode
 
