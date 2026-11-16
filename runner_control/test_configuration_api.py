@@ -91,7 +91,7 @@ class RunnerConfigurationAPITests(ConfiguredProjectTestCase):
     def test_missing_configuration_never_claims_item(self):
         item = enqueue_item(project=self.project, title="Incomplete configuration")
         saved = RunnerSettings.objects.get(pk=1)
-        saved.validation_commands = []
+        saved.implementation_model = ""
         saved.save()
         response = self.claim(configuration_document()["revision"])
         self.assertEqual(response.status_code, 200)
@@ -107,7 +107,7 @@ class RunnerConfigurationAPITests(ConfiguredProjectTestCase):
             name="Invalid", repository_url="https://github.com/example/invalid"
         )
         ProjectRunnerSettings.objects.create(
-            project=invalid, overrides={"validation_commands": {"mode": "clear"}}
+            project=invalid, overrides={"implementation_model": {"mode": "clear"}}
         )
         waiting = enqueue_item(project=invalid, title="Invalid first")
         valid = enqueue_item(project=self.project, title="Valid second")

@@ -8,11 +8,18 @@ from . import (
     plan_api,
     secrets,
     operations_api,
+    native_api,
 )
 
 from . import recovery_api, source_api
 
 urlpatterns = [
+    path("candidates/", native_api.native_candidates, name="runner_candidates"),
+    path(
+        "runs/<uuid:run_id>/native/status/",
+        native_api.native_status,
+        name="runner_native_status",
+    ),
     path(
         "runs/<uuid:run_id>/source/refresh/",
         source_api.refresh_source,

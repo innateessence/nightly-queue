@@ -7,6 +7,7 @@ from django.utils import timezone
 from credentials.redaction import redact_run_payload
 
 from vibearr_runner.context import ContextError, digest, discussion_digest
+from vibearr_runner.native_contract import NativeContractError
 from vibearr_runner.plans import revision, validate_context, validate_plan
 from work_queue.api import item_data
 
@@ -34,7 +35,7 @@ def claimed_item(run):
 def checked(operation):
     try:
         return operation()
-    except ContextError as exc:
+    except (ContextError, NativeContractError) as exc:
         raise ValidationError({"document": str(exc)}) from None
 
 
@@ -96,7 +97,9 @@ def save_context(
         raise ValidationError(
             {"resolved_base_branch": "Record the actual resolved base branch."}
         )
-    checked(lambda: validate_context(document, claimed_item(run)))
+    native = run.configuration_snapshot.get("execution_kind") == "native"
+    if not native:
+        checked(lambda: validate_context(document, claimed_item(run)))
     previous = previous_operation(
         ContextSnapshot,
         run,
@@ -108,11 +111,21 @@ def save_context(
     )
     if previous is not None:
         return previous
+    if native:
+        from .native_services import authorize, lock_scope, validate_context_binding
+
+        run, configuration = lock_scope(run, claim_token)
+        authorize(run, configuration)
+        checked(
+            lambda: validate_context_binding(
+                run, document, base_commit, resolved_base_branch
+            )
+        )
     latest = run.contexts.last()
     if latest is not None and not reason.strip():
         raise ValidationError({"reason": "Describe why the context was refreshed."})
     changes = []
-    discussion = discussion_digest(document)
+    discussion = digest(document["source"]) if native else discussion_digest(document)
     if latest and latest.discussion_digest != discussion:
         changes.append("discussion")
     if latest and latest.resolved_base_branch != resolved_base_branch:
@@ -148,16 +161,21 @@ def save_plan(*, runner, run_id, claim_token, operation_id, document, reason):
     if latest_context is None:
         raise RunConflict("Save complete context before a plan.")
     require_safe_document(run, latest_context.document)
-    checked(
-        lambda: validate_plan(
-            document,
-            latest_context.document,
-            str(latest_context.pk),
-            latest_context.inspected_base_commit,
+    if run.configuration_snapshot.get("execution_kind") == "native":
+        from .native_services import validate_plan_binding
+
+        checked(lambda: validate_plan_binding(run, document, latest_context))
+    else:
+        checked(
+            lambda: validate_plan(
+                document,
+                latest_context.document,
+                str(latest_context.pk),
+                latest_context.inspected_base_commit,
+            )
         )
-    )
-    if document["resolved_base_branch"] != latest_context.resolved_base_branch:
-        raise RunConflict("Plan must preserve the inspected resolved base branch.")
+        if document["resolved_base_branch"] != latest_context.resolved_base_branch:
+            raise RunConflict("Plan must preserve the inspected resolved base branch.")
     latest = run.plans.last()
     if latest is not None and not reason.strip():
         raise ValidationError(
