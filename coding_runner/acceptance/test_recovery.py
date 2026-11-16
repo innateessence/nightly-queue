@@ -470,7 +470,8 @@ class LifecycleRecoveryTests(WorkspaceFixture, unittest.TestCase):
         def factory(client, journal, backends, checkpoint, **kwargs):
             lifecycle = owner.lifecycle()
             lifecycle.checkpoint = checkpoint
-            lifecycle.ready = lambda configuration: True
+            lifecycle.ready = lambda configuration, state=None: True
+            lifecycle.claim_project_ids = [1]
             return lifecycle
 
         gates = GateEvaluator(self.journal, clock=lambda: NOW)

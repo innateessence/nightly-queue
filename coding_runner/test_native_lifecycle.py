@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import shutil
+import subprocess
 from pathlib import Path
 import tempfile
 import threading
@@ -23,6 +24,7 @@ from vibearr_runner.native_github import NativeGitHub
 from vibearr_runner.policy import ExecutionPolicy
 from vibearr_runner.recovery import ReconciliationRequired
 from vibearr_runner.workspaces import Workspace, git
+from vibearr_runner.workspaces import WorkspaceManager
 
 SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
 REPOSITORY_READ = NativeGitHub.repository
@@ -421,6 +423,98 @@ class NativeLifecycleTests(unittest.TestCase):
         self.assertTrue(self.state["native"]["paused"])
         record = next(iter(self.state["native"]["transport_reads"].values()))
         self.assertEqual(record["attempts"], 1)
+
+    def test_partial_failed_clone_restarts_with_the_same_read_budget(self):
+        from vibearr_runner import processes
+
+        self.host.workspaces = WorkspaceManager(self.root / "fresh-workspaces")
+        original = processes.run
+        attempts = []
+
+        def clone(arguments, **kwargs):
+            if "clone" not in arguments:
+                return original(arguments, **kwargs)
+            attempts.append(arguments)
+            checkout = Path(arguments[-1])
+            if len(attempts) == 1:
+                checkout.mkdir()
+                (checkout / "partial").write_text("incomplete")
+                return subprocess.CompletedProcess(
+                    arguments, 128, b"", b"Could not resolve host: github.com"
+                )
+            self.assertFalse(checkout.exists())
+            local = [
+                "/usr/bin/git",
+                "-c",
+                "protocol.file.allow=always",
+                "clone",
+                "--no-checkout",
+                "--no-local",
+                "--single-branch",
+                "--branch",
+                "main",
+                "--",
+                str(self.workspace.checkout),
+                str(checkout),
+            ]
+            return original(local, **kwargs)
+
+        with patch("vibearr_runner.delivery.processes.run", side_effect=clone):
+            self.assertEqual(self.engine().step(self.state), "wait")
+            record = next(iter(self.state["native"]["transport_reads"].values()))
+            self.assertEqual(record["attempts"], 1)
+            record["retry_at"] = 0
+            self.journal.save(self.state)
+            self.state = self.journal.load()
+            self.assertEqual(self.engine().step(self.state), "continue")
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(self.state["native"]["phase"], "agent")
+        self.assertEqual(self.executor.started, [])
+        self.assertEqual(self.queue.finishes, [])
+
+    def test_completed_clone_restart_finishes_checkout_without_recloning(self):
+        from vibearr_runner import processes
+        from vibearr_runner import workspaces
+
+        self.host.workspaces = WorkspaceManager(self.root / "fresh-workspaces")
+        original, original_git = processes.run, workspaces.git
+        attempts = []
+
+        def clone(arguments, **kwargs):
+            if "clone" not in arguments:
+                return original(arguments, **kwargs)
+            attempts.append(arguments)
+            local = [
+                "/usr/bin/git",
+                "-c",
+                "protocol.file.allow=always",
+                "clone",
+                "--no-checkout",
+                "--no-local",
+                "--single-branch",
+                "--branch",
+                "main",
+                "--",
+                str(self.workspace.checkout),
+                arguments[-1],
+            ]
+            return original(local, **kwargs)
+
+        def interrupt(arguments, *args, **kwargs):
+            if arguments[:2] == ["symbolic-ref", "--short"]:
+                raise KeyboardInterrupt("supervisor restart")
+            return original_git(arguments, *args, **kwargs)
+
+        with patch("vibearr_runner.delivery.processes.run", side_effect=clone):
+            with patch("vibearr_runner.workspaces.git", side_effect=interrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    self.engine().step(self.state)
+            self.state = self.journal.load()
+            self.assertEqual(self.state["native"]["clone"]["state"], "completed")
+            self.assertEqual(self.engine().step(self.state), "continue")
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(self.state["native"]["phase"], "agent")
+        self.assertEqual(self.executor.started, [])
 
     def advance(self, phase):
         for _ in range(50):
