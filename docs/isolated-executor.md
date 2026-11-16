@@ -280,7 +280,7 @@ image. `native_agent_ready: false` means this executor does not attest native
 backend availability; feature 03 supplies that separate diagnostic. The runtime
 diagnostic can succeed before any production claim or model call.
 
-Qualification version 2 binds executor source digest, engine ID/version/API,
+Qualification version 3 binds executor source digest, engine ID/version/API,
 kernel, security options, cgroup/storage driver, active-run limit, denied host
 addresses, exact registry digests and installed immutable image contracts. Every
 distinct task image must have a complete actual host probe report. Changes or
@@ -312,7 +312,8 @@ this ordinary-operation assertion: creating the private network added only gatew
 binding now records the stable authorization inputs described above; the same strict
 ordinary lifecycle check remains mandatory on rootful CI and rootless hosts.
 The checks exercise hostile source/imports and forged receipts, selected-secret
-isolation, credential-free package installation, model HTTPS reachability without
+isolation, pause/resume and deadline reconciliation, terminal retention,
+credential-free package installation, model HTTPS reachability without
 auth, offline validation, real ENOSPC/PID/OOM/CPU enforcement, restart-stable launch,
 detached descendant stop/export, and fresh PostgreSQL/cross-operation isolation.
 The workspace/PID/CPU probe must exit successfully and export its verified source
@@ -324,8 +325,8 @@ operation identity, memory/PID limits, `OOMKilled=true`, and exit 137 as boundar
 evidence. The runtime remains unknown until explicit stop confirms every descendant
 gone; the report keeps a null task exit and marks its workspace export unavailable.
 Ordinary unknowns, arbitrary signals, foreign identities and missing receipts never
-become successful tasks or validations. Protocol/schema stay at 1; version 1
-qualification reports must be replaced by all eleven version 2 checks.
+become successful tasks or validations. Protocol/schema stay at 1; earlier
+qualification reports must be replaced by all thirteen version 3 checks.
 
 Qualification prints safe profile/operation progress and preserves unknown-state
 diagnostics, including engine exit/OOM metadata, before cleanup. It omits source,
