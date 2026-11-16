@@ -2,6 +2,8 @@ import copy
 import uuid
 
 from django.core.exceptions import ValidationError
+from coding_runner.context import digest
+from coding_runner.approvals import ActionSpec
 
 from runner_control.models import ActionApproval, Run, RunEvidence
 from django.test import TestCase
@@ -42,7 +44,7 @@ class DeliveryAPITests(TestCase):
             run_id=self.run_id,
             operation_id=uuid.uuid4(),
             action=self.action,
-            binding_digest="c" * 64,
+            binding_digest=ActionSpec.from_data(self.action).binding_digest,
             decision="approved",
             execution_id=self.execution_id,
             consumed_at=timezone.now(),
@@ -180,6 +182,50 @@ class DeliveryAPITests(TestCase):
         invalid["implementation"]["plan_digest"] = "e" * 64
         self.assertEqual(self.upload(invalid).status_code, 400)
         self.assertFalse(RunEvidence.objects.filter(kind="verified_delivery").exists())
+
+    def test_configured_string_command_requires_matching_approved_evidence(self):
+        run = Run.objects.get(pk=self.run_id)
+        run.configuration_snapshot = {
+            "effective": {"validation_commands": ["python -m unittest"]}
+        }
+        run.save()
+        self.assertEqual(self.upload().status_code, 400)
+        action = {
+            **self.action,
+            "argv": ["/bin/sh", "-c", "python -m unittest"],
+            "mode": "shell",
+            "source_kind": "operator",
+            "source_reference": "run-configuration:" + str(self.run_id),
+            "source_digest": digest(run.configuration_snapshot),
+        }
+        execution = uuid.uuid4()
+        ActionApproval.objects.create(
+            run_id=self.run_id,
+            operation_id=uuid.uuid4(),
+            action=action,
+            binding_digest=ActionSpec.from_data(action).binding_digest,
+            decision="approved",
+            execution_id=execution,
+            consumed_at=timezone.now(),
+        )
+        check = {
+            **self.payload["implementation"]["validation"][0],
+            "action": action,
+            "execution_id": str(execution),
+        }
+        self.payload["implementation"]["validation"].append(check)
+        self.assertEqual(self.upload().status_code, 200)
+        self.assertEqual(self.finish_success().status_code, 200)
+
+    def test_unconsumed_human_approval_cannot_assert_validation(self):
+        ActionApproval.objects.filter(run_id=self.run_id).update(consumed_at=None)
+        self.assertEqual(self.upload().status_code, 400)
+
+    def test_foreign_execution_id_cannot_assert_validation(self):
+        self.payload["implementation"]["validation"][0]["execution_id"] = str(
+            uuid.uuid4()
+        )
+        self.assertEqual(self.upload().status_code, 400)
 
     def test_invalid_data_types_raise_validation_error(self):
         for payload in ({}, [], None, {**self.payload, "implementation": []}):

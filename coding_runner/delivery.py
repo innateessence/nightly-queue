@@ -4,6 +4,8 @@ import json
 import os
 import re
 import subprocess
+import tempfile
+import shlex
 import time
 from http.client import HTTPException
 from typing import Any
@@ -12,9 +14,10 @@ from urllib.parse import urlencode
 from urllib.request import ProxyHandler, Request, build_opener
 from uuid import uuid4
 
+from .backends import BackendError
 from .client import APIError, AmbiguousRequest, NoRedirects
 from .context import repository_path
-from .workspaces import Workspace, clean_environment, git
+from .workspaces import Workspace, WorkspaceError, clean_environment, git
 
 
 class DeliveryError(Exception):
@@ -22,6 +25,10 @@ class DeliveryError(Exception):
 
 
 class DeliveryUnknown(DeliveryError):
+    pass
+
+
+class DeliveryWait(DeliveryError):
     pass
 
 
@@ -152,16 +159,30 @@ class SupervisorGit:
     def remote(self, workspace: Workspace, arguments: list[str]) -> str:
         if not self.trusted_local:
             repository_path(workspace.repository_url)
-        descriptor = os.memfd_create("repository-credential", os.MFD_CLOEXEC)
+            if (
+                not self.token
+                or len(self.token) > 65536
+                or any(character.isspace() for character in self.token)
+            ):
+                raise DeliveryError("A selected repository credential is required.")
+        credential = tempfile.TemporaryFile(dir=workspace.directory)
+        descriptor = credential.fileno()
         try:
-            os.write(descriptor, self.token.encode())
-            helper = f"!/usr/bin/python3 {os.path.dirname(__file__)}/git_credential.py {os.getpid()} {descriptor}"
+            credential.write(self.token.encode())
+            credential.flush()
+            helper_path = shlex.quote(os.path.dirname(__file__) + "/git_credential.py")
+            scope = repository_path(workspace.repository_url).lstrip("/")
+            helper = f"!/usr/bin/python3 {helper_path} {os.getpid()} {descriptor} {shlex.quote(scope)}"
             command = [
                 "/usr/bin/git",
                 "-c",
                 "core.hooksPath=/dev/null",
                 "-c",
                 "core.fsmonitor=false",
+                "-c",
+                "http.followRedirects=false",
+                "-c",
+                "credential.useHttpPath=true",
                 "-c",
                 "credential.helper=",
                 "-c",
@@ -192,7 +213,7 @@ class SupervisorGit:
                 "Repository operation outcome requires reconciliation."
             ) from None
         finally:
-            os.close(descriptor)
+            credential.close()
 
     def observed_remote(self, workspace: Workspace) -> str:
         output = self.remote(
@@ -273,7 +294,7 @@ class DeliveryStage:
 
     def allowed(self):
         if self.gate is None or not self.gate():
-            raise DeliveryError("Delivery is waiting for current execution gates.")
+            raise DeliveryWait("Delivery is waiting for current execution gates.")
 
     def step(
         self,
@@ -298,14 +319,18 @@ class DeliveryStage:
                 return self.deliver(
                     state, run_id, workspace, evidence, plan, claim_token
                 )
-        except (DeliveryError, APIError) as exc:
+        except (DeliveryError, APIError, WorkspaceError, BackendError) as exc:
             delivery["error"] = str(exc)
             self.save(state, delivery)
             return {
                 "status": (
-                    "reconciliation"
-                    if isinstance(exc, (DeliveryUnknown, AmbiguousRequest))
-                    else "failed"
+                    "wait"
+                    if isinstance(exc, DeliveryWait)
+                    else (
+                        "reconciliation"
+                        if isinstance(exc, (DeliveryUnknown, AmbiguousRequest))
+                        else "failed"
+                    )
                 ),
                 "error": str(exc),
                 "pull_request": delivery.get("pull_request"),
@@ -460,6 +485,14 @@ class DeliveryStage:
                         "error_summary": "",
                     },
                 )
+        except DeliveryError as exc:
+            delivery["error"] = str(exc)
+            self.save(state, delivery)
+            return {
+                "status": "reconciliation",
+                "error": str(exc),
+                "pull_request": delivery["pull_request"],
+            }
         except APIError:
             return {
                 "status": "reporting_pending",

@@ -6,7 +6,7 @@ from uuid import UUID
 from django.core.exceptions import ValidationError
 
 from coding_runner.approvals import ActionSpec
-from coding_runner.context import repository_path
+from coding_runner.context import repository_path, digest
 from coding_runner.delivery import DeliveryError, pull_identity
 
 from .plan_services import valid_handoff
@@ -196,6 +196,7 @@ def checked_delivery(run, payload):
             decision=ActionApproval.Decision.APPROVED,
             consumed_at__isnull=False,
             action=action.to_data(),
+            binding_digest=action.binding_digest,
         ).exists():
             reject()
         actions.append(action.to_data())
@@ -211,6 +212,8 @@ def checked_delivery(run, payload):
             record["argv"] == ["/bin/sh", "-c", command]
             and record["mode"] == "shell"
             and record["source_kind"] == "operator"
+            and record["source_reference"] == "run-configuration:" + str(run.pk)
+            and record["source_digest"] == digest(run.configuration_snapshot)
             for record in actions
         ):
             reject()

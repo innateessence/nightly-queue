@@ -1,6 +1,5 @@
 import copy
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -235,7 +234,7 @@ class DeliveryTests(unittest.TestCase):
 
     def test_gate_closure_prevents_delivery(self):
         self.stage.gate = lambda: False
-        self.assertEqual(self.step()["status"], "failed")
+        self.assertEqual(self.step()["status"], "wait")
         self.assertEqual(self.github.creates, 0)
 
     def test_commit_is_reconciled_after_journal_response_loss(self):
@@ -254,6 +253,72 @@ class DeliveryTests(unittest.TestCase):
         head = git(["rev-parse", "HEAD"], self.workspace.checkout)
         self.assertEqual(self.step()["status"], "finished")
         self.assertEqual(git(["rev-parse", "HEAD"], self.workspace.checkout), head)
+
+    def test_commit_hooks_are_never_executed(self):
+        marker = self.root / "hook-ran"
+        hook = self.workspace.checkout / ".git/hooks/pre-commit"
+        hook.write_text("#!/bin/sh\ntouch " + str(marker) + "\n")
+        hook.chmod(0o755)
+        self.assertEqual(self.step()["status"], "finished")
+        self.assertFalse(marker.exists())
+
+    def test_new_file_is_committed_without_repeating_validation(self):
+        from coding_runner.implementation import workspace_evidence
+
+        (self.workspace.checkout / "new.txt").write_text("New validated file\n")
+        current = workspace_evidence(self.workspace)
+        self.evidence["workspace"] = current
+        self.evidence["validation"][0].update(before=current, after=current)
+        self.assertEqual(self.step()["status"], "finished")
+        self.assertEqual(git(["status", "--porcelain"], self.workspace.checkout), "")
+        self.assertEqual(
+            git(["show", "HEAD:new.txt"], self.workspace.checkout), "New validated file"
+        )
+
+    def test_non_fast_forward_remote_conflict_preserves_remote(self):
+        competing = self.root / "competing"
+        git(["clone", str(self.remote), str(competing)], local=True)
+        git(["checkout", "-b", "nq/task"], competing)
+        (competing / "other.txt").write_text("Other task change\n")
+        git(["add", "other.txt"], competing)
+        git(
+            [
+                "-c",
+                "user.name=Other",
+                "-c",
+                "user.email=other@example.com",
+                "commit",
+                "-m",
+                "Competing",
+            ],
+            competing,
+        )
+        git(["push", "origin", "nq/task"], competing, local=True)
+        remote_head = git(["rev-parse", "HEAD"], competing)
+        self.assertEqual(self.step()["status"], "failed")
+        self.assertEqual(self.repo_git.observed_remote(self.workspace), remote_head)
+        self.assertEqual(self.github.creates, 0)
+
+    def test_foreign_journal_commit_requires_reconciliation(self):
+        self.stage.repository_git.push = Mock(side_effect=DeliveryUnknown("Lost push"))
+        self.step()
+        self.state["delivery"].pop("commit_sha")
+        (self.workspace.checkout / "README.md").write_text("Unexpected change\n")
+        git(["add", "README.md"], self.workspace.checkout)
+        git(
+            [
+                "-c",
+                "user.name=Other",
+                "-c",
+                "user.email=other@example.com",
+                "commit",
+                "-m",
+                "Unexpected",
+            ],
+            self.workspace.checkout,
+        )
+        self.assertEqual(self.step()["status"], "failed")
+        self.assertEqual(self.github.creates, 0)
 
     def test_pr_description_includes_problem_validation_and_original_issue(self):
         body = description(self.plan, self.evidence)
