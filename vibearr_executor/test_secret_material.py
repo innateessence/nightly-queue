@@ -1,0 +1,76 @@
+import json
+import unittest
+
+from .secret_material import contains_secret, protection_material, redact
+
+
+class StructuredSecretTests(unittest.TestCase):
+    def setUp(self):
+        self.access = b"access-token-0123456789"
+        self.refresh = b"refresh-token-9876543210"
+        self.secret = json.dumps(
+            {
+                "tokens": {
+                    "access_token": self.access.decode(),
+                    "refresh_token": self.refresh.decode(),
+                }
+            }
+        ).encode()
+
+    def test_individual_structured_tokens_are_redacted(self):
+        self.assertEqual(
+            redact(self.access + b" " + self.refresh, self.secret),
+            b"[REDACTED] [REDACTED]",
+        )
+
+    def test_partial_token_is_withheld_from_stream(self):
+        self.assertEqual(
+            redact(b"value:" + self.access[:12], self.secret, incomplete=True),
+            b"value:",
+        )
+
+    def test_individual_token_in_export_is_detected(self):
+        self.assertTrue(contains_secret(b"file content " + self.access, self.secret))
+
+    def test_invalid_json_still_redacts_full_selected_secret(self):
+        self.assertEqual(
+            redact(b"prefix:key-not-json-123456789", b"key-not-json-123456789"),
+            b"prefix:[REDACTED]",
+        )
+
+    def test_no_secret_preserves_output(self):
+        self.assertEqual(redact(b"unchanged", b""), b"unchanged")
+
+    def test_nonsecret_auth_metadata_does_not_reject_repository_source(self):
+        selected = json.dumps(
+            {
+                "auth_mode": "chatgptAuthTokens",
+                "last_refresh": "1970-01-01T00:00:00Z",
+                "tokens": {"access_token": self.access.decode()},
+            }
+        ).encode()
+        source = (
+            b'auth_mode = "chatgptAuthTokens"\nlast_refresh = "1970-01-01T00:00:00Z"\n'
+        )
+        self.assertFalse(contains_secret(source, selected))
+        self.assertEqual(redact(source, selected), source)
+
+    def test_disposable_database_url_and_password_are_redacted_with_backend_tokens(
+        self,
+    ):
+        password = "a" * 48
+        url = f"postgresql://task:{password}@172.20.0.2:5432/task"
+        protected = protection_material(self.secret, url)
+        output = self.access + b" " + password.encode() + b" " + url.encode()
+        self.assertEqual(redact(output, protected), b"[REDACTED] [REDACTED] [REDACTED]")
+
+    def test_disposable_database_password_in_export_is_rejected_without_model_secret(
+        self,
+    ):
+        password = "a" * 48
+        protected = protection_material(
+            b"", f"postgresql://task:{password}@172.20.0.2:5432/task"
+        )
+        self.assertTrue(
+            contains_secret(b"connection_password=" + password.encode(), protected)
+        )
