@@ -222,6 +222,11 @@ do not establish that an agent environment works in deployment. The independent
 profiles, and automated host qualification; the supervisor uses its authenticated
 control API. Runtime readiness is separate from native coding-agent readiness.
 
+The [isolated validation profile](docs/isolated-validation.md) tests exact committed
+trees in fresh containers and disposable databases. It keeps required commands
+outside candidate control and builds dependency changes without touching the live
+installation.
+
 ## Keeping your data
 
 PostgreSQL data lives in the `postgres-data` volume. `docker compose down` keeps

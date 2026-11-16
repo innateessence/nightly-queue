@@ -33,6 +33,20 @@ def runtime_diagnostics(policy: dict, client=None) -> dict:
         }
         agent = profiles.get(selected.runtime_profile)
         validation = profiles.get(selected.validation_profile)
+        validation_document = None
+        from vibearr_executor.validation_profile import PROFILE_ID
+
+        if selected.validation_profile == PROFILE_ID:
+            from .native_validation import validation_diagnostics
+
+            diagnostic = validation_diagnostics(
+                selected, executor, capabilities=capabilities
+            )
+            if not diagnostic["ready"]:
+                raise ValueError(diagnostic["reason"])
+            validation_document = diagnostic["profile"]
+            first = validation_document["executor_profiles"][0]["profile_id"]
+            validation = profiles[first]
         if (
             not agent
             or agent.get("phase") != "agent"
@@ -70,7 +84,7 @@ def runtime_diagnostics(policy: dict, client=None) -> dict:
             "native_agent_ready": False,
             "binding_digest": capabilities["binding_digest"],
             "runtime_profile": agent,
-            "validation_profile": validation,
+            "validation_profile": validation_document or validation,
             "reason": "Installed runtime is qualified; native adapter/authentication and lifecycle diagnostics remain separate.",
         }
     except ImportError:

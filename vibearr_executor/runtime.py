@@ -87,6 +87,9 @@ class Runtime:
         if not identity.exists():
             durable(identity, str(uuid4()).encode())
         self.instance = identifier(identity.read_text())
+        from .dependency_builds import DependencyBuilds
+
+        self.dependency_builds = DependencyBuilds(self)
 
     def close(self):
         self.lockfile.close()
@@ -170,6 +173,10 @@ class Runtime:
                     )
                 return self.public(record)
             profile = self.profiles.get(data.get("profile_id", ""))
+            if profile is None:
+                profile = self.dependency_builds.profiles(
+                    run_id=data.get("run_id")
+                ).get(data.get("profile_id", ""))
             if profile is None:
                 raise Rejected("Runtime profile is not registered.")
             manifest = Manifest.parse(data, profile)
@@ -459,6 +466,16 @@ class Runtime:
             from .qualify import smoke_profiles
 
             profile = record["profile"]
+            if self.dependency_builds.blocked(operation_id):
+                raise Conflict(
+                    "A dependency build owns the executor; reconcile or stop it first."
+                )
+            if profile["profile_id"] not in self.profiles:
+                derived = self.dependency_builds.profiles(
+                    run_id=record["manifest"]["run_id"]
+                ).get(profile["profile_id"])
+                if derived is None or derived.data() != profile:
+                    raise Rejected("Derived image qualification is missing or stale.")
             probes = smoke_profiles(profile["image"], profile["database_image"])
             is_probe = any(candidate.data() == profile for candidate in probes)
             if not is_probe and not capabilities(self)["qualified"]:
@@ -573,6 +590,13 @@ class Runtime:
                 "/tmp": "size=16m,mode=1777",
                 "/home/task": "size=32m,uid=1000,gid=1000,mode=0700",
             }
+            from .validation_profile import BUILD_ARGV
+
+            if (
+                tuple(record["profile"]["argv"]) == BUILD_ARGV
+                and record["profile"]["phase"] == "setup"
+            ):
+                mounts["/state"] = "size=320m,mode=0700,noexec"
             for destination, options in mounts.items():
                 arguments.extend(
                     ("--tmpfs", f"{destination}:rw,nosuid,nodev,{options}")
@@ -673,6 +697,15 @@ class Runtime:
         if logs is None or digest(logs) != result.get("log_digest"):
             raise ResultInvalid("Runtime log digest does not match.")
         durable(path / "logs.bin", logs)
+        if result.get("dependency_artifact"):
+            from .dependency_artifacts import MAX_DEPENDENCIES, manifest
+
+            dependencies = self.docker.read(name, "dependencies.tar", MAX_DEPENDENCIES)
+            if dependencies is None or canonical(manifest(dependencies)) != canonical(
+                result["dependency_artifact"]
+            ):
+                raise ResultInvalid("Protected dependency layer digest does not match.")
+            durable(path / "dependencies.tar", dependencies)
         if result.get("artifact"):
             exported = self.docker.read(name, "source.tar", MAX_ARCHIVE)
             source = (path / "input" / "source.tar").read_bytes()

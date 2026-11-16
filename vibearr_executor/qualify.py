@@ -77,8 +77,11 @@ def require(value, message):
 
 
 class Harness:
-    def __init__(self, state: Path, profiles: list[Profile]):
+    def __init__(
+        self, state: Path, profiles: list[Profile], *, denied_ips: tuple[str, ...] = ()
+    ):
         self.state, self.profiles = state, profiles
+        self.denied_ips = denied_ips
         self.process: subprocess.Popen | None = None
         self.server_log = None
         self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -108,6 +111,8 @@ class Harness:
             str(self.port),
         ]
         environment = dict(os.environ)
+        for address in self.denied_ips:
+            command.extend(("--deny-ip", address))
         environment.pop("PYTHONPATH", None)
         environment.pop("PYTHONHOME", None)
         self.process = subprocess.Popen(
@@ -179,8 +184,10 @@ class Harness:
         raise RuntimeError("Qualification task did not terminate in time.")
 
 
-def qualify_one(state: Path, profiles: list[Profile]) -> dict:
-    harness = Harness(state, profiles)
+def qualify_one(
+    state: Path, profiles: list[Profile], *, denied_ips: tuple[str, ...] = ()
+) -> dict:
+    harness = Harness(state, profiles, denied_ips=denied_ips)
     source = pack(
         {
             "original.txt": (0o644, b"original\n"),
@@ -518,7 +525,7 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
             except ExecutorUnavailable:
                 pass
         harness.shutdown()
-    runtime = Runtime(state, profiles)
+    runtime = Runtime(state, profiles, denied_ips=denied_ips)
     try:
         report = {
             "schema_version": 1,
@@ -535,8 +542,10 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
         runtime.close()
 
 
-def qualify(state: Path, profiles: list[Profile]) -> dict:
-    preflight = Runtime(state, profiles)
+def qualify(
+    state: Path, profiles: list[Profile], *, denied_ips: tuple[str, ...] = ()
+) -> dict:
+    preflight = Runtime(state, profiles, denied_ips=denied_ips)
     try:
         if any(
             preflight.record(path.name).get("launch_intent")
@@ -561,14 +570,16 @@ def qualify(state: Path, profiles: list[Profile]) -> dict:
     database = next(
         profile.database_image for profile in profiles if profile.database_image
     )
-    report = qualify_one(state, profiles)
+    report = qualify_one(state, profiles, denied_ips=denied_ips)
     for image in sorted({profile.image for profile in profiles} - {primary}):
         probe_state = state / ("image-probe-" + image.removeprefix("sha256:")[:16])
-        image_report = qualify_one(probe_state, smoke_profiles(image, database))
+        image_report = qualify_one(
+            probe_state, smoke_profiles(image, database), denied_ips=denied_ips
+        )
         report["image_checks"][image] = image_report["checks"]
         report.setdefault("image_observations", {})[image] = image_report
     durable(state / "qualification.json", canonical(report))
-    runtime = Runtime(state, profiles)
+    runtime = Runtime(state, profiles, denied_ips=denied_ips)
     try:
         from .qualification import capabilities
 

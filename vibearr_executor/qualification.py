@@ -118,7 +118,10 @@ def capabilities(runtime: Runtime) -> dict:
                 "backend_secret_env": profile.backend_secret_env,
                 "database_image": profile.database_image,
             }
-            for profile in runtime.profiles.values()
+            for profile in [
+                *runtime.profiles.values(),
+                *runtime.dependency_builds.profiles().values(),
+            ]
         ],
         "reason": (
             "Actual OCI boundary checks passed for this installed runtime."
