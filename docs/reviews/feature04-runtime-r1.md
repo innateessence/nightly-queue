@@ -1,4 +1,4 @@
-# Feature 04 runtime independent review, round 1
+# Feature 04 runtime independent review, round 1 (historical)
 
 Final reviewed executable source: `8c6c6b43143e532f89e81ae5d8831d4e393425b6`.
 Initial controls review source: `fe3baca6b1c54f9e0cf883b6051738adac87b589`.
@@ -8,10 +8,44 @@ Topic: [PR 93](https://github.com/innateessence/nightly-queue/pull/93),
 `feat/native-runtime-controls` into `feat/unattended-issue-to-pr`.
 Review date: 2026-11-16. This report changes documentation only.
 
-No P0, P1, or P2 findings were identified in the reviewed runtime topic. Integration
-remains subject to root review and successful CI on the exact topic and report
-heads. This report does not clear later executable changes or the separate native
-server/controller integration.
+**Outcome: changes required. One confirmed P2 finding remains at this historical
+revision.** This supersedes the preliminary clean conclusions in report commits
+`9ba1632` and `364f312`. No P0 or P1 finding was identified. The final receipt API
+delta passed its independent functional checks, but exact report-head OCI CI
+exposed the qualification defect below. This report does not clear a fix, later
+executable changes, or separate native server/controller integration. A fresh
+independent round 2 is required after the author publishes a stable correction.
+
+## P2 — The pause qualification samples outside the frozen interval
+
+`vibearr_executor/control_qualification.py:115` samples `frozen` before requesting
+pause. Lines 128–133 resume the task and complete the resume/status API work before
+sampling `advanced`. Lines 134–137 then assert `0 <= advanced - frozen <= 8` as
+proof that the counter did not advance while frozen.
+
+Both measurement edges include time when the task is legitimately running. Its
+fixed counter writes every 50 ms, so more than about 400 ms of combined pre-pause
+and post-resume API/engine/scheduling time can fail this assertion even when Docker
+freezes the task correctly. The check does not isolate counter stability during
+the paused interval, and an increased tolerance would retain the invalid window.
+
+This occurred in the exact `364f31224751d051888416b5fe21ce5eede53b22` report-head
+[rootful OCI CI run](https://github.com/innateessence/nightly-queue/actions/runs/43883143828)
+against unchanged `8c6c6b4` executable source. The run reached `smoke-controls-v1`,
+then failed with `RuntimeError: Candidate counter advanced during the frozen
+interval` at line 134. The log did not record either counter value. This failure
+therefore does **not** establish that writes occurred while paused; it establishes
+that the required qualification gate failed at this invalid measurement window.
+Root independently confirmed the source defect. The CI log is retained at
+`/tmp/vibearr-review04-runtime-r1-ci-boundary-failure.log`.
+
+Correct the probe to establish a baseline after pause is acknowledged, compare
+stable samples while the original task remains paused across restart, then test
+progress separately after resume. Preserve exact PID/container/deadline checks.
+Repeat actual qualification on rootless and rootful hosts, and request fresh
+independent review of the corrected exact source.
+
+## Scope and independent evidence
 
 The full accepted-base-to-source diff and surrounding runtime, engine, API/SDK,
 qualification, dependency assembly/qualification, provenance, retention, artifact,
@@ -64,12 +98,12 @@ source; they are historical proof for the unchanged controls/build implementatio
 | Repository-wide Black and Ruff | Passed, 341 Python files checked |
 | Repository-wide mypy | Passed, 341 source files |
 | Migration drift and Django system checks | No changes; no system issues |
-| Installed-wheel actual rootless OCI qualification | All 13 required checks passed |
-| Second actual qualification with parent validation/setup profiles registered | All 13 required checks passed |
+| Installed-wheel actual rootless OCI qualification | All 13 checks reported passed; pause-proof measurement limited by P2 above |
+| Second actual qualification with parent validation/setup profiles registered | All 13 checks reported passed; same P2 limitation |
 | Actual installed-wheel dependency build, pause/restart, provenance and selective retention | Passed; exact derived image removed, parent preserved |
 | Actual paused never-launched build expiry and never-prepared stop | Passed; protected terminal receipt and same-instance HTTP 404 |
 
-The actual control probes exercised frozen writes, same PID/container identity,
+The actual control probes exercised pause and observed the flawed counter criterion, same PID/container identity,
 service restart, pause/cancel, original-deadline expiry after downtime,
 never-launched secret erasure, source-only retention preserving logs, shared source
 references, HTTP 410, and terminal prepare/start replay without another launch.
@@ -107,7 +141,7 @@ Initial executor wheel SHA-256:
 Initial runner wheel SHA-256:
 `351908823dafe49f82022327137a3cc12caf2c6f8d8ffe5bbeb5fc887f25a035`.
 
-The final API delta from `9d8ece7` to `8c6c6b4` was independently assessed after
+The final API delta from `9d8ece7` to `8c6c6b4` was independently assessed without a separate finding after
 merging the stable topic into this report branch. It adds the SDK action and
 method, authenticated empty-body POST route, and `manifest_digest` to the existing
 protected receipt helper. The digest uses canonical bytes of the immutable
@@ -129,7 +163,7 @@ separately from current-source qualification and HTTP presence evidence.
 | --- | --- |
 | Executor unit discovery | 164 passed |
 | Repository-wide Black, Ruff and mypy | Passed; 341 Python/source files checked |
-| Fresh installed-wheel actual OCI qualification with an ordinary profile registered | All 13 checks passed |
+| Fresh installed-wheel actual OCI qualification with an ordinary profile registered | All 13 checks reported passed; pause-proof measurement limited by P2 above |
 | Installed HTTP SDK presence lifecycle | Prepared binding/no launch, service restart, same-ID ordinary task, protected terminal result, selective/full purge and restart-stable receipt passed |
 | API error semantics | Missing HTTP 404, unauthorized 401, malformed UUID and nonempty-body 400 passed |
 
@@ -176,6 +210,13 @@ monitor acknowledgement rather than assuming it completes at a fixed sleep bound
 The first presence driver used the wrong SDK export return type after the actual
 task completed; this fixture was corrected, then a fresh ordinary operation ran
 the full HTTP lifecycle using the completed genuine current-source qualification.
+After the CI failure, a normal latency fixture attempted to read the owned paused
+counter via trusted `docker cp`. Rootless Docker rejected its remount of the
+read-only `/input` mount. The fixture stopped its original container in cleanup;
+it produced no paused-counter comparison proof and was not counted as a pass.
+The root-confirmed finding above rests on the source measurement edges and actual
+CI failure, not that incomplete fixture. Its log is
+`/tmp/vibearr-review04-runtime-r1-counter-latency.log`.
 
 This review performed ordinary functional/regression validation and the existing
 required qualification, with no additional adversarial or host-network attack
@@ -183,5 +224,7 @@ probes. It did not use paid models, production application/database resources,
 other reviewers' runtime resources, or external repository delivery. The complete
 nine-check exact-candidate validation acceptance, real native server/controller
 integration, live issue-to-PR acceptance and rootful deployment behavior remain
-separate release/integration evidence. CI was still running when inspected; this
-report does not substitute local results for the root's exact-head CI gate.
+separate release/integration evidence. Exact-head OCI CI failed as documented
+above; other checks were still running when this historical finding was recorded.
+Earlier local qualification passes do not resolve the P2 finding or substitute
+for corrected exact-head CI and a fresh independent review.
