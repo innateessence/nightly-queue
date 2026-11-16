@@ -269,6 +269,27 @@ class ImplementationTests(WorkspaceFixture, unittest.TestCase):
         self.step()
         self.assertEqual(self.budget.data["total"], spent)
 
+    def test_approval_polls_do_not_exhaust_saved_context_capacity(self):
+        self.implement()
+        self.step()
+        refreshes = self.store.refreshes
+        for _ in range(205):
+            self.assertEqual(self.step().status, "approval")
+        self.assertEqual(self.store.refreshes, refreshes)
+        self.broker.decision = "approved"
+        self.assertEqual(self.step().detail["exit_code"], 0)
+        self.assertEqual(self.store.refreshes, refreshes + 1)
+
+    def test_approved_pending_action_rechecks_fresh_discussion(self):
+        self.implement()
+        self.step()
+        self.store.failure = BackendError("Discussion changed while waiting")
+        self.assertEqual(self.step().status, "approval")
+        self.broker.decision = "approved"
+        with self.assertRaisesRegex(BackendError, "Discussion changed"):
+            self.step()
+        self.assertEqual(self.executor.calls, [])
+
     def test_no_change_is_explicit_failed_outcome(self):
         self.backend.events = [BackendEvent("complete", {"summary": "Already done"})]
         self.step()
@@ -335,6 +356,56 @@ class ImplementationTests(WorkspaceFixture, unittest.TestCase):
         self.broker.decision = "approved"
         self.assertEqual(self.step().detail["exit_code"], 0)
         self.assertEqual(self.step().detail["phase"], "implementation")
+
+    def test_failed_configured_setup_requires_successful_retry_after_repair(self):
+        self.snapshot["effective"]["setup_commands"] = ["required setup", "next setup"]
+        self.broker.decision = "approved"
+        self.executor.exit_codes = [1]
+        self.assertEqual(self.step().detail["exit_code"], 1)
+        self.backend.events = [
+            lambda request: BackendEvent("patch", self.patch()),
+            BackendEvent("complete", {"summary": "Repaired setup"}),
+        ]
+        self.step()
+        self.assertEqual(self.step().detail["phase"], "setup")
+        self.assertEqual(self.step().detail["exit_code"], 0)
+        self.assertEqual(self.step().detail["exit_code"], 0)
+        self.assertEqual(self.step().detail["phase"], "review")
+        self.step()
+        self.step()
+        self.assertEqual(self.step().status, "delivery_ready")
+        commands = [call[0].argv for call in self.executor.calls]
+        self.assertEqual(
+            commands[:3],
+            [
+                ("/bin/sh", "-c", "required setup"),
+                ("/bin/sh", "-c", "required setup"),
+                ("/bin/sh", "-c", "next setup"),
+            ],
+        )
+
+    def test_explicit_revalidation_cannot_skip_failed_setup(self):
+        self.snapshot["effective"]["setup_commands"] = ["required setup"]
+        self.broker.decision = "approved"
+        self.executor.exit_codes = [1]
+        self.step()
+        (self.workspace.checkout / "README.md").write_text("Manual repair\n")
+        self.stage.revalidate(self.state, self.run_id)
+        self.assertEqual(self.step().detail["exit_code"], 0)
+        self.assertEqual(
+            self.executor.calls[-1][0].argv, ("/bin/sh", "-c", "required setup")
+        )
+
+    def test_explicit_revalidation_cannot_skip_remaining_setup(self):
+        self.snapshot["effective"]["setup_commands"] = ["first setup", "required setup"]
+        self.broker.decision = "approved"
+        self.step()
+        with self.assertRaisesRegex(BackendError, "required setup"):
+            self.stage.revalidate(self.state, self.run_id)
+        self.assertEqual(self.step().detail["exit_code"], 0)
+        self.assertEqual(
+            self.executor.calls[-1][0].argv, ("/bin/sh", "-c", "required setup")
+        )
 
     def test_changed_workspace_requires_new_approval(self):
         self.implement()
@@ -586,6 +657,60 @@ class ImplementationTests(WorkspaceFixture, unittest.TestCase):
         )
         head = git(["rev-parse", "HEAD"], self.workspace.checkout)
         with self.assertRaisesRegex(BackendError, "stale"):
+            verify_delivery_ready(self.workspace, result.detail, committed_head=head)
+
+    def test_commit_attestation_rejects_hidden_index_content(self):
+        result = self.ready()
+        path = self.workspace.checkout / "README.md"
+        validated = path.read_bytes()
+        path.write_text("Unchecked committed content\n")
+        git(["add", "README.md"], self.workspace.checkout)
+        path.write_bytes(validated)
+        git(
+            ["update-index", "--assume-unchanged", "README.md"], self.workspace.checkout
+        )
+        git(
+            [
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                "Wrong blob",
+            ],
+            self.workspace.checkout,
+        )
+        self.assertEqual(git(["status", "--porcelain"], self.workspace.checkout), "")
+        head = git(["rev-parse", "HEAD"], self.workspace.checkout)
+        with self.assertRaisesRegex(BackendError, "tree"):
+            verify_delivery_ready(self.workspace, result.detail, committed_head=head)
+
+    def test_commit_attestation_rejects_git_attribute_byte_conversion(self):
+        self.implement()
+        (self.workspace.checkout / ".gitattributes").write_text("README.md text\n")
+        (self.workspace.checkout / "README.md").write_bytes(b"Validated CRLF\r\n")
+        self.stage.revalidate(self.state, self.run_id)
+        self.step()
+        self.broker.decision = "approved"
+        self.step()
+        result = self.step()
+        git(["add", ".gitattributes", "README.md"], self.workspace.checkout)
+        git(
+            [
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                "Converted",
+            ],
+            self.workspace.checkout,
+        )
+        head = git(["rev-parse", "HEAD"], self.workspace.checkout)
+        self.assertEqual(git(["status", "--porcelain"], self.workspace.checkout), "")
+        with self.assertRaisesRegex(BackendError, "tree"):
             verify_delivery_ready(self.workspace, result.detail, committed_head=head)
 
     def test_explicit_revalidation_reviews_and_runs_checks_without_model(self):

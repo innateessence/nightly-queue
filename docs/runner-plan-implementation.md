@@ -35,8 +35,10 @@ diff review. It cannot create validation evidence.
 ## Context, amendments and proposals
 
 Each step fully refreshes the issue/manual context and verifies the server's saved
-plan handoff. Closed issues or incomplete discussions stop work. The original
-saved context is read back to validate the plan; a newer fetch timestamp can keep
+plan handoff before active work. Polls of an unchanged pending human approval reuse
+the pending request without creating more saved context versions; approval triggers
+a fresh handoff before execution. Closed issues or incomplete discussions stop
+work. The original saved context is read back to validate the plan; a newer fetch timestamp can keep
 the plan when the actual discussion is unchanged. Changed discussion, resolved
 base, or inspected base requires a saved assessment and revised plan. Material
 plan changes retain their prior/new IDs and explicit reason and invalidate checks.
@@ -84,6 +86,8 @@ ID, exit code, interruption flag, before/after workspace fingerprints, and outpu
 byte count/digest. Raw command output is omitted from durable display evidence;
 the full output is untrusted and is not a new command source automatically.
 Failed checks return to implementation for repair within the remaining budget.
+Failed setup actions also require a successful setup pass after repair, including
+when an operator requests explicit revalidation.
 Any check that changes workspace content invalidates all previous checks and
 requires diff review and a complete fresh validation pass. This includes generated
 files: projects should choose stable validation commands.
@@ -91,7 +95,8 @@ files: projects should choose stable validation commands.
 Delivery readiness contains schema version 1, plan/context IDs, plan digest,
 amendment history, current workspace fingerprint and passing validation records.
 The fingerprint includes task workspace ID, base revision, branch, HEAD,
-content digest, and a diff digest binding that full content to the recorded base
+content digest, raw Git blob/mode tree digest, and a diff digest binding that full
+content to the recorded base
 (including untracked files). The digest stays stable across staging/committing a
 new file because index membership is excluded. A later file change invalidates readiness. `revalidate(state, run_id)`
 resets to diff review and validation without another model call when validation
@@ -100,8 +105,10 @@ alone is needed.
 `verify_delivery_ready(workspace, evidence)` checks exact current readiness.
 Feature 10 may make a supervised commit and then call it with
 `committed_head=<verified commit>`. Only HEAD may change: content, diff, base and
-branch must still match and Git status must be clean. The returned attestation
-records validated HEAD and committed HEAD. Identical validated files do not need
+branch must still match and Git status must be clean. The actual committed tree
+must match the validated file bytes and executable modes, including when Git's
+index flags or attributes hide differences from ordinary status. The returned
+attestation records validated HEAD and committed HEAD. Identical validated files do not need
 duplicate checks just because the supervisor committed them. Any changed file or
 diff requires fresh validation. This helper does not approve Git operations,
 verify a remote PR or finish a queue item. A supervisor that already holds the
@@ -118,6 +125,8 @@ and checks both the task total and that stage's accumulated time. The stage pass
 the remaining time to supervised models and commands; command process groups and
 the model worker are stopped by their existing timeout/periodic supervision.
 `checkpoint()` is suitable for periodic gate composition.
+Limits are finite and copied from the caller so later configuration mutations
+cannot enlarge the frozen allowance.
 
 Research and planning use the `research` allowance. Context refreshes also count
 as research. Implementation calls and setup commands use `implementation`;

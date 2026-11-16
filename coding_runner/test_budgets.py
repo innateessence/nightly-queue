@@ -55,6 +55,20 @@ class BudgetTests(unittest.TestCase):
         remaining = self.budget.run("validation", lambda remaining: remaining)
         self.assertEqual(remaining, 10)
 
+    def test_mutating_input_cannot_increase_frozen_stage_budget(self):
+        self.limits["research"] = 100
+        self.assertEqual(self.budget.remaining("research"), 10)
+        self.budget.run("validation", lambda remaining: None)
+        with self.assertRaisesRegex(BudgetExceeded, "Frozen"):
+            ActiveBudget(
+                self.journal, self.journal.load(), self.run_id, 15, self.limits
+            )
+
+    def test_nonfinite_budgets_are_rejected(self):
+        for value in (float("inf"), float("nan")):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                ActiveBudget(self.journal, self.state, str(uuid4()), value, self.limits)
+
     def test_unresolved_active_segment_blocks_replay(self):
         self.budget.data["active"] = {"stage": "research", "started": 1}
         self.journal.save(self.state)

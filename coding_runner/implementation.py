@@ -31,6 +31,54 @@ class ImplementationResult:
     detail: dict[str, Any]
 
 
+def tree_entries(workspace: Workspace, revision: str) -> list[list[str]]:
+    entries = git(["ls-tree", "-r", "-z", "--full-tree", revision], workspace.checkout)
+    result = []
+    for entry in entries.split("\0"):
+        if not entry:
+            continue
+        metadata, path = entry.split("\t", 1)
+        mode, kind, object_id = metadata.split(" ")
+        if kind != "blob":
+            raise WorkspaceError("Submodule trees require explicit operator recovery.")
+        result.append([path, mode, object_id])
+    return sorted(result)
+
+
+def working_tree_entries(workspace: Workspace) -> list[list[str]]:
+    names = git(
+        ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        workspace.checkout,
+    )
+    algorithm = git(["rev-parse", "--show-object-format"], workspace.checkout)
+    result = []
+    for name in sorted(set(names.split("\0")) - {""}):
+        path = workspace.checkout / name
+        if any(
+            (workspace.checkout / parent).is_symlink() for parent in Path(name).parents
+        ):
+            raise WorkspaceError("Git paths cannot traverse symbolic links.")
+        if not path.exists() and not path.is_symlink():
+            continue
+        details = path.lstat()
+        if stat.S_ISLNK(details.st_mode):
+            content = os.fsencode(os.readlink(path))
+            blob = hashlib.new(algorithm, f"blob {len(content)}\0".encode())
+            blob.update(content)
+            mode = "120000"
+        elif stat.S_ISREG(details.st_mode) and details.st_nlink == 1:
+            blob = hashlib.new(algorithm, f"blob {details.st_size}\0".encode())
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(descriptor, "rb") as stream:
+                while chunk := stream.read(65536):
+                    blob.update(chunk)
+            mode = "100755" if details.st_mode & 0o111 else "100644"
+        else:
+            raise WorkspaceError("Delivery requires regular files or symbolic links.")
+        result.append([name, mode, blob.hexdigest()])
+    return result
+
+
 def workspace_evidence(workspace: Workspace) -> dict[str, str]:
     content = workspace.verify()
     if git(["ls-files", "--unmerged"], workspace.checkout):
@@ -61,6 +109,7 @@ def workspace_evidence(workspace: Workspace) -> dict[str, str]:
         "branch": branch,
         "head_revision": head,
         "content_digest": content,
+        "tree_digest": digest(working_tree_entries(workspace)),
         "diff_digest": digest(
             {"base_revision": workspace.base_revision, "content_digest": content}
         ),
@@ -104,6 +153,14 @@ def verify_delivery_ready(
         ):
             raise BackendError(
                 "Supervised commit did not include the complete validated task changes."
+            )
+        if (
+            committed_head
+            and digest(tree_entries(workspace, committed_head))
+            != validated["tree_digest"]
+        ):
+            raise BackendError(
+                "Committed tree does not match the validated file bytes and modes."
             )
     return {
         "validated_head": validated["head_revision"],
@@ -213,7 +270,12 @@ class ImplementationStage:
             raise BackendError(
                 "Resolve pending execution before requesting validation again."
             )
-        session.update({"phase": "review", "index": 0, "checks": [], "review": None})
+        if session["phase"] == "setup":
+            raise BackendError(
+                "Complete required setup before requesting validation again."
+            )
+        phase = "setup" if session.get("setup_retry") else "review"
+        session.update({"phase": phase, "index": 0, "checks": [], "review": None})
         self.journal.save(state)
 
     def _periodic(self) -> bool:
@@ -249,6 +311,29 @@ class ImplementationStage:
     def _step(self, state, run_id, item, workspace, request, issue_client):
         if run_id != workspace.workspace_id:
             raise BackendError("Run and task workspace do not match.")
+        session = state.get("implementation", {}).get(run_id, {})
+        pending = session.get("pending")
+        if pending and pending["kind"] == "action" and not pending.get("started"):
+            action = ActionSpec.from_data(pending["data"]["action"])
+            with workspace.locked():
+                unchanged = action.content_digest == workspace.verify()
+                unchanged = (
+                    unchanged
+                    and action.source_digest
+                    == self.sources.current_digest(
+                        action.source_kind, action.source_reference, workspace
+                    )
+                )
+            if unchanged:
+                approval = self.executor.broker.request(action, pending["operation_id"])
+                if approval["decision"] != "approved":
+                    return ImplementationResult(
+                        "approval",
+                        {
+                            "approval_id": approval["id"],
+                            "decision": approval["decision"],
+                        },
+                    )
         handoff = self.budget.run(
             "research",
             lambda remaining: self.store.handoff(
@@ -320,6 +405,7 @@ class ImplementationStage:
                 "turns": 0,
                 "amendments": [],
                 "review": None,
+                "setup_retry": False,
             },
         )
         if session["binding"] != binding:
@@ -348,6 +434,7 @@ class ImplementationStage:
                     "phase": "setup",
                     "pending": None,
                     "review": None,
+                    "setup_retry": False,
                 }
             )
         with workspace.locked():
@@ -472,7 +559,7 @@ class ImplementationStage:
                 "implementation",
             )
         elif kind == "complete":
-            session["phase"] = "review"
+            session["phase"] = "setup" if session.get("setup_retry") else "review"
         elif kind == "amendment":
             validate_plan(
                 data["document"],
@@ -524,9 +611,12 @@ class ImplementationStage:
             raise BackendError("At least one required validation action must pass.")
         if session["index"] == len(actions):
             if phase == "setup":
-                session.update({"phase": "implementation", "index": 0})
+                next_phase = (
+                    "review" if session.get("setup_retry") else "implementation"
+                )
+                session.update({"phase": next_phase, "index": 0, "setup_retry": False})
                 self.journal.save(state)
-                return ImplementationResult("continue", {"phase": "implementation"})
+                return ImplementationResult("continue", {"phase": next_phase})
             with workspace.locked():
                 current = workspace_evidence(workspace)
             if current != session["review"]:
@@ -638,6 +728,8 @@ class ImplementationStage:
                 },
             )
         if result.exit_code:
+            if phase == "setup":
+                session["setup_retry"] = True
             session.update(
                 {"phase": "implementation", "index": 0, "checks": [], "review": None}
             )

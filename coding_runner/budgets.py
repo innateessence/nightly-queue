@@ -1,3 +1,4 @@
+import math
 import time
 from typing import Any, Callable, TypeVar
 
@@ -21,10 +22,14 @@ class ActiveBudget:
         *,
         clock: Callable[[], float] = time.monotonic,
     ):
-        if total_seconds <= 0 or any(value <= 0 for value in stage_seconds.values()):
+        values = [total_seconds, *stage_seconds.values()]
+        if any(not math.isfinite(value) or value <= 0 for value in values):
             raise ValueError("Active budgets must be positive.")
         self.journal, self.state, self.clock = journal, state, clock
-        self.limits: dict[str, Any] = {"total": total_seconds, "stages": stage_seconds}
+        self.limits: dict[str, Any] = {
+            "total": total_seconds,
+            "stages": dict(stage_seconds),
+        }
         self.data = state.setdefault("budgets", {}).setdefault(
             run_id, {"limits": self.limits, "total": 0.0, "stages": {}, "active": None}
         )
