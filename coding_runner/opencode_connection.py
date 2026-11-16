@@ -27,7 +27,7 @@ def validate_connection(value: Any) -> dict[str, str]:
     if not isinstance(value, dict) or set(value) - {"provider", "api_key", "base_url"}:
         raise ValueError("Unsupported connection fields.")
     provider = value.get("provider")
-    if provider not in {*OFFICIAL_ENDPOINTS, "ollama"}:
+    if not isinstance(provider, str) or provider not in {*OFFICIAL_ENDPOINTS, "ollama"}:
         raise ValueError("Select a supported inference provider.")
     key = value.get("api_key", "")
     if (

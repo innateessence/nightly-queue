@@ -111,6 +111,20 @@ class OpenCodeConnectionTests(TestCase):
                 validate_backend_model("opencode", value)
         validate_backend_model("opencode", "qwen3-coder:30b")
 
+    def test_connection_json_with_non_string_provider_has_form_error(self):
+        for provider in ([], {}):
+            with self.subTest(provider=provider):
+                form = CredentialForm(
+                    data=self.data(
+                        connection_provider="",
+                        connection_endpoint="",
+                        secret=json.dumps({"provider": provider, "api_key": "key"}),
+                    )
+                )
+                self.assertFalse(form.is_valid())
+                self.assertIn("secret", form.errors)
+        self.assertFalse(Credential.objects.exists())
+
     def test_connection_help_is_visible(self):
         response = self.client.get(reverse("credential_list"))
         self.assertContains(response, "Ollama endpoint")

@@ -95,6 +95,48 @@ class OpenCodeContractTests(AdapterContract, unittest.TestCase):
         self.progress = Mock()
         self.envelope = response
 
+    def use_secret(self, token):
+        selected = grant(ACCOUNT)
+        connection = json.loads(selected["material"]["secret"])
+        connection["api_key"] = token
+        selected["material"]["secret"] = json.dumps(connection)
+        self.backend.credentials = lambda account: selected
+        return token
+
+    def test_json_escaped_secret_is_redacted_from_document(self):
+        token = self.use_secret('secret-with-"quote\\and-unicode-☃')
+        self.request = replace(
+            self.request,
+            instructions="Use " + token,
+            document={"source": token, token: ["prefix-" + token]},
+        )
+        self.run_stage()
+        messages = self.transport.exchange.call_args.args[0]["request"]["messages"]
+        self.assertNotIn(token, messages[0]["content"])
+        document = json.loads(messages[1]["content"])
+        self.assertEqual(
+            document, {"source": "[redacted]", "[redacted]": ["prefix-[redacted]"]}
+        )
+
+    def test_model_containing_secret_blocks_transport(self):
+        token = self.use_secret("private-model-key")
+        self.request = replace(self.request, model="model-" + token)
+        with self.assertRaisesRegex(BackendError, "credential material"):
+            self.run_stage()
+        self.transport.exchange.assert_not_called()
+
+    def test_echoed_secret_is_rejected_before_proposal_progress(self):
+        token = self.use_secret('secret-with-"quote\\and-unicode-☃')
+        self.transport.exchange.return_value = response(
+            "plan", {"document": {"note": token}}
+        )
+        with self.assertRaisesRegex(BackendOutputError, "credential material"):
+            self.run_stage()
+        self.assertEqual(
+            [row.args[0].kind for row in self.progress.call_args_list],
+            ["model_started"],
+        )
+
     def test_ollama_has_no_tools_and_requires_json(self):
         self.run_stage()
         body = self.transport.exchange.call_args.args[0]["request"]
@@ -218,6 +260,11 @@ class ConnectionTests(unittest.TestCase):
         ):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_connection(value)
+
+    def test_non_string_provider_is_rejected(self):
+        for provider in ([], {}, None, True):
+            with self.subTest(provider=provider), self.assertRaises(ValueError):
+                validate_connection({"provider": provider, "api_key": TOKEN})
 
     def test_model_ids(self):
         for model in (
@@ -356,6 +403,27 @@ class WorkerHTTPTests(unittest.TestCase):
         self.assertEqual(headers["Authorization"], "Bearer " + TOKEN)
         self.assertNotIn(TOKEN, json.dumps(body))
         self.assertEqual(body["tools"], [])
+
+    def test_real_worker_redacts_escaped_secret_before_http(self):
+        token = 'key-with-"quote\\and-slash'
+        selected = grant(ACCOUNT, endpoint=self.endpoint)
+        connection = json.loads(selected["material"]["secret"])
+        connection["api_key"] = token
+        selected["material"]["secret"] = json.dumps(connection)
+        self.backend.credentials = lambda account: selected
+        self.request = replace(self.request, document={"source": token})
+        self.assertEqual(self.run_model().kind, "read")
+        _, headers, body = self.server.calls[0]
+        self.assertEqual(headers["Authorization"], "Bearer " + token)
+        self.assertEqual(
+            json.loads(body["messages"][1]["content"]), {"source": "[redacted]"}
+        )
+
+    def test_real_worker_echoed_secret_is_rejected(self):
+        self.server.value = response("plan", {"document": {"note": TOKEN}})["response"]
+        with self.assertRaisesRegex(BackendOutputError, "credential material"):
+            self.run_model()
+        self.assertIsNone(self.backend.transport.process)
 
     def test_redirect_does_not_forward_credentials(self):
         self.server.status = 307
@@ -816,6 +884,58 @@ class OpenCodeTraceTests(unittest.TestCase):
                     {"connection": selected, "request": {"model": "qwen3-coder:30b"}}
                 )
             self.assertNotIn("release_evidence", state)
+
+    def test_secret_in_proposal_or_provider_identity_cannot_enter_evidence(self):
+        from .qualification_trace import ModelTraceTransport
+
+        token = 'secret-with-"quote\\and-unicode-☃'
+        selected = validate_connection({"provider": "openai", "api_key": token})
+        for field in ("proposal", "response_id"):
+            value = response(provider="openai")
+            value["response"]["id"] = "chatcmpl_test"
+            if field == "proposal":
+                value = response(
+                    "plan", {"document": {"note": token}}, provider="openai"
+                )
+            else:
+                value["response"]["id"] = token
+            state = {}
+            transport = ModelTraceTransport(Mock(), state, ACCOUNT, 1)
+            with (
+                self.subTest(field=field),
+                patch.object(ProcessTransport, "exchange", return_value=value),
+                self.assertRaisesRegex(BackendOutputError, "credential material"),
+            ):
+                transport.exchange(
+                    {"connection": selected, "request": {"model": "qwen3-coder:30b"}}
+                )
+            self.assertNotIn("release_evidence", state)
+
+    def test_secret_in_ollama_version_cannot_enter_evidence(self):
+        from .qualification_trace import ModelTraceTransport
+
+        token = "private-api-key"
+        selected = validate_connection(
+            {
+                "provider": "ollama",
+                "base_url": "http://localhost:11434",
+                "api_key": token,
+            }
+        )
+        value = {
+            **response(),
+            "receipt": {"response_digest": "a" * 64, "ollama_version": token},
+        }
+        state = {}
+        transport = ModelTraceTransport(Mock(), state, ACCOUNT, 1)
+        with (
+            patch.object(ProcessTransport, "exchange", return_value=value),
+            self.assertRaisesRegex(BackendOutputError, "credential material"),
+        ):
+            transport.exchange(
+                {"connection": selected, "request": {"model": "qwen3-coder:30b"}}
+            )
+        self.assertNotIn("release_evidence", state)
 
     def test_wrong_reported_model_cannot_supply_local_receipt(self):
         from .qualification_trace import ModelTraceTransport
