@@ -1,7 +1,8 @@
-# Isolated OCI executor
+# Docker worker target and historical OCI protocol
 
-Feature 02 supplies a real Linux Docker executor and an independent standard-library
-package, `vibearr_executor`. It supplies execution, not a coding model adapter.
+The existing `vibearr_executor` package implements the earlier host-launched OCI
+runtime. The supported target is now the Docker-only worker contract below; the
+earlier implementation is reference material, not a compliant deployment.
 Feature 03 owns native CLI/session/authentication diagnostics, 15 owns trusted
 project validation recipes, and 04 owns queue dispatch and delivery. Native queue
 readiness remains false until those integrations exist. Historical proposal
@@ -10,111 +11,34 @@ qualification never authorizes this runtime.
 [Native runtime controls](native-runtime-controls.md) documents pause/resume,
 deadline reconciliation, terminal artifact retention and state identity checks.
 
-## Deployment
+## Docker-only deployment requirement
 
-Run the executor on a dedicated Linux runner host/account with Docker engine
-access. The web application, supervisor, and task processes receive no Docker
-socket, engine credentials, production mounts, database access, encryption key,
-or other run's state. The supervisor uses authenticated HTTP control only.
-Do not mount the executor state directory into the supervisor or a task.
+The [Docker-only runtime plan](docker-only-runtime-plan.md) replaces the host
+launcher described by the existing implementation. Do not install this package,
+Python, service files, coding tools or qualification utilities on the host.
+There is no systemd, lingering, host socket, privileged container or host-path
+mount option. Old host qualification is historical evidence only.
 
-The intended host supports cgroup v2 memory, swap, CPU and PID controls, tmpfs,
-container network namespaces, and a one-use NET_ADMIN firewall helper. Rootless
-Docker is supported and tested. Qualification fails when these controls fail;
-there is no nested bubblewrap or unsupported-check skip path.
+Correction D2 replaces dynamic daemon dispatch with Compose-provisioned worker
+slots and authenticated control APIs. Trusted worker PID 1 runs one job at a time
+under a separate UID, enforces the slot's actual limits and network rules, seals
+results and resets all task state before reuse. A reused slot is not a fresh
+container. No application component receives Docker daemon access.
 
-Build from reviewed source, record the Dockerfile/base digest and resulting image
-ID, and register that immutable ID. Images extending this base must retain its
-protected Python package and Python 3.12; every distinct registered task image
-undergoes the same actual boundary probes. Never adopt a candidate-controlled
-Dockerfile/profile as an operator's trusted recipe. Dependency-image construction
-belongs to feature 15's isolated build boundary.
+Correction D3 supplies credential-free validation/setup, sealed dependency
+artifacts and resettable test databases. D4 supplies containerized qualification,
+CLI, packaging, browser capture and backup/recovery jobs. Keep claims disabled
+until the actual Docker-only boundary qualifies; missing tools are not a reason
+to run host commands.
 
-```sh
-python3.12 -m venv /opt/vibearr-executor
-/opt/vibearr-executor/bin/pip install ./vibearr_executor
-docker build -f vibearr_executor/Dockerfile -t vibearr-task:reviewed .
-docker image inspect vibearr-task:reviewed --format '{{.Id}}'
-docker pull postgres:17@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
-docker image inspect postgres:17@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f --format '{{.Id}}'
-```
+The sections below describe existing protocol concepts and pre-replacement
+implementation evidence. Reuse valid identity/artifact/fencing contracts while
+versioning the changed worker/boot/reset evidence. They are not installation
+instructions for a supported host service, nor proof the Docker-only worker
+implementation is complete. All diagnostic Python examples execute inside a
+qualification/tools container once that path is implemented.
 
-On hosts with a read-only Docker configuration home, pass a private writable
-`docker --config /tmp/<build-config>` directory when building. The service never
-builds or pulls a task-selected image.
-
-Stop the executor control service before qualification; active or unknown
-operations must first reconcile. Qualification itself starts an authenticated
-service, exercises the real API and Docker, restarts that service during an active
-task, and preserves a private journal/report. It does not claim a queue item,
-consume approvals, contact a paid model, or require a successful production run.
-
-```sh
-python3.12 -m vibearr_runner.verify --boundary \
-  --executor-image sha256:<installed-task-image-id> \
-  --database-image sha256:<installed-postgresql-image-id> \
-  --executor-state /var/lib/vibearr-executor \
-  --profiles /etc/vibearr-executor/project-profiles.json \
-  --evidence /tmp/executor-boundary.json
-```
-
-`coding_runner.verify --boundary` is the same compatibility entrypoint. Omitting
-`--profiles` qualifies the fixed smoke profiles alone. Additional profiles are an
-operator-owned JSON list, parsed by `Profile.parse`. Qualification writes the full
-installed registry to `<state>/profiles.json` and a private random control token to
-`<state>/token`; use these when starting the service afterward. A failed repeat
-qualification revokes the previous report before probes begin. Preserve the
-whole journal, rather than copying only a success JSON into another deployment.
-
-```sh
-python3.12 -I -m vibearr_executor.server \
-  --state /var/lib/vibearr-executor \
-  --profiles /var/lib/vibearr-executor/profiles.json \
-  --token-file /var/lib/vibearr-executor/token
-```
-
-The state directory is mode 0700 and the token is mode 0600, readable only by its
-service identity. [The systemd example](../deploy/vibearr-executor.service) uses
-separate `/etc` profile/token paths; install the generated registry/token there
-with the service identity's ownership if using it. It assumes that account's
-rootless engine is already running with lingering configured. Configure
-`DOCKER_HOST=unix:///run/user/<executor-uid>/docker.sock` in its private
-`/etc/vibearr-executor/engine.env` for that host's actual socket. Neither the supervisor nor
-the application joins the engine's permission group.
-
-Loopback control defaults to `127.0.0.1:8791`. Remote control requires
-`--tls-cert`, `--tls-key`, and an explicit `--bind` address; clients verify TLS
-normally and reject redirects. Make only the supervisor able to reach that
-control origin. Add `--deny-ip` for additional executor-host public/NAT addresses;
-local hostname addresses and all non-public destinations are already denied by
-the egress proxy. A changed deny list invalidates qualification. The current
-supported operating mode is one active run; unknown runs retain that fence.
-An active/unknown operation also fences a replacement operation UUID within the
-same run. Only the exact pair of fixed database-only qualification probes can
-overlap to test cross-operation network isolation.
-
-Install the executor client package beside a separately installed supervisor and
-set `VIBEARR_EXECUTOR_URL` and `VIBEARR_EXECUTOR_TOKEN_FILE` there. The runner
-Dockerfiles include the package without installing Docker or mounting its socket.
-`vibearr_runner.native_runtime.runtime_diagnostics(policy)` reads the actual
-installed capability report. It reports runtime readiness separately from native
-adapter readiness, and never reads a legacy proposal or production-release proof.
-Both canonical and legacy runner distributions declare the client through the
-`native-runtime` extra. Install reviewed local sources together with
-`pip install ./vibearr_executor './vibearr_runner[native-runtime]'`, or use their
-reviewed wheels. Without that extra, normal standalone CLI imports still work and
-runtime diagnostics explain the missing client. With the client installed, missing
-control configuration names the two required environment variables explicitly.
-The same-object `coding_runner.native_runtime` compatibility import is retained.
-
-Distribution tests build the executor from its sdist, install it with both runner
-sdists in clean environments, invoke diagnostics outside the checkout, and verify
-packaged helper/image-recipe resources. CI additionally installs the executor wheel
-and runs `python -I -m vibearr_executor.artifact_smoke --image sha256:<id> --state <private-directory>`
-outside the checkout. This starts its authenticated service and executes/exports a
-real offline OCI validation job using only installed Python modules.
-
-## Profiles and manifests
+## Historical protocol reference: profiles and manifests
 
 Profiles live outside candidate checkouts and have this exact schema:
 
@@ -252,7 +176,7 @@ never remove uncertain active state to free capacity. General retention remains
 separate from task workspace enforcement.
 
 Only the selected backend credential is uploaded privately. Trusted init loads it
-before launch, then the executor erases its host input file before opening the
+before launch, then the worker erases its private input file before opening the
 agent gate. Init exposes a private per-run file and the profile's selected variable
 only to the agent phase; Docker's recorded environment contains no backend key.
 The file is deleted when the agent stops. Known values are redacted from bounded
@@ -298,8 +222,8 @@ This source change invalidates prior proofs: rebuild/pin worker images, install 
 matching executor and rerun host qualification before ordinary work resumes.
 
 The PR `Executor boundary / Qualify OCI executor` check runs actual Docker probes
-on Linux and uploads their report. The manually dispatched deployment workflow runs
-the same verifier directly on the executor host, never nested in the supervisor.
+on Linux and uploads their report. The replacement deployment workflow runs the verifier inside a qualification
+container against the Docker-only worker slots, without mounting a host socket.
 CI also registers a credential-free ordinary validation recipe before qualification,
 then launches it with a disposable database. This recipe has no smoke exemption.
 `python -m vibearr_executor.network_probe` checks readiness and the exact binding
