@@ -45,6 +45,7 @@ def run_data(run):
         "wait_reason": run.wait_reason,
         "configuration_revision": run.configuration_revision,
         "configuration_snapshot": run.configuration_snapshot,
+        "source_snapshot": run.source_snapshot,
         "context_reference": run.context_reference,
         "plan_reference": run.plan_reference,
         "created_at": run.created_at.isoformat(),

@@ -164,6 +164,16 @@ def project_configuration(project, defaults, overrides, credentials):
         "repository_url": project.repository_url,
         "base_branch": project.base_branch,
         "autonomous": project.autonomous,
+        "source_policy": {
+            "repository_id": project.github_repository_id,
+            "owner_id": project.github_owner_id,
+            "default_branch": project.github_default_branch,
+            "permitted_author_ids": project.permitted_author_ids,
+            "enabled_at": (
+                project.enabled_at.isoformat() if project.enabled_at else None
+            ),
+            "backfill_issues": project.backfill_issues,
+        },
         "effective": effective,
         "sources": sources,
         "errors": errors,

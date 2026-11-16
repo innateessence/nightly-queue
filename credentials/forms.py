@@ -8,18 +8,29 @@ from .models import APISettings, Credential
 
 
 class APISettingsForm(forms.ModelForm):
+    auto_sync_interval_seconds = forms.IntegerField(
+        min_value=60,
+        max_value=86400,
+        label="Auto sync interval (seconds)",
+        help_text="Default 60 seconds. Sync issues now runs immediately.",
+    )
+
     class Meta:
         model = APISettings
-        fields = ["github_credential", "gitlab_credential", "auto_sync_interval_hours"]
+        fields = [
+            "github_credential",
+            "gitlab_credential",
+            "auto_sync_interval_seconds",
+        ]
         labels = {
             "github_credential": "GitHub API credential",
             "gitlab_credential": "GitLab API credential",
-            "auto_sync_interval_hours": "Auto sync interval",
+            "auto_sync_interval_seconds": "Auto sync interval",
         }
         help_texts = {
             "github_credential": "Used for scheduled issue imports from autonomous GitHub projects.",
             "gitlab_credential": "Saved for GitLab API access. GitLab issue imports are not available yet.",
-            "auto_sync_interval_hours": "How often to sync issues for all autonomous projects. Sync issues now runs immediately.",
+            "auto_sync_interval_seconds": "How often to sync issues for all autonomous projects. Sync issues now runs immediately.",
         }
 
 

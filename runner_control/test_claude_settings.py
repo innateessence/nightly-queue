@@ -44,6 +44,7 @@ class ClaudeSettingsTests(TestCase):
         RunnerSettings(research_backend="claude").full_clean(validate_unique=False)
 
     def test_project_inherited_claude_backend_rejects_bad_model(self):
+        RunnerSettings.objects.get_or_create(pk=1)
         RunnerSettings.objects.update(
             implementation_backend="claude", implementation_model="claude-sonnet-5-5"
         )

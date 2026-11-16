@@ -10,9 +10,14 @@ from . import (
     operations_api,
 )
 
-from . import recovery_api
+from . import recovery_api, source_api
 
 urlpatterns = [
+    path(
+        "runs/<uuid:run_id>/source/refresh/",
+        source_api.refresh_source,
+        name="runner_refresh_source",
+    ),
     path("health/", operations_api.health, name="runner_health"),
     path(
         "release/<uuid:qualification_id>/",

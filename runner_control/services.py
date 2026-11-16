@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import hashlib
 import json
 import re
@@ -37,7 +39,7 @@ def lock_controller(runner=None):
     controller.save(update_fields=["generation"])
     if runner is None:
         return
-    current = RunnerIdentity.objects.get(pk=runner.pk)
+    current = RunnerIdentity.objects.select_for_update().get(pk=runner.pk)
     proof_changed = not constant_time_compare(
         current.controller_digest, runner.controller_digest
     )
@@ -85,8 +87,14 @@ def claim_run(*, runner, run_id, configuration_revision=""):
         raise RunConflict(
             "An active run already owns the controller; reconcile it first."
         )
+    skipped_projects = set()
     while True:
-        candidate = claimable_items().select_related("project").first()
+        candidate = (
+            claimable_items()
+            .exclude(project_id__in=skipped_projects)
+            .select_related("project")
+            .first()
+        )
         if candidate is None:
             return Run.objects.create(
                 id=run_id,
@@ -94,9 +102,19 @@ def claim_run(*, runner, run_id, configuration_revision=""):
                 state=Run.State.EMPTY,
                 finished_at=timezone.now(),
             )
-        revision, snapshot = locked_configuration_snapshot(
-            candidate.project, configuration_revision
-        )
+        try:
+            revision, snapshot = locked_configuration_snapshot(
+                candidate.project, configuration_revision
+            )
+        except ValidationError as exc:
+            if "configuration" not in getattr(exc, "message_dict", {}):
+                raise
+            skipped_projects.add(candidate.project_id)
+            continue
+        defaults = snapshot.get("global", {})
+        if not defaults.get("enabled", True) or defaults.get("paused", False):
+            skipped_projects.add(candidate.project_id)
+            continue
         item = claim_item(candidate, execution_ref=f"runner:{run_id}")
         if item is None:
             continue
@@ -108,6 +126,7 @@ def claim_run(*, runner, run_id, configuration_revision=""):
             active_slot=1,
             configuration_revision=revision,
             configuration_snapshot=snapshot,
+            source_snapshot=deepcopy(item.source_snapshot),
             claim_digest=token_digest(str(item.claim_token)),
         )
 

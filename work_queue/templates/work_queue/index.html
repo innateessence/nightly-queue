@@ -10,7 +10,7 @@
         <h1 id="page-title">Leave it for the night.</h1>
         <p class="subtitle">Manual work and GitHub issues, together in one queue.</p>
       </div>
-      <div class="queue-total"><span class="status-dot" aria-hidden="true"></span> {{ queue_count }} item{{ queue_count|pluralize }} queued</div>
+      <div class="queue-total"><span class="status-dot" aria-hidden="true"></span> {{ queue_count }} executable · {{ queue_total }} queued total</div>
     </section>
 
 {% endblock %}
@@ -93,6 +93,7 @@
               <h3>{{ item.title }}</h3>
               {% if item.issue_number %}<p class="item-project"><a href="{{ item.issue_repository|slice:':-4' }}/issues/{{ item.issue_number }}" target="_blank" rel="noopener noreferrer">Issue #{{ item.issue_number }}</a> · {{ item.get_issue_state_display }}</p>{% endif %}
               <p class="item-project"><a href="{{ item.project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ item.project.name }}</a> · #{{ item.project_id }}{% if item.branch_name %} · {{ item.branch_name }}{% endif %}</p>
+              {% if item.waiting_reason %}<p class="item-instructions" role="status">{{ item.waiting_reason }}</p>{% endif %}
               {% if item.instructions %}<p class="item-instructions">{{ item.instructions }}</p>{% endif %}
               {% if item.result_url %}<p class="item-project"><a href="{{ item.result_url }}" target="_blank" rel="noopener noreferrer">View result</a></p>{% endif %}
               {% if item.error_summary %}<p class="item-instructions">{{ item.error_summary }}</p>{% endif %}
@@ -123,7 +124,7 @@
         </div>
         <aside class="integration-note">
           <span class="integration-icon" aria-hidden="true">↳</span>
-          <div><strong>Ready for a coding runner.</strong><p>Manual work and open GitHub issues are processed oldest first. Built-in task execution is planned.</p></div>
+          <div><strong>Ready for a coding runner.</strong><p>Eligible work runs high, normal, then low priority, oldest first within each priority. Held issues and unmet dependencies wait here.</p></div>
         </aside>
       </section>
     </div>

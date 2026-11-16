@@ -6,6 +6,7 @@ from django.urls import reverse
 from projects.models import Project
 
 from .models import QueueItem
+from .test_selection import source_issue
 from .services import claim_item, claim_next, enqueue_item, import_issue
 
 
@@ -16,6 +17,9 @@ class UnifiedQueueTests(TestCase):
             name="Auto",
             repository_url="https://github.com/example/repo",
             autonomous=True,
+            github_repository_id=99,
+            github_owner_id=42,
+            base_branch="main",
         )
         import_issue(
             project=self.project,
@@ -25,6 +29,10 @@ class UnifiedQueueTests(TestCase):
             state="open",
         )
         self.imported = QueueItem.objects.get()
+        import_issue(
+            project=self.project,
+            **source_issue(7, title="Imported issue", body="<script>context</script>"),
+        )
         self.manual = enqueue_item(project=self.project, title="Manual work")
 
     def claim(self, data):
@@ -72,7 +80,7 @@ class UnifiedQueueTests(TestCase):
     def test_earlier_manual_work_is_claimed_before_later_issue(self):
         QueueItem.objects.filter(pk=self.imported.pk).update(status="succeeded")
         import_issue(
-            project=self.project, number=8, title="Later issue", body="", state="open"
+            project=self.project, **source_issue(8, title="Later issue", body="")
         )
         self.assertEqual(claim_next().pk, self.manual.pk)
         self.assertEqual(claim_next().issue_number, 8)

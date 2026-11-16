@@ -83,3 +83,41 @@ class ProjectTests(TestCase):
 
     def test_branch_rejects_backslash(self):
         self.assert_invalid_branch("x\\y")
+
+    def test_stale_edit_preserves_server_owned_metadata_and_identity(self):
+        import uuid
+        from django.utils import timezone
+
+        stale = Project.objects.get(pk=self.project.pk)
+        fields = dict(
+            github_repository_id=99,
+            github_owner_id=42,
+            github_default_branch="main",
+            github_authority_version=9,
+            sync_lock_token=uuid.uuid4(),
+            sync_lock_until=timezone.now(),
+            sync_etags={"1": {"etag": "new"}},
+            sync_success_at=timezone.now(),
+            sync_error="provider backoff",
+        )
+        Project.objects.filter(pk=stale.pk).update(**fields)
+        stale.name = "Edited name"
+        stale.save()
+        stale.refresh_from_db()
+        self.assertEqual(stale.name, "Edited name")
+        for key, value in fields.items():
+            self.assertEqual(getattr(stale, key), value)
+        stale.repository_url = "https://github.com/elsewhere/repoint"
+        with self.assertRaisesMessage(ValidationError, "identified by GitHub ID"):
+            stale.save()
+
+    def test_stale_name_save_adopts_synchronized_canonical_rename(self):
+        stale = Project.objects.get(pk=self.project.pk)
+        Project.objects.filter(pk=stale.pk).update(
+            github_repository_id=99,
+            repository_url="https://github.com/example/renamed.git",
+        )
+        stale.name = "Renamed project"
+        stale.save()
+        self.assertEqual(stale.repository_url, "https://github.com/example/renamed.git")
+        self.assertEqual(stale.github_repository_id, 99)

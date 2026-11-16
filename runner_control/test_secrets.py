@@ -46,6 +46,7 @@ class SelectedSecretTests(TestCase):
         self.import_token = self.credential("Import", "github", "import-private-secret")
         APISettings.objects.create(github_credential=self.import_token)
         self.settings = RunnerSettings.objects.get(pk=1)
+        self.settings.enabled = True
         self.settings.research_backend = "codex"
         self.settings.implementation_backend = "codex"
         self.settings.research_model = "test-model"
@@ -630,3 +631,103 @@ class SelectedSecretTests(TestCase):
         self.settings.implementation_model = "claude-sonnet-5-5"
         self.settings.save()
         self.assertEqual(self.run_secret().status_code, 400)
+
+    def test_source_refresh_returns_owned_manual_snapshot(self):
+        self.claim()
+        response = self.client.post(
+            reverse("runner_refresh_source", args=[self.run.pk]),
+            json.dumps({"claim_token": str(self.run.item.claim_token)}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["source_snapshot"]["title"], "Task")
+
+    def test_source_refresh_rejects_stale_token(self):
+        self.claim()
+        response = self.client.post(
+            reverse("runner_refresh_source", args=[self.run.pk]),
+            json.dumps({"claim_token": str(uuid.uuid4())}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 409)
+
+    def test_source_refresh_fails_closed_on_provider_error(self):
+        from unittest.mock import patch
+        from work_queue.github import GitHubAPIError
+
+        self.claim()
+        with patch(
+            "runner_control.source_api.refresh_issue_for_launch",
+            side_effect=GitHubAPIError("offline"),
+        ):
+            response = self.client.post(
+                reverse("runner_refresh_source", args=[self.run.pk]),
+                json.dumps({"claim_token": str(self.run.item.claim_token)}),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("wait before launch", response.json()["error"])
+
+    def assert_source_refresh_revocation_is_read_only(self, identity_changes):
+        from datetime import timedelta
+        from unittest.mock import patch
+        from django.utils import timezone
+        from work_queue.models import QueueItem
+        from work_queue.services import import_issue
+        from work_queue.test_selection import source_issue, source_repository
+
+        QueueItem.objects.filter(pk=self.item.pk).update(status="succeeded")
+        Project.objects.filter(pk=self.project.pk).update(
+            autonomous=True,
+            enabled_at=timezone.now() - timedelta(minutes=1),
+            github_repository_id=99,
+            github_owner_id=42,
+            github_default_branch="main",
+        )
+        self.project.refresh_from_db()
+        original = source_issue()
+        import_issue(project=self.project, **original)
+        self.claim()
+        before_item = QueueItem.objects.values().get(pk=self.run.item_id)
+        before_run = Run.objects.values().get(pk=self.run.pk)
+        before_project = Project.objects.values().get(pk=self.project.pk)
+
+        def provider(project, number, token, **kwargs):
+            RunnerIdentity.objects.filter(pk=self.runner.pk).update(**identity_changes)
+            return {
+                **original,
+                "state": "closed",
+                "revision": "c" * 64,
+                "body": "Revoked request",
+            }
+
+        repository = source_repository(repository_url=self.project.repository_url)
+        with (
+            patch("work_queue.github.repository_metadata", return_value=repository),
+            patch(
+                "work_queue.github.issue_comments",
+                return_value=[{"body": "Revoked comments"}],
+            ),
+            patch("work_queue.github.read_issue", side_effect=provider),
+        ):
+            response = self.client.post(
+                reverse("runner_refresh_source", args=[self.run.pk]),
+                json.dumps({"claim_token": str(self.run.item.claim_token)}),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(
+            QueueItem.objects.values().get(pk=self.run.item_id), before_item
+        )
+        self.assertEqual(Run.objects.values().get(pk=self.run.pk), before_run)
+        self.assertEqual(
+            Project.objects.values().get(pk=self.project.pk), before_project
+        )
+
+    def test_source_refresh_rechecks_disabled_identity_before_side_effects(self):
+        self.assert_source_refresh_revocation_is_read_only({"enabled": False})
+
+    def test_source_refresh_rechecks_controller_proof_before_side_effects(self):
+        self.assert_source_refresh_revocation_is_read_only(
+            {"controller_digest": token_digest("rotated-controller")}
+        )

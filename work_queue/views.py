@@ -11,7 +11,7 @@ from projects.models import Project
 
 from .forms import QueueItemForm
 from .models import QueueItem
-from .services import claimable_items
+from .services import claimable_items, source_wait_reason
 from .tasks import import_auto_issues
 
 
@@ -39,7 +39,17 @@ class Index(ListView):
             items = items.filter(priority=priority)
         if project:
             items = items.filter(project_id=project)
+        items = list(items)
+        for item in items:
+            item.waiting_reason = (
+                source_wait_reason(item)
+                if item.status == QueueItem.Status.QUEUED
+                else ""
+            )
         context = {
+            "queue_total": QueueItem.objects.filter(
+                status=QueueItem.Status.QUEUED
+            ).count(),
             "form": form,
             "items": items,
             "queue_count": queue_count,

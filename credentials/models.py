@@ -7,6 +7,7 @@ from cryptography.hazmat.primitives.serialization import (
     load_ssh_private_key,
 )
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models, transaction
 from django.utils import timezone
 from django.views.decorators.debug import sensitive_variables
@@ -204,6 +205,12 @@ class APISettings(models.Model):
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     auto_sync_interval_hours = models.PositiveSmallIntegerField(
         choices=SyncInterval.choices, default=SyncInterval.HOURLY
+    )
+    auto_sync_interval_seconds = models.PositiveIntegerField(
+        default=60, validators=[MinValueValidator(60), MaxValueValidator(86400)]
+    )
+    last_auto_sync_success_at = models.DateTimeField(
+        null=True, blank=True, editable=False
     )
     last_auto_sync_at = models.DateTimeField(null=True, blank=True, editable=False)
     github_credential = models.ForeignKey(
