@@ -124,6 +124,20 @@ class GateTests(TestCase):
         self.gates.complete_run(self.state, "run")
         self.assertEqual(self.evaluate().reasons, ("window_limit",))
 
+    def test_confirmed_claim_consumes_checkpoint_before_another_claim(self):
+        decision = self.claim()
+        with self.assertRaises(JournalError):
+            self.gates.prepare_claim(self.state, "other", decision)
+        self.assertEqual(self.state["gates"]["owned_run_id"], "run")
+
+    def test_completed_claim_cannot_reuse_checkpoint_to_bypass_window_limit(self):
+        decision = self.claim()
+        self.gates.complete_run(self.state, "run")
+        self.state = self.journal.load()
+        with self.assertRaises(JournalError):
+            self.gates.prepare_claim(self.state, "other", decision)
+        self.assertEqual(sum(self.state["gates"]["counts"].values()), 1)
+
     def test_empty_claim_does_not_consume_capacity(self):
         decision = self.evaluate()
         self.gates.prepare_claim(self.state, "empty", decision)
@@ -386,6 +400,24 @@ class GateTests(TestCase):
         self.now += timedelta(hours=2)
         self.assertEqual(self.evaluate().reasons, ("window_limit",))
 
+    def test_dst_erased_weekly_gap_does_not_reset_limit_after_restart(self):
+        self.config["global"].update(
+            schedule_mode="windows",
+            timezone="America/Los_Angeles",
+            windows=[
+                {"days": list(range(7)), "start": "02:30", "end": "02:00"},
+                {"days": list(range(6)), "start": "02:00", "end": "02:30"},
+            ],
+        )
+        self.now = datetime(2026, 3, 2, 18, tzinfo=UTC)
+        self.claim()
+        self.gates.complete_run(self.state, "run")
+        self.state = self.journal.load()
+        for day in (3, 7, 9, 14):
+            with self.subTest(day=day):
+                self.now = datetime(2026, 3, day, 18, tzinfo=UTC)
+                self.assertEqual(self.evaluate().reasons, ("window_limit",))
+
 
 class ScheduleTests(TestCase):
     def setUp(self):
@@ -451,6 +483,20 @@ class ScheduleTests(TestCase):
         interval, _ = self.at("2026-03-08T09:30:00+00:00")
         self.assertEqual(interval.end, datetime(2026, 3, 8, 10, tzinfo=UTC))
         self.assertIsNone(self.at("2026-03-08T10:00:00+00:00")[0])
+
+    def test_dst_erased_weekly_gap_retains_full_component_boundaries(self):
+        self.controls.update(
+            timezone="America/Los_Angeles",
+            windows=[
+                {"days": list(range(7)), "start": "02:30", "end": "02:00"},
+                {"days": list(range(6)), "start": "02:00", "end": "02:30"},
+            ],
+        )
+        before, _ = self.at("2026-03-02T18:00:00+00:00")
+        after, _ = self.at("2026-03-14T18:00:00+00:00")
+        self.assertEqual(before, after)
+        self.assertEqual(before.start, datetime(2026, 3, 1, 10, 30, tzinfo=UTC))
+        self.assertEqual(before.end, datetime(2026, 3, 15, 9, tzinfo=UTC))
 
     def test_dst_repeated_open_uses_earlier_fold_and_close_later_fold(self):
         self.controls.update(

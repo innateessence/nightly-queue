@@ -134,9 +134,32 @@ def schedule(
         end = boundary(today + timedelta(days=1), "00:00", zone, True)
         identity = f"day:{zone.key}:{today.isoformat()}"
         return Interval(identity, start, end), end
+    span = 8
+    while True:
+        intervals = schedule_intervals(windows, zone, today, span)
+        for start, end in merged(intervals):
+            if start <= now < end:
+                first = today - timedelta(days=span - 1)
+                last = today + timedelta(days=span)
+                # DST can erase the only weekly gap and join two weeks.
+                if (
+                    start.astimezone(zone).date() <= first
+                    or end.astimezone(zone).date() >= last
+                ):
+                    break
+                identity = f"{zone.key}:{stamp(start)}:{stamp(end)}"
+                digest = hashlib.sha256(identity.encode()).hexdigest()
+                return Interval(f"window:{digest}", start, end), end
+            if start > now:
+                return None, start
+        else:
+            return None, None
+        span *= 2
+
+
+def schedule_intervals(windows, zone, today, span):
     intervals = []
-    # A weekly component with a gap is shorter than a week, including overnight edges.
-    for offset in range(-8, 9):
+    for offset in range(-span, span + 1):
         day = today + timedelta(days=offset)
         for window in windows:
             if day.weekday() not in window["days"]:
@@ -145,14 +168,7 @@ def schedule(
             start = boundary(day, window["start"], zone, True)
             end = boundary(end_day, window["end"], zone, False)
             intervals.append((start, end))
-    for start, end in merged(intervals):
-        if start <= now < end:
-            identity = f"{zone.key}:{stamp(start)}:{stamp(end)}"
-            digest = hashlib.sha256(identity.encode()).hexdigest()
-            return Interval(f"window:{digest}", start, end), end
-        if start > now:
-            return None, start
-    return None, None
+    return intervals
 
 
 class GateEvaluator:
@@ -395,6 +411,7 @@ class GateEvaluator:
         gate.setdefault("attempt_accounts", {})[run_id] = pending["accounts"]
         gate["owned_run_id"] = run_id
         gate["pending_claim"] = None
+        gate["checkpoint"] = None
         self.journal.save(state)
 
     def abandon_claim(self, state: dict[str, Any], run_id: str) -> None:

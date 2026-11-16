@@ -32,7 +32,8 @@ unreconciled decisions. Include the current configuration revision in the claim
 API request, and use the operation journal around the mutation. Only after a
 confirmed active claim, or reconciliation proving the original claim active, call
 `record_claim(state, run_id)`. It charges that attempt once, retaining its original
-interval even when reconciliation crosses midnight. A confirmed empty/not-found
+interval even when reconciliation crosses midnight, and consumes the checkpoint
+so another claim requires fresh ownership and limit checks. A confirmed empty/not-found
 outcome can call `abandon_claim`; ambiguous responses cannot. A resume never
 charges again. Counters and attempt identities survive process restart.
 
@@ -59,7 +60,8 @@ All comparisons and durations use UTC, including folds and DST transitions.
 Overlapping and touching windows form one processing interval. Its stable ID is
 a SHA-256 of timezone and the merged UTC start/end, independent of window order,
 duplicate rows, poll time, and restart. Finite weekly components are evaluated
-with enough surrounding days to retain the actual component boundaries. If the
+with an expanding search until both component boundaries are complete, including
+when a DST gap removes the only weekly closure and joins adjacent weeks. If the
 weekly union has no gap, it uses the continuous-mode local-calendar-day policy;
 it never derives an identity from a moving lookback. Continuous days use the
 `day:<timezone>:<local-date>` identity and can last 23 or 25 hours at DST changes.
