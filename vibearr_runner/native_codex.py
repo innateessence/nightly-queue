@@ -13,7 +13,7 @@ from .policy import ExecutionPolicy
 CODEX_VERSION = "0.169.0"
 MAX_EVENTS = 2048
 MAX_OUTPUT = 1024 * 1024
-MAX_LINE = 256 * 1024
+MAX_LINE = MAX_OUTPUT
 AUTH_PROMPT = "Authentication diagnostic: reply with a short greeting only. Do not run tools, edit files, or access another repository."
 
 
@@ -84,8 +84,10 @@ class CodexEvents:
         return self.events
 
     def line(self, line: bytes):
-        if len(line) > MAX_LINE or len(self.events) >= MAX_EVENTS:
-            raise NativeSessionError("Native Codex event limit exceeded.")
+        if len(line) > MAX_LINE:
+            raise NativeSessionError("Native Codex event exceeds its byte limit.")
+        if len(self.events) >= MAX_EVENTS:
+            raise NativeSessionError("Native Codex event count exceeds its limit.")
         if not line.strip():
             return
         try:
