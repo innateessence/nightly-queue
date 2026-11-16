@@ -20,6 +20,7 @@ from vibearr_runner.native_contract import NativeContractError, digest
 from vibearr_runner.native_merge import NativeMerge
 from vibearr_runner.merge_review import publish_review
 from vibearr_runner.merge_setup import apply_setup
+from vibearr_runner.merge_acceptance import merge_waypoint
 from vibearr_runner.policy import ExecutionPolicy
 from vibearr_runner.recovery import ReconciliationRequired
 
@@ -30,6 +31,8 @@ def profile():
         "repository_id": 17,
         "actor_id": 25,
         "ci_timeout_seconds": 1800,
+        "review_timeout_seconds": 1200,
+        "control_base": "vibearr/reviews",
         "delete_branch": False,
         "checks": [
             {
@@ -45,8 +48,8 @@ def profile():
                 "role": role,
                 "context": "ai-review/" + role,
                 "creator_id": 25,
-                "report_repository": "owner/reports",
-                "report_repository_id": 18,
+                "report_repository": "owner/repo",
+                "report_repository_id": 17,
                 "report_prefix": "reports/",
             }
             for role in ("independent", "root")
@@ -135,7 +138,7 @@ def receipt(run_id="run"):
                 "status_id": index + 40,
                 "creator_id": 25,
                 "context": "ai-review/" + role,
-                "report_url": "https://github.com/owner/reports/blob/"
+                "report_url": "https://github.com/owner/repo/blob/"
                 + "e" * 40
                 + "/reports/"
                 + role
@@ -225,6 +228,11 @@ class Provider(MergeGitHub):
             return {"id": 25}
         if path == "/repos/owner/repo":
             return {"allow_squash_merge": True}
+        if "/git/ref/heads/vibearr%2Freviews" in path:
+            return {
+                "ref": "refs/heads/vibearr/reviews",
+                "object": {"type": "commit", "sha": "a" * 40},
+            }
         if "/rules/branches/" in path:
             return self.rules
         if "/rulesets/" in path:
@@ -426,6 +434,48 @@ class MergeHost:
 
 
 class MergeLifecycleTests(unittest.TestCase):
+    def test_base_change_after_paused_unstarted_intent_releases_only_that_fence(self):
+        host = MergeHost()
+        host.native["candidate"] = {"workspace": workspace()}
+        identity = str(uuid4())
+        host.native["merge"] = {
+            "profile": profile(),
+            "receipt": receipt(host.run_id),
+            "intents": {"merge": identity},
+            "authorization_id": str(uuid4()),
+        }
+        host.secret = lambda *args: {"material": {"secret": "fixture"}}
+        host.read = lambda key, operation: operation()
+        provider = Provider()
+        provider.pull = lambda *args: provider.raw
+        provider.base_sha = lambda *args: "e" * 40
+        with (
+            patch.object(NativeMerge, "client", return_value=provider),
+            patch("vibearr_runner.native_revision.MergeGitHub", return_value=provider),
+        ):
+            self.assertEqual(NativeMerge(host).step(), "continue")
+        self.assertEqual(
+            host.records[0],
+            (
+                "native_merge_terminal",
+                {"schema_version": 1, "intent_id": identity, "state": "not_started"},
+            ),
+        )
+        self.assertEqual(host.native["phase"], "publication_revision")
+        self.assertEqual(host.native["publication_revision"]["intent"]["attempt"], 1)
+        self.assertFalse(host.native["merge"].get("dispatched", False))
+
+    def test_paused_dispatched_intent_never_becomes_unstarted(self):
+        host = MergeHost()
+        host.native["merge"] = {"dispatched": True, "intents": {"merge": str(uuid4())}}
+        host.checkpoint = lambda **kwargs: False
+        provider = Provider()
+        provider.pull = lambda *args: provider.raw
+        with patch.object(NativeMerge, "client", return_value=provider):
+            with self.assertRaises(ReconciliationRequired):
+                NativeMerge(host).step()
+        self.assertEqual(host.records, [])
+
     def test_base_race_rejected_by_server_enters_revision_without_merge(self):
         from vibearr_runner.native_lifecycle import NativeMetadataRejected
 
@@ -523,6 +573,28 @@ class MergeLifecycleTests(unittest.TestCase):
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_merge_restart_waypoints_distinguish_actual_provider_effects(self):
+        self.assertEqual(
+            merge_waypoint({"merge": {"dispatched": True}}), "merge-dispatched"
+        )
+        self.assertEqual(
+            merge_waypoint(
+                {"merge": {"dispatched": True, "merge": {"commit_sha": "e" * 40}}}
+            ),
+            "merge-observed",
+        )
+        self.assertEqual(
+            merge_waypoint({"merge": {"comment_dispatched": True}}),
+            "completion-comment",
+        )
+        self.assertEqual(
+            merge_waypoint({"merge": {"close_dispatched": True}}), "completion-close"
+        )
+        self.assertEqual(
+            merge_waypoint({"merge": {"completed": True}}, "reporting-pending"),
+            "reporting-pending",
+        )
+
     def test_lost_status_response_is_reconciled_without_republication(self):
         value = receipt()["reviews"][0]
         payload = {

@@ -22,6 +22,8 @@ the accepted base's workflow files.
   "repository_id": 1353963957,
   "actor_id": 17239750,
   "ci_timeout_seconds": 1800,
+  "review_timeout_seconds": 1200,
+  "control_base": "vibearr/reviews",
   "delete_branch": false,
   "checks": [
     {
@@ -128,7 +130,16 @@ silently weaken their own merge checks.
 
 ## AI review machine interface
 
-Publish reports on a separate control/report branch and PR. Never add review
+The built-in coordinator runs two genuine isolated native review sessions under
+the original run's ownership, fixed aggregate review deadline and cancellation
+controls. It publishes their protected receipts and reports without per-task
+operator commands. An optional third `external_root` role can enforce the finite
+goal's separate root AI handoff; ordinary installed profiles use the two built-in
+roles. See the [review protocol](automatic-review-contract.md) for ownership and
+terminal evidence.
+
+Publish reports on a separate control/report branch and PR targeting the persistent
+`control_base` (`vibearr/reviews`), never the application base. Never add review
 report commits to an active app-owned candidate head. A report URL must identify
 an immutable commit and the configured report path/repository. Each report is
 finite JSON with these fields:
