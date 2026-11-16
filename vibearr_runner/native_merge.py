@@ -200,6 +200,12 @@ class NativeMerge:
             return "wait"
         if not self.host.checkpoint(force_source=True):
             return "wait"
+        self.host.status(
+            "delivery",
+            detail="Squash merging the exact validated and AI-reviewed head.",
+            validation_status="passed",
+            force=True,
+        )
         self.data["dispatched"] = True
         self.host.save()
         try:
@@ -270,6 +276,13 @@ class NativeMerge:
         return number, issue_id, raw
 
     def complete(self):
+        self.host.status(
+            "delivery",
+            detail="Reporting verified merge "
+            + self.data["merge"]["commit_sha"]
+            + " and completing the original source issue.",
+            validation_status="passed",
+        )
         source = self.native["context"]["document"]["source"]
         if (
             self.host.run.get("item", {}).get("source") == "manual"

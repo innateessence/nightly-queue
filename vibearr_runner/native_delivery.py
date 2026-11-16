@@ -115,6 +115,11 @@ class NativeDelivery:
         ) == "reporting_pending" or "termination" in self.native.get("metadata", {}):
             self.host.terminate()
             return self.report()
+        if (
+            self.data.get("checkpoint") == "pr_verified"
+            and self.host.policy.delivery_mode == "merge"
+        ):
+            return self.merge()
         if not self.host.checkpoint(force_source=True):
             return "wait"
         self.verify()
@@ -219,22 +224,25 @@ class NativeDelivery:
             return "continue"
         self.verify()
         if self.host.policy.delivery_mode == "merge":
-            from .native_merge import NativeMerge
-            from .merge_github import MergeRepair, MergeWait
-
-            try:
-                return NativeMerge(self.host).step()
-            except MergeWait as exc:
-                self.host.status("waiting", reason=str(exc), validation_status="passed")
-                return "wait"
-            except MergeRepair as exc:
-                return NativeMerge(self.host).repair("ci_repair", str(exc))
+            return self.merge()
         evidence = self.evidence(workspace, pull)
         self.host.artifact("verified_delivery", evidence, "verified-delivery")
         self.host.terminate()
         self.data["checkpoint"] = "reporting_pending"
         self.host.save()
         return "continue"
+
+    def merge(self):
+        from .native_merge import NativeMerge
+        from .merge_github import MergeRepair, MergeWait
+
+        try:
+            return NativeMerge(self.host).step()
+        except MergeWait as exc:
+            self.host.status("waiting", reason=str(exc), validation_status="passed")
+            return "wait"
+        except MergeRepair as exc:
+            return NativeMerge(self.host).repair("ci_repair", str(exc))
 
     def report(self):
         pull = self.data["pull_request"]

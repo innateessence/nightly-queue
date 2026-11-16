@@ -1,4 +1,6 @@
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 import tempfile
 import unittest
@@ -6,6 +8,7 @@ from uuid import uuid4
 
 from coding_runner.test_automatic_merge import MergeHost
 from vibearr_runner.native_contract import intent_document
+from vibearr_runner.native_lifecycle import NativeLifecycle
 from vibearr_runner.native_revision import NativeRevision
 from vibearr_runner.native_validation import CandidateSource
 from vibearr_runner.workspaces import Workspace, git
@@ -132,6 +135,53 @@ class PublicationRevisionAcceptanceTests(unittest.TestCase):
             )
             self.assertTrue((checkout / "task.py").is_file())
             self.assertTrue((checkout / "base.py").is_file())
+            deadline = host.native["deadline"]
+            host.native["implementation_timeout_seconds"] = "2026-11-16T22:00:00+00:00"
+            host.native["validation_timeout_seconds"] = "2026-11-16T22:10:00+00:00"
+            host.native["validation"] = {
+                "failed": {"check_id": "django", "exit_code": 1}
+            }
+            failed = subprocess.run(
+                [sys.executable, "-c", "raise SystemExit(1)"], check=False
+            )
+            self.assertEqual(failed.returncode, 1)
+            host.native["dependency"] = {"old": "validation setup"}
+            host.executor = SimpleNamespace(
+                logs=lambda *args: b"actual validation diagnostic"
+            )
+            self.assertEqual(
+                NativeLifecycle.repair(
+                    host,
+                    {"check_id": "django", "operation": {"operation_id": str(uuid4())}},
+                ),
+                "continue",
+            )
+            self.assertEqual(host.native["attempt"], 2)
+            self.assertEqual(host.native["phase"], "agent")
+            self.assertNotIn("validation", host.native)
+            self.assertNotIn("dependency", host.native)
+            self.assertEqual(
+                host.native["candidate"]["workspace"]["commit_sha"],
+                current["workspace"]["commit_sha"],
+            )
+            self.assertEqual(host.native["deadline"], deadline)
+            self.assertEqual(
+                host.native["implementation_timeout_seconds"],
+                "2026-11-16T22:00:00+00:00",
+            )
+            self.assertEqual(
+                host.native["validation_timeout_seconds"], "2026-11-16T22:10:00+00:00"
+            )
+            (checkout / "task.py").write_text("value = 2\n")
+            repaired = self.commit(
+                checkout, "Repair task after failed local validation"
+            )
+            host.native["candidate"]["workspace"]["commit_sha"] = repaired
+            NativeRevision(host).activate_candidate()
+            self.assertNotIn("workspace", host.native["delivery"])
+            self.assertEqual(host.native["delivery"]["previous_head"], delivered)
+            self.assertEqual(host.native["delivery"]["existing_pull_number"], 9)
+            self.assertEqual(len(host.native["publication_history"]), 1)
 
 
 if __name__ == "__main__":
