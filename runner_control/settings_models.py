@@ -113,8 +113,12 @@ class RunnerSettings(models.Model):
             ("setup_commands", validate_commands),
             ("validation_commands", validate_commands),
         ):
+            value = getattr(self, field)
+            # Django skips field validators for empty JSON values.
+            if value not in self._meta.get_field(field).empty_values:
+                continue
             try:
-                validator(getattr(self, field))
+                validator(value)
             except ValidationError as exc:
                 raise ValidationError({field: exc.messages}) from None
         if self.pk != 1:
@@ -154,6 +158,8 @@ class ProjectRunnerSettings(models.Model):
 
     def clean(self):
         super().clean()
+        if self.overrides not in self._meta.get_field("overrides").empty_values:
+            return
         try:
             validate_overrides(self.overrides)
         except ValidationError as exc:

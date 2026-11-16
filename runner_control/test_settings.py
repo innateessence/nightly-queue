@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from threading import Event
 
@@ -69,7 +70,7 @@ class RunnerSettingsTests(TestCase):
             configuration_document()["projects"][0]["project_id"], self.project.pk
         )
 
-    def test_settings_post_rejects_null_commands_without_database_error(self):
+    def post_setup_commands(self, value):
         saved = RunnerSettings.objects.get(pk=1)
         data = {
             f"runner-{field.name}": field.value_from_object(saved)
@@ -80,12 +81,15 @@ class RunnerSettingsTests(TestCase):
             section="runner",
             **{
                 "runner-windows": "[]",
-                "runner-setup_commands": "null",
+                "runner-setup_commands": value,
                 "runner-validation_commands": "[]",
             },
         )
         data = {key: "" if value is None else value for key, value in data.items()}
-        response = self.client.post("/settings/", data)
+        return self.client.post("/settings/", data)
+
+    def test_settings_post_rejects_null_commands_without_database_error(self):
+        response = self.post_setup_commands("null")
         self.assertEqual(response.status_code, 200)
         self.assertFormError(
             response,
@@ -94,6 +98,62 @@ class RunnerSettingsTests(TestCase):
             "Enter a list of at most 100 commands.",
         )
         self.assertEqual(RunnerSettings.objects.get(pk=1).setup_commands, [])
+
+    def test_settings_post_rejects_null_command_characters(self):
+        response = self.post_setup_commands(json.dumps(["echo \x00"]))
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(
+            response,
+            "runner_form",
+            "setup_commands",
+            "Text cannot contain null characters.",
+        )
+        self.assertEqual(RunnerSettings.objects.get(pk=1).setup_commands, [])
+
+    def test_settings_post_rejects_unpaired_command_surrogates(self):
+        response = self.post_setup_commands(json.dumps(["echo \ud800"]))
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(
+            response, "runner_form", "setup_commands", "Enter valid Unicode text."
+        )
+        self.assertEqual(RunnerSettings.objects.get(pk=1).setup_commands, [])
+
+    def test_settings_post_preserves_unicode_and_literal_escapes(self):
+        commands = ["echo \U0001f600 \u00e9", r"echo \u0000"]
+        response = self.post_setup_commands(json.dumps(commands))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(RunnerSettings.objects.get(pk=1).setup_commands, commands)
+
+    def test_model_rejects_null_override_instructions(self):
+        overrides = {
+            "research_instructions": {
+                "mode": "replace",
+                "value": "research\x00instructions",
+            }
+        }
+        with self.assertRaisesMessage(ValidationError, "null characters"):
+            ProjectRunnerSettings(project=self.project, overrides=overrides).save()
+        self.assertFalse(ProjectRunnerSettings.objects.exists())
+
+    def test_model_rejects_unpaired_override_command_surrogates(self):
+        overrides = {"setup_commands": {"mode": "replace", "value": ["echo \ud800"]}}
+        with self.assertRaisesMessage(ValidationError, "valid Unicode text"):
+            ProjectRunnerSettings(project=self.project, overrides=overrides).save()
+        self.assertFalse(ProjectRunnerSettings.objects.exists())
+
+    def test_project_post_rejects_unpaired_command_surrogates(self):
+        response = self.client.post(
+            "/projects/",
+            {
+                "name": "Invalid commands",
+                "repository_url": "https://github.com/example/invalid",
+                "runner-setup_commands_mode": "replace",
+                "runner-setup_commands": json.dumps(["echo \ud800"]),
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Enter valid Unicode text.")
+        self.assertFalse(Project.objects.filter(name="Invalid commands").exists())
 
     def test_form_accepts_overnight_windows(self):
         saved = RunnerSettings()

@@ -67,6 +67,17 @@ def validate_commands(value):
         raise ValidationError(
             "Commands must be nonempty strings of at most 4000 characters."
         )
+    for command in value:
+        validate_json_text(command)
+
+
+def validate_json_text(value):
+    if "\x00" in value:
+        raise ValidationError("Text cannot contain null characters.")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValidationError("Enter valid Unicode text.") from None
 
 
 def validate_overrides(value):
@@ -101,3 +112,5 @@ def validate_overrides(value):
             )
         elif key.endswith("backend") and replacement not in BACKENDS:
             raise ValidationError("Choose a supported backend.")
+        else:
+            validate_json_text(replacement)

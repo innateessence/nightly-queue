@@ -7,6 +7,12 @@ from .settings_models import ProjectRunnerSettings, RunnerSettings
 from .validators import BACKENDS, OVERRIDE_FIELDS
 
 
+class ConfigurationJSONField(forms.JSONField):
+    def prepare_value(self, value):
+        prepared = super().prepare_value(value)
+        return prepared.encode("utf-8", errors="backslashreplace").decode("utf-8")
+
+
 class RunnerSettingsForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -19,6 +25,10 @@ class RunnerSettingsForm(forms.ModelForm):
         model = RunnerSettings
         exclude = ["id"]
         labels = {"minimum_remaining_usage_percent": "Minimum remaining usage (%)"}
+        field_classes = {
+            field: ConfigurationJSONField
+            for field in ("windows", "setup_commands", "validation_commands")
+        }
         help_texts = {
             "enabled": "Execution stays release-gated until live integration verification succeeds.",
             "paused": "Pause current work at the next safe checkpoint and prevent new claims.",
@@ -77,7 +87,7 @@ class ProjectRunnerSettingsForm(forms.Form):
                     label=label,
                 )
             elif key.endswith("commands"):
-                value = forms.JSONField(
+                value = ConfigurationJSONField(
                     required=False,
                     label=label,
                     widget=forms.Textarea(attrs={"rows": 3}),
