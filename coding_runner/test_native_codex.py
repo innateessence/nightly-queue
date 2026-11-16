@@ -444,9 +444,89 @@ class CodexEventTests(unittest.TestCase):
         with self.assertRaises(NativeSessionError):
             CodexEvents().feed(b"a" * (1024 * 1024 + 1))
 
-    def test_oversized_event_is_rejected(self):
-        with self.assertRaises(NativeSessionError):
-            CodexEvents().feed(b"a" * (256 * 1024 + 1))
+    def large_command_event(self):
+        return (
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "command": "python manage.py test",
+                        "aggregated_output": "ordinary test diagnostic\n" * 12000,
+                        "status": "failed",
+                        "exit_code": 1,
+                    },
+                }
+            ).encode()
+            + b"\n"
+        )
+
+    def test_large_failed_command_output_is_summarized_before_turn_completion(self):
+        parser = CodexEvents()
+        event = self.large_command_event()
+        self.assertGreater(len(event), 256 * 1024)
+        parser.feed(event + b'{"type":"turn.completed","usage":{}}\n')
+        self.assertTrue(parser.completed)
+        self.assertFalse(parser.failed)
+        self.assertEqual(parser.events[0]["command"], "python manage.py test")
+        self.assertNotIn("ordinary test diagnostic", json.dumps(parser.events))
+
+    def test_large_frame_keeps_command_and_message_summaries_bounded(self):
+        command = json.loads(self.large_command_event())
+        command["item"]["command"] = "x" * 5000
+        message = {
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "y" * 5000},
+        }
+        parser = CodexEvents()
+        parser.feed((json.dumps(command) + "\n" + json.dumps(message) + "\n").encode())
+        self.assertEqual(len(parser.events[0]["command"]), 4000)
+        self.assertEqual(len(parser.events[1]["text"]), 4000)
+        self.assertNotIn("aggregated_output", parser.events[0])
+
+    def test_large_command_event_is_reassembled_across_bounded_chunks(self):
+        parser = CodexEvents()
+        event = self.large_command_event()
+        for offset in range(0, len(event), 65536):
+            parser.feed(event[offset : offset + 65536])
+        self.assertEqual(len(parser.events), 1)
+        self.assertFalse(parser.completed)
+        self.assertEqual(parser.pending, b"")
+
+    def test_oversized_event_has_a_distinct_byte_limit_error(self):
+        with self.assertRaisesRegex(NativeSessionError, "event exceeds its byte limit"):
+            CodexEvents().line(b"a" * (1024 * 1024 + 1))
+
+    def test_whole_transcript_limit_survives_multiple_valid_large_events(self):
+        parser = CodexEvents()
+        event = self.large_command_event()
+        parser.feed(event)
+        parser.feed(event)
+        parser.feed(event)
+        with self.assertRaisesRegex(
+            NativeSessionError, "output exceeds its byte limit"
+        ):
+            parser.feed(event)
+
+    def test_event_count_limit_remains_separate_from_byte_budget(self):
+        parser = CodexEvents()
+        parser.feed(b'{"type":"turn.started"}\n' * 2048)
+        with self.assertRaisesRegex(
+            NativeSessionError, "event count exceeds its limit"
+        ):
+            parser.feed(b'{"type":"turn.started"}\n')
+
+    def test_non_object_event_is_rejected_with_larger_frame_budget(self):
+        with self.assertRaisesRegex(NativeSessionError, "event must be an object"):
+            CodexEvents().feed(json.dumps(["x" * 280000]).encode() + b"\n")
+
+    def test_large_command_does_not_invent_terminal_success(self):
+        parser = CodexEvents()
+        parser.feed(self.large_command_event())
+        self.assertFalse(parser.completed)
+        parser.feed(b'{"type":"turn.failed"}\n')
+        self.assertTrue(parser.failed)
+        self.assertFalse(parser.completed)
 
     def test_changed_session_identity_is_rejected(self):
         parser = CodexEvents()
