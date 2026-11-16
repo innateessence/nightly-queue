@@ -73,6 +73,11 @@ milestones: the application rename, autonomous execution, an isolated runtime,
 native agent integrations, issue selection, automatic merging, the operations UI,
 and self-updates.
 
+The [MVP release contract](docs/vibearr-mvp.md) defines the first complete loop:
+two dependent issues implemented, tested, and merged automatically, with the second
+starting from the first change. That is the starting point for building vibearr
+through its own queue.
+
 ## Run with Docker Compose
 
 You'll need Docker with Compose. The web app uses port **7777** by default.

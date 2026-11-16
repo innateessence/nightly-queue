@@ -3,6 +3,10 @@
 Date: 2026-11-15. Baseline: `5905c0f` on `main`.
 Planning branch: `plan/autonomous-ai-queue-pivot`.
 
+The [MVP release contract](vibearr-mvp.md) defines the first self-improvement loop,
+runtime choice, native evidence format, validation boundary, and release scenarios.
+This document maps that contract to feature branches and the later product roadmap.
+
 ## Outcome and priority
 
 Build **vibearr**, an *arr style app for vibe coding: configure repositories
@@ -20,8 +24,9 @@ HTTP CLI. No framework migration is needed to reach this outcome.
 Remove human command and plan approvals from normal execution. Configured project
 policy authorizes autonomous work inside an isolated task environment. A blocked
 action produces a clear error or bounded retry rather than an approval inbox.
-Automatic merge and deployment are separate features so the first usable queue
-can deliver PRs before it also upgrades the installed application.
+Automatic merge is part of the MVP: the next task must use code merged by the
+previous task. Automatic deployment is a later feature; delivery, merge, and a
+running application upgrade have separate evidence and outcomes.
 
 This document supersedes the sequencing and approval requirements in
 [the previous feature backlog](runner-feature-branches.md) for future pivot work.
@@ -49,7 +54,7 @@ alter repository instructions, publish issues, or run paid agents.
    Local runner storage owns workspaces and protected recovery state.
 2. Once a repository and permitted issue authors are configured, new open issues
    from those authors are eligible automatically. Start with the repository owner
-   for this app's backlog. An optional `nq:hold` label excludes work; a `ready`
+   for this app's backlog. An optional `vibearr:hold` label excludes work; a `ready`
    label or a per-issue click is not required by default. Other authors' issues
    remain visible but do not execute under this initial policy.
 3. Issue content, comments, repository files, and research are task data. They
@@ -83,14 +88,15 @@ The numbered IDs are planning identifiers, not existing GitHub issue numbers.
 
 | ID | Priority | Feature branch | Depends on | Result |
 | --- | --- | --- | --- | --- |
-| 00 | P0 | `feat/vibearr-rename` | — | Consistent product, CLI, package, and deployment naming with upgrade compatibility |
+| 00 | P1 | `feat/vibearr-rename` | — | Consistent product, CLI, package, and deployment naming with upgrade compatibility |
 | 01 | P0 | `feat/autonomous-execution-policy` | — | Remove human approval requirements from configured autonomous execution |
 | 02 | P0 | `feat/isolated-agent-runtime` | 01 | A usable, tested execution boundary for native agent processes |
 | 03 | P0 | `feat/native-codex-runner` | 02 | Real Codex CLI sessions with noninteractive operation |
-| 04 | P0 | `feat/unattended-issue-to-pr` | 03 | Complete background task execution, validation, and repeatable PR delivery |
+| 15 | P0 | `feat/isolated-project-validation` | 02 | Trusted test profile, disposable PostgreSQL, and validation evidence outside the live stack |
+| 04 | P0 | `feat/unattended-issue-to-pr` | 03, 15 | Complete background task execution, validation, and repeatable PR delivery |
 | 05 | P0 | `feat/github-work-selection` | 01 | Author filtering, dependencies, holds, and deterministic priority |
 | 06 | P0 | `feat/self-development-bootstrap` | 04, 05 | This repository consumes its own feature issues automatically |
-| 07 | P1 | `feat/automatic-pr-merge` | 06 | Passing PRs merge and unlock dependent backlog work |
+| 07 | P0 | `feat/automatic-pr-merge` | 06 | Passing PRs merge and unlock dependent backlog work; completes the MVP |
 | 08 | P1 | `feat/native-claude-runner` | 06 | Native Claude Code using the same task lifecycle |
 | 09 | P1 | `feat/native-opencode-runner` | 06 | Native OpenCode using the same task lifecycle |
 | 10 | P1 | `feat/arr-queue-dashboard` | 06 | Appliance-style queue, Activity, History, and System views |
@@ -99,10 +105,12 @@ The numbered IDs are planning identifiers, not existing GitHub issue numbers.
 | 13 | P2 | `feat/parallel-project-workers` | 07 | Bounded concurrency across repositories |
 | 14 | P2 | `refactor/retire-legacy-approval-stack` | 07, 08, 09 | Remove obsolete runtime and approval plumbing after migration |
 
-The rename in 00 can land independently and does not delay execution work.
-Branches 05 and 02–04 can be developed independently after 01. Features 08–11
-need not delay the first operational Codex loop or automatic merging. Dependencies
-describe merge order, not a request to use multiple development agents now.
+The MVP consists of 01–07 and 15. Feature 15 keeps a new ID so existing plan
+references do not change. The rename in 00 can land independently and does not
+delay execution work. Branch 05 can proceed after 01 while runtime work proceeds
+through 02, then 03 and 15, then 04. Features 08–11 and the full rename do not delay
+the Codex loop or automatic merging. Dependencies describe merge order, not a
+request to use multiple development agents now.
 
 ### 00 — Rename the application to vibearr
 
@@ -144,29 +152,32 @@ describe merge order, not a request to use multiple development agents now.
   execution to describe bounded autonomous execution and rejection of permission
   changes embedded in task data. Update the architecture and operations docs in
   the same PR. The current rule remains in effect until that change lands.
-- Replace approval-broker calls with an execution-policy interface in research,
-  implementation, and setup/validation dispatch. Do not auto-click the existing
-  approval API or manufacture human approval records. Keep operation IDs, action
-  provenance, run ownership, and durable execution evidence where useful.
+- Define the native execution policy and version 2 delivery evidence contract
+  described in the MVP. Remove native configuration's `command_approval` and
+  mandatory separate research-stage capability requirements. Ordinary setup,
+  implementation, and validation use that policy rather than a per-command broker.
+  Keep legacy proposal execution disabled; do not refactor every old proposal loop
+  before implementing native sessions. Do not manufacture approval records.
 - Migrate pending approval waits to an explicit stopped/needs-retry outcome;
   preserve historical decisions. Existing approved actions must not silently run
   after an upgrade. Hide creation/decision controls for autonomous projects.
-- Acceptance: setup and tests run under allowed policy without a human decision;
-  forbidden capabilities fail without opening an inbox; stale claims and changed
-  policy cannot execute; upgrades preserve historical runs and pending work.
+- Acceptance: configuration/API contract tests distinguish native policy from
+  legacy approvals; forbidden capabilities fail without opening an inbox; stale
+  claims and changed policy cannot authorize execution; upgrades preserve history
+  and stop pending legacy actions. Actual native dispatch is proven in 02–04.
 
 ### 02 — Isolated native agent runtime
 
-- Prove a task environment on the actual deployment host with Git, Python 3.12,
-  pinned agent binaries, dependency installation, and child-process termination.
-  Try a narrowly scoped correction to the existing namespace deployment first.
-  If it cannot support native tools and required network access, provide a
-  dedicated executor service with a fixed launch API and one ephemeral sandbox
-  per run. Settle this in this branch rather than spreading host exceptions.
+- Implement the MVP's fixed OCI executor service using Docker on a dedicated
+  Linux runner host. Do not require nested bubblewrap. Prove Git, Python 3.12,
+  dependency installation, resource limits, restart-stable container identity, and
+  full descendant termination on the actual target host. Pin the task image;
+  branch 03 adds the native agent binary and verifies its runtime requirements.
 - Keep the web app and supervisor outside agent workspaces. Do not expose the
   production checkout, application database, encryption key, Docker socket,
-  unrelated tasks, or supervisor journal to agent processes. Give task Git
-  metadata only the access native tools need; publishing remains supervisor-owned.
+  unrelated tasks, or supervisor journal to agent processes. Give agents their own
+  disposable Git metadata and import file changes into a separate trusted checkout;
+  publishing remains supervisor-owned. Only the trusted executor has engine access.
 - Separate dependency setup from credentialed model traffic. Define enforceable
   egress and private-network restrictions and explicitly test the chosen model
   auth mechanism. Native tools cannot inherit unrestricted supervisor secrets.
@@ -178,8 +189,8 @@ describe merge order, not a request to use multiple development agents now.
   a readiness switch alone cannot bypass a failed environment.
 - Acceptance: actual image/host tests prove allowed writes and installs, denied
   access to host/control-plane files and networks, resource limits, cancellation
-  of all descendants, and recovery after restart. `python -m coding_runner.verify
-  --boundary` must test the selected boundary, not a retired namespace assumption.
+  of all descendants, and recovery after restart. The explicit deployment boundary
+  verifier must test the selected runtime, not a retired namespace assumption.
 
 ### 03 — Native Codex adapter
 
@@ -193,10 +204,36 @@ describe merge order, not a request to use multiple development agents now.
 - Normalize progress, errors, session identity, changed files, and available usage
   into existing run artifacts. Check usable authentication without assuming an
   interactive login, API key, and subscription session are interchangeable.
+- Support dedicated Codex API-key authentication first. Subscription sessions are
+  an additional capability, not a bootstrap prerequisite. Use a clean per-run
+  configuration and no inherited plugins/MCP connections; capability diagnostics
+  must work before a production run has qualified, without circular release gates.
 - Acceptance: fixture processes test parsing, output limits, missing auth, hangs,
   and signals; a real bounded task edits a temporary repository, runs a test,
   exits without prompts, and records its genuine session/result. Interrupt and
   restart without duplicating an unknown remote invocation.
+
+### 15 — Isolated project validation
+
+- Build the trusted validation manifest and pinned Python 3.12/Git test image for
+  this repository before the delivery lifecycle depends on it. Use a fresh
+  PostgreSQL sidecar and run-specific credentials, volumes, and network. The
+  executor launches resources; candidate code receives no engine socket.
+- Cover formatting/lint/types, migration/system checks, Django tests, CLI tests,
+  portable runner tests, and Git acceptance. Run real boundary qualification on
+  the executor host. Select commands from the configured immutable profile, not
+  candidate-edited scripts. Dependency changes rebuild a candidate image in an
+  isolated executor build phase; production dependencies never change in place.
+- Emit profile/image/tree digests, required command IDs, actual outcomes, and log
+  references for version 2 delivery evidence. Run checks without model/GitHub
+  credentials. Clean up only run-owned disposable resources after recording results.
+- Add `.github/workflows/vibearr-validation.yml` with workflow `Vibearr validation`
+  and job `Validate candidate`, using the same trusted profile. Keep the current
+  `Run test.sh` check until its full coverage is deliberately consolidated later.
+- Acceptance: a known passing candidate passes, a deliberate failing test fails,
+  candidate edits cannot silently skip required checks, repeated runs have no DB
+  state leakage, and the live app/database/runner are unaffected. CI runs the same
+  profile; demonstrate the whole path without any native agent or paid model call.
 
 ### 04 — Unattended issue to PR
 
@@ -207,12 +244,19 @@ describe merge order, not a request to use multiple development agents now.
 - Reuse frozen checkout settings, run fencing, scoped credentials, operation
   journals, existing Git delivery, redaction, schedules, and retention. Native
   agent output must not skip independent configured validation or diff inspection.
+- Implement version 2 delivery validation on both supervisor and server, including
+  `runner_control/delivery.py`. Bind the tested tree, configured validation profile,
+  native session, pushed head, and PR identity; preserve legacy historical readback.
+  The current validator's consumed-approval/plan-handoff requirements do not apply
+  to native sessions. Reject incomplete, mixed-version, or agent-attested evidence.
 - Implement at most two repair attempts per run for failed validation initially.
   Retry transient transport errors with bounded backoff; reconcile ambiguous
   paid calls, process execution, push, and PR creation before doing anything again.
-- Distinguish failed, canceled, delivered, and no-change outcomes. No-change work
-  records an explanation and blocks automatic completion until existing evidence
-  proves the acceptance criteria; it never invents a commit or PR.
+- Distinguish failed, canceled, delivered, and no-change outcomes. In the MVP,
+  no-change work fails with an explanation; it never invents a commit or PR.
+- Add the minimum missing visibility to existing run pages: stage, age/heartbeat,
+  wait reason, repair count, validation outcome, and PR/merge links. Pause/cancel
+  and explicit retry are usable without waiting for the later dashboard feature.
 - Acceptance: a real issue produces one branch and one PR without command/plan
   approval; a failed check prevents successful delivery; restart after claim,
   agent completion, push, PR creation, and finish reporting creates no duplicates.
@@ -228,6 +272,10 @@ describe merge order, not a request to use multiple development agents now.
   Exclude closed issues, PRs, held work, existing deliveries, and unmet dependencies.
   Before starting, refetch issue state and record an immutable context revision.
   Later edits do not silently mutate an active run's instructions.
+- Use GitHub repository/user IDs as stable identity, a 60-second default polling
+  interval, conditional requests, a per-project sync lock, and rate-limit backoff.
+  Define label/dependency/branch syntax, initial backlog cutoff/backfill, and
+  fresh-read failure behavior as in the MVP.
 - Order high/normal/low priority, then creation time and ID; define explicit label
   mapping for imported issues. Detect missing/cyclic dependencies and display the
   reason. A prerequisite is fulfilled by recorded merge evidence, not simply by
@@ -235,6 +283,10 @@ describe merge order, not a request to use multiple development agents now.
 - Before feature 07, reconcile manually merged prerequisite PRs so dependent work
   can proceed. Closed-unmerged PRs stop with a visible reason. No automatic requeue
   on reopen; an explicit retry creates a new attempt and preserves delivery history.
+- Apply source eligibility consistently to UI counts and generic/runner claims.
+  The built-in runner also filters valid native configuration; generic clients
+  retain manual-task compatibility. Skip invalid runner project configuration
+  rather than starving valid work; preserve genuinely global execution gates.
 - Acceptance: author and hold filters, pagination, priority ties, stale updates,
   cycles, repository changes, duplicate imports, concurrent claims, and manual
   tasks all have explicit tests. Ineligible backlog entries cannot starve ready work.
@@ -251,11 +303,13 @@ describe merge order, not a request to use multiple development agents now.
   test expectations. Use a stable plan feature key to avoid duplicate issues.
   During implementation, publish only with the user's authorization to write to
   GitHub; this planning change publishes nothing.
-- Run checks against the task checkout and a disposable test database. Existing
-  `test.sh` starts Compose and mounts application source; do not run it against
-  the live stack from an agent. Provide a CI-equivalent isolated validation
-  profile, including portable runner tests, Git acceptance, and deployment boundary
-  checks in their appropriate environments.
+- Select feature 15's existing validation profile during bootstrap. Do not defer
+  isolated testing until this branch or launch the live-stack `test.sh` from agents.
+- Add a repeatable acceptance driver/report for the MVP's two dependent issues,
+  deliberate validation failure, restart points, and exact-head checks. This branch
+  proves discovery/execution/delivery; 07 extends the same driver to real merges.
+  Seed tools mark already merged prerequisites complete, so bootstrapping never
+  waits for the queue to implement its own missing execution prerequisites.
 - Acceptance: an owner-created issue for a small real improvement is discovered,
   implemented, tested, and delivered without intervention; a second independent
   issue runs next. Restart the service during one run and reconcile correctly.
@@ -267,16 +321,31 @@ describe merge order, not a request to use multiple development agents now.
   merge for this repository after required checks are configured. Do not add a
   human review requirement to the autonomous path; configure GitHub repository
   rules consistently rather than attempting to bypass required reviews.
+- Keep the run active through remote CI and merge in automatic-merge mode, using
+  its existing claim for scoped secret delivery. Finish only after verified merge
+  and idempotent completion reporting. PR-only mode still finishes at delivery.
+  Include both outcomes in native evidence; do not overload a PR URL as merge proof.
 - Track remote check runs and required status contexts for the exact PR head.
   Merge only the expected repository/base/head with all required checks passing;
   missing, pending, failed, or stale results are not success. Serialize merges
   per repository and revalidate after base changes with bounded repair attempts.
+- Bootstrap must detect the current empty required-check list and require a
+  nonempty configured set with producer/workflow identities. Use an expected-head
+  SHA guard and squash merge; the app's own merge loop does not require GitHub's
+  separate auto-merge setting. Bound CI waits and share repair limits across local
+  tests, remote tests, and changed-base repairs.
+- Verify that the delivery actor has no ruleset bypass; explicitly address the
+  current admin-role bypass during initial setup rather than treating an owner's
+  token as permission to ignore branch rules.
 - Use verified merge identity to complete the issue, remove the branch according
   to policy, and unlock dependents. Use retry-safe status comments with a stable
   run marker. A delivered-but-unmerged run remains visible and reconcilable.
 - Acceptance: head changes invalidate old checks; permission errors, conflicts,
   required reviews, and lost merge responses produce accurate states; retries do
   not merge a different commit, close unrelated issues, or duplicate comments.
+- Release acceptance: the real two-issue scenario merges both changes without
+  human gates; the second starts from a base containing the first merge. Every
+  required evidence row in the MVP release contract passes before calling it ready.
 
 ### 08 — Native Claude Code adapter
 
@@ -381,13 +450,15 @@ portable test success or a model-generated success summary.
 
 - **Identity, branch 00:** the application ships as vibearr with a tested migration
   from the previous command, configuration, package, and deployment names.
-- **M1, branches 01–04:** one real Codex task becomes a tested PR without any human
+- **M1, branches 01–04 plus 15:** one real Codex task becomes a tested PR without any human
   command or plan approval. This is the first execution milestone.
 - **M2, branches 05–06:** new owner issues in this repository are picked up in the
   background and delivered repeatedly. Use this loop to implement later features;
-  the first six branches must bootstrap it through ordinary development.
+  the execution, selection, validation, and bootstrap branches must first land
+  through ordinary development.
 - **M3, branch 07:** passing self-development PRs merge automatically and unblock
-  dependent features. No per-PR approval is part of the configured happy path.
+  dependent features. This is the MVP release: the full two-issue scenario and
+  failure/recovery matrix pass. No per-PR approval is part of the happy path.
 - **M4, branches 08–11:** Codex, Claude Code, and OpenCode share one queue, with
   usable appliance controls and GitHub-backed work creation.
 - **M5, branches 12–14:** merged changes update the running app, capacity grows,
