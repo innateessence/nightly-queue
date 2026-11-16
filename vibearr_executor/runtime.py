@@ -253,6 +253,7 @@ class Runtime:
             path.mkdir(mode=0o700)
             inputs = path / "input"
             inputs.mkdir(mode=0o755)
+            inputs.chmod(0o755)
             durable(inputs / "source.tar", source, 0o444)
             durable(
                 inputs / "context",
