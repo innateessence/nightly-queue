@@ -218,6 +218,13 @@ class Controller:
                 state["reconciliation_required"] = str(exc)
                 self.journal.save(state)
                 logger.warning("Execution blocked: %s", exc)
+                if self.maintenance and hasattr(self.maintenance, "blocked"):
+                    try:
+                        self.maintenance.blocked(state, str(exc))
+                    except APIError:
+                        logger.warning(
+                            "Recovery status could not be reported; local journal remains authoritative."
+                        )
                 self.stop.wait(30)
             except APIError as exc:
                 if check:

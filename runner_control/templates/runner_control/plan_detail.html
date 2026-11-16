@@ -1,8 +1,33 @@
 {% extends "base.html" %}
-{% block title %}{{ run.item.title }} · Saved plan{% endblock %}
-{% block heading %}<section class="page-heading"><div><p class="eyebrow">SAVED RESEARCH · {{ run.get_stage_display }}</p><h1>{{ run.item.title|default:"Runner attempt" }}</h1><p class="subtitle">{{ run.pk }} · {{ run.get_state_display }}</p></div></section>{% endblock %}
+{% load runner_display %}
+{% block title %}{{ run.item.title }} · Run detail{% endblock %}
+{% block heading %}<section class="page-heading"><div><p class="eyebrow">RUN HISTORY · {{ run.get_stage_display }}</p><h1>{{ run.item.title|default:"Runner attempt" }}</h1><p class="subtitle">{{ run.pk }} · {{ run.get_state_display }}</p></div></section>{% endblock %}
 {% block content %}
 <style>.plan-section{margin-bottom:24px;padding:28px;overflow-wrap:anywhere}.plan-section h2,.plan-section h3{margin:0 0 12px}.plan-section pre{white-space:pre-wrap;font:inherit;background:var(--color-input-bg);padding:12px;border-radius:8px}.plan-section summary{cursor:pointer;font-weight:600}.plan-section details{margin-top:18px}.plan-section li{margin-bottom:8px}.plan-section code{font-size:.88em}</style>
+<section class="panel plan-section"><h2>Execution and delivery</h2>
+<p>{{ run.runner.name }} · Started {{ run.created_at }}{% if run.finished_at %} · Finished {{ run.finished_at }}{% endif %}</p>
+<p>{{ run.get_stage_display }} · {{ run.get_state_display }} · {{ run.result_status|default:"In progress" }}</p>
+{% if run.wait_reason %}<p role="status">Waiting: {{ run.wait_reason }}</p>{% endif %}
+{% if run.error_summary %}<pre role="status">{{ run.error_summary }}</pre>{% endif %}
+{% if delivery %}<p>PR delivery evidence recorded. {% if run.state == "active" %}<strong>Completion reporting pending; keep this run and its volume.</strong>{% endif %}</p><pre>{{ delivery.payload|pretty_json }}</pre>{% endif %}
+{% if run.result_url %}<p><a href="{{ run.result_url }}" rel="noreferrer">Delivered pull request</a></p>{% endif %}
+{% if run.state == "active" %}
+{% if run.cancellation_requested_at %}<p>Cancellation requested {{ run.cancellation_requested_at }}. {% if run.cancellation_confirmed_at %}Process termination confirmed.{% else %}Awaiting confirmed backend and process termination. The claim remains owned.{% endif %}</p>{% else %}
+<form method="post" action="{% url 'runner_operator_cancel' run.pk %}">{% csrf_token %}<label>Reason <input name="reason" maxlength="2000" required value="Operator requested cancellation"></label><button type="submit">Request cancellation</button></form>{% endif %}
+<p>Recovery: stop the owning runner before inspecting its private journal and volume. Resume with that same volume and controller identity. A missing volume or uncertain external outcome requires reconciliation; elapsed time grants no ownership.</p>{% endif %}
+<details><summary>Effective configuration at claim · {{ run.configuration_revision }}</summary><pre>{{ configuration_json }}</pre></details>
+</section>
+<section class="panel plan-section"><h2>Approvals</h2>{% for approval in approvals %}<details><summary>{{ approval.decision_display }} · {{ approval.created_at }}</summary><pre>{{ approval.action|pretty_json }}</pre><p>{{ approval.decision_note }} · Decision {{ approval.decided_at|default:"pending" }} · Consumed {{ approval.consumed_at|default:"no" }}</p></details>{% empty %}<p>No command approvals requested.</p>{% endfor %}<p><a href="{% url 'runner_approval_inbox' %}">Open approval inbox</a></p></section>
+<section class="panel plan-section"><h2>Stages, validation, errors, and artifacts</h2>
+{% for entry in evidence_page %}<details><summary>{{ entry.kind }} · {{ entry.created_at }}</summary><pre>{{ entry.payload|pretty_json }}</pre></details>{% empty %}<p>No uploaded execution evidence.</p>{% endfor %}
+{% if evidence_page.has_previous %}<a href="?page={{ evidence_page.previous_page_number }}">Earlier evidence</a>{% endif %} <span>Page {{ evidence_page.number }} of {{ evidence_page.paginator.num_pages }}</span> {% if evidence_page.has_next %}<a href="?page={{ evidence_page.next_page_number }}">Later evidence</a>{% endif %}
+</section>
+<section class="panel plan-section"><h2>Retention and recovery data</h2>
+{% if retention.reporting_acknowledged_at %}<p>Completion reporting acknowledged {{ retention.reporting_acknowledged_at }}.</p>{% else %}<p>Protected: reporting acknowledgement is still pending. Cleanup cannot remove recoverable data.</p>{% endif %}
+{% if retention.workspace_removed_at %}<p>Workspace {{ retention.local_status }} under retention {{ retention.workspace_removed_at }}. History and commit/PR evidence remain available; this run cannot resume from that workspace.</p>{% endif %}
+{% if retention.documents_removed_at %}<p>Context and plan contents expired {{ retention.documents_removed_at }} ({{ retention.documents_removed }} documents). Run references remain as history tombstones.</p>{% endif %}
+{% if retention.logs_removed_at %}<p>Logs and uploaded artifacts expired {{ retention.logs_removed_at }} ({{ retention.artifacts_removed }} entries). Delivery, validation, stage, recovery, and approval evidence are preserved.</p>{% endif %}
+</section>
 <section class="panel plan-section"><h2>Implementation handoff</h2>{% if handoff_reason %}<p role="status">Blocked: {{ handoff_reason }}</p>{% else %}<p>Saved plan and refreshed context match.</p>{% endif %}<p>Every command still requires its own human approval. Saving a plan grants no permission to execute.</p><a href="{% url 'runner_plan_history' %}">All runs</a></section>
 <nav aria-label="Plan versions">{% if plans.has_previous %}<a href="?plan_page={{ plans.previous_page_number }}&amp;context_page={{ contexts.number }}">Newer plan</a>{% endif %} <span>Plan page {{ plans.number }} of {{ plans.paginator.num_pages }}</span> {% if plans.has_next %}<a href="?plan_page={{ plans.next_page_number }}&amp;context_page={{ contexts.number }}">Older plan</a>{% endif %}</nav>
 {% for plan in plans %}

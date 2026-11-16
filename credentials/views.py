@@ -1,12 +1,17 @@
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils import timezone
-from django.utils.dateparse import parse_datetime
 
 from runner_control.configuration import configuration_document
 from runner_control.settings_forms import RunnerSettingsForm
 from runner_control.settings_models import RunnerSettings
 from runner_control.gate_models import RunnerGateEvidence
+from runner_control.plan_presentation import (
+    present_configuration_payload,
+    form_presentation_error,
+    present_configuration,
+    present_gates,
+    present_release,
+)
 from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_http_methods
@@ -27,7 +32,13 @@ def api_settings(request):
         data if runner_post else None, instance=runner_saved, prefix="runner"
     )
     if runner_post and runner_form.is_valid():
+        from runner_control.configuration import settings_values
+        from runner_control.release import observe_settings
+
+        previous = RunnerSettings.objects.filter(pk=1).first() or RunnerSettings()
+        before = settings_values(previous)
         runner_form.save()
+        observe_settings(before, settings_values(runner_form.instance))
         messages.success(
             request,
             "Coding runner settings saved. Live execution remains release-gated.",
@@ -40,22 +51,36 @@ def api_settings(request):
         messages.success(request, "Settings saved.")
         return redirect("api_settings")
     configuration = configuration_document()
-    gate_evidence = list(
-        RunnerGateEvidence.objects.select_related("runner").order_by("runner__name")
+    gate_evidence = present_gates(
+        RunnerGateEvidence.objects.select_related("runner").order_by("runner__name"),
+        configuration,
     )
-    for evidence in gate_evidence:
-        next_check = parse_datetime(evidence.report["next_check_at"])
-        evidence.stale = next_check is None or next_check <= timezone.now()
-        evidence.configuration_changed = (
-            evidence.report["configuration_revision"] != configuration["revision"]
+    from runner_control.models import ReleaseQualification, RunnerIdentity
+
+    form_error = form_presentation_error(form, configuration)
+    runner_form_error = form_presentation_error(runner_form, configuration)
+    identities = []
+    for runner in RunnerIdentity.objects.filter(enabled=True):
+        name, error = present_configuration_payload(configuration, runner.name)
+        identities.append(
+            {"pk": runner.pk, "name": name if name is not None else "Runner"}
         )
     context = {
+        "runner_identities": identities,
+        "release_qualifications": [
+            present_release(entry, configuration)
+            for entry in ReleaseQualification.objects.order_by("-created_at")[:20]
+        ],
         "form": form,
         "runner_form": runner_form,
-        "runner_configuration": configuration,
+        "runner_form_unavailable": runner_form_error,
+        "form_unavailable": form_error,
+        "runner_configuration": present_configuration(configuration),
         "runner_gate_evidence": gate_evidence,
     }
-    return render(request, "credentials/settings.html", context)
+    response = render(request, "credentials/settings.html", context)
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @never_cache

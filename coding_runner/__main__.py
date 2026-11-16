@@ -8,6 +8,7 @@ import threading
 from .client import APIError, Client
 from .controller import Controller
 from .journal import Journal, JournalError
+from .maintenance import Maintenance
 
 
 def main() -> int:
@@ -28,12 +29,20 @@ def main() -> int:
         client = Client(
             os.environ.get("NQ_URL", "http://nightly-queue:8000"),
             os.environ.get("NQ_RUNNER_API_TOKEN", ""),
+            max_bytes=8388608,
         )
         directory = Path(
             os.environ.get("NQ_RUNNER_STATE_DIR", "/var/lib/coding-runner")
         )
         with Journal(directory) as journal:
-            Controller(client, journal, stop).run(check=arguments.check)
+            maintenance = Maintenance(client, journal, directory / "workspaces")
+            Controller(
+                client,
+                journal,
+                stop,
+                maintenance=maintenance,
+                completed=maintenance.acknowledge,
+            ).run(check=arguments.check)
     except (APIError, JournalError, ValueError, OSError) as exc:
         logging.error(
             "Runner stopped (%s). Check bootstrap configuration and private journal.",

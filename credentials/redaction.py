@@ -27,14 +27,11 @@ def credential_values(credential):
 
 
 @sensitive_variables()
-def redact_run_payload(run, payload):
-    """Call in a transaction after run authorization; mutations also require an active claim."""
-    from runner_control.services import redact_payload
+def selected_credential_values(references):
     from runner_control.settings_models import RunnerSettings
 
-    references = snapshot_credential_ids(run.configuration_snapshot)
     if not references:
-        return payload
+        return []
     RunnerSettings.objects.get_or_create(pk=1)
     RunnerSettings.objects.select_for_update().get(pk=1)
     credentials = list(Credential.objects.select_for_update().filter(pk__in=references))
@@ -62,5 +59,25 @@ def redact_run_payload(run, payload):
                 "credential": "Unable to redact selected credentials; check NQ_CREDENTIAL_KEY and credential material."
             }
         ) from None
-    secrets = sorted({value for value in values if value}, key=len, reverse=True)
-    return redact_payload(payload, secrets)
+    return sorted({value for value in values if value}, key=len, reverse=True)
+
+
+@sensitive_variables()
+def redact_selected_payload(references, payload, *, preserve_secret_versions=False):
+    from runner_control.services import redact_payload
+
+    values = selected_credential_values(references)
+    return redact_payload(
+        payload, values, preserve_secret_versions=preserve_secret_versions
+    )
+
+
+@sensitive_variables()
+def redact_run_payload(run, payload, *, preserve_secret_versions=False):
+    """Call in a transaction after run authorization; mutations also require an active claim."""
+    references = snapshot_credential_ids(run.configuration_snapshot)
+    if not references:
+        return payload
+    return redact_selected_payload(
+        references, payload, preserve_secret_versions=preserve_secret_versions
+    )

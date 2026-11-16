@@ -1,0 +1,14 @@
+<h3>Controlled release verification</h3>
+<p>{{ runner_configuration.readiness_reason }}</p>
+<p class="field-hint">The browser UI uses the existing private-LAN access model. Runner bearer tokens and private controller ownership are separate machine authorization boundaries. Keep this UI on a trusted private network.</p>
+{% for entry in release_qualifications %}<details><summary>{{ entry.repository_url }} · {% if entry.revoked_at %}Revoked{% elif entry.qualified_at %}Qualified {{ entry.qualified_at }}{% else %}Awaiting live evidence{% endif %}</summary><p>ID {{ entry.pk }} · Expires {{ entry.expires_at }}</p><p>{{ entry.blocker }}</p><p>{{ entry.authorization_note }}</p><form method="post" action="{% url 'runner_release_revoke' entry.pk %}">{% csrf_token %}<button type="submit">Revoke qualification</button></form></details>{% empty %}<p>No controlled live release has been qualified.</p>{% endfor %}
+<details><summary>Authorize a designated live test</summary>
+<p>Run <code>python -m coding_runner.release --probe</code> inside the actual hardened runner deployment first. Unsupported sandbox namespaces block qualification. This authorization permits test work and paid backend calls only in the named repository for 24 hours; ordinary execution stays gated.</p>
+<form method="post" action="{% url 'runner_release_authorize' %}">{% csrf_token %}
+<div class="field"><label for="release-runner">Runner</label><select id="release-runner" name="runner_id" required>{% for runner in runner_identities %}<option value="{{ runner.pk }}">{{ runner.name }}</option>{% endfor %}</select></div>
+<div class="field"><label>Designated test repository <input type="url" name="repository_url" required placeholder="https://github.com/owner/test-repository"></label></div>
+<div class="field"><label>Environment digest <input name="environment_digest" pattern="[0-9a-f]{64}" required></label></div>
+<div class="field"><label>Runner code digest <input name="code_revision" pattern="[0-9a-f]{64}" required></label></div>
+<div class="field"><label>Authorization and scope <textarea name="note" maxlength="2000" required></textarea></label></div>
+<label><input type="checkbox" name="authorize_live" value="yes" required> I authorize the designated test repository actions and live backend calls.</label>
+<button type="submit">Authorize controlled test</button></form></details>

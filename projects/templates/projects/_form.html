@@ -1,3 +1,4 @@
+{% if form_unavailable %}<p role="status">{{ form_unavailable }}</p>{% for error in form_presentation_errors %}<p class="field-error">{{ error }}</p>{% endfor %}{% else %}
 {% csrf_token %}
 {% if form.errors %}
   <div class="form-errors" role="alert">
@@ -34,6 +35,8 @@
     </div>
   {% endfor %}
 </details>
+{% endif %}
+{% if effective_unavailable %}<p role="status">{{ effective_unavailable }}</p>{% endif %}
 {% if effective_configuration %}
   <details open>
     <summary>Saved effective runner configuration</summary>
@@ -42,4 +45,4 @@
     {% for error in effective_configuration.errors %}<p class="field-error">{{ error.field }}: {{ error.message }}</p>{% endfor %}
   </details>
 {% endif %}
-<button class="button-primary" type="submit">{{ submit_label }}</button>
+{% if not form_unavailable %}<button class="button-primary" type="submit">{{ submit_label }}</button>{% endif %}

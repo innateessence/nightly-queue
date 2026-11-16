@@ -230,6 +230,19 @@ def _configuration_document(saved):
         "execution_ready": False,
         "readiness_reason": "Live execution requires controlled release verification; structural validity grants no execution permission.",
     }
+    from .release import verification
+
+    proof = verification(document)
+    document["release_verification"] = proof
+    document["execution_ready"] = proof["qualified"]
+    document["readiness_reason"] = proof.get(
+        "reason",
+        "Controlled release qualified; execution still requires enabled settings and fresh gates.",
+    )
+    for project in projects:
+        project["execution_ready"] = bool(
+            proof["qualified"] and project["structurally_valid"]
+        )
     encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     document["revision"] = hashlib.sha256(encoded).hexdigest()
     return document

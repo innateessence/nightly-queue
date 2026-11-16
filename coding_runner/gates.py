@@ -405,6 +405,9 @@ class GateEvaluator:
             raise JournalError("Reconcile the pending claim first.")
         if gate.get("checkpoint") != decision.data():
             raise JournalError("The claim checkpoint has been superseded.")
+        gate.setdefault("interval_ends", {})[decision.interval["id"]] = (
+            decision.interval["end"]
+        )
         gate["pending_claim"] = {
             "run_id": run_id,
             "interval_id": decision.interval["id"],

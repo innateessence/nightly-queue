@@ -30,6 +30,9 @@ class RunnerSettingsForm(forms.ModelForm):
             for field in ("windows", "setup_commands", "validation_commands")
         }
         help_texts = {
+            "workspace_retention_days": "Remove only acknowledged terminal workspaces; active, waiting, and uncertain reporting remain protected.",
+            "plan_retention_days": "Expire context and plan contents after this many days. Approval context and reconciliation evidence remain protected; history keeps tombstones.",
+            "log_retention_days": "Expire protected local logs and uploaded artifacts for acknowledged terminal runs. Keep delivery, validation, stage, and recovery summaries.",
             "enabled": "Execution stays release-gated until live integration verification succeeds.",
             "paused": "Pause current work at the next safe checkpoint and prevent new claims.",
             "windows": 'JSON list: [{"days": [0,1,2,3,4], "start": "22:00", "end": "06:00"}]. Days start on Monday; overnight windows belong to their starting day.',

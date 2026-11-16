@@ -2,11 +2,14 @@
 
 ## Project Structure & Module Organization
 
-- `hello/` contains Django models, forms, views, admin, JSON API, validators, and shared queue services. Put schema changes in `hello/migrations/` and management commands in `hello/management/commands/`.
-- `hello/templates/hello/` and `hello/static/hello/` hold HTML and CSS.
-- `nightly_queue/` contains settings, root routing, ASGI/WSGI entry points, and Celery configuration.
-- `nq/` is the standalone, standard-library HTTP CLI; keep it independent of Django and database access.
-- Tests live alongside the app in `hello/tests.py` and `hello/test_*.py`.
+- `work_queue/` owns queue models, views, JSON API, and shared queue services.
+- `projects/` owns project configuration; `credentials/` owns encrypted secrets and settings views.
+- `runner_control/` owns scoped machine APIs, configuration, immutable context/plans, approvals, recovery, retention, release evidence, operator views, and its migrations.
+- `coding_runner/` is the independent standard-library supervisor, backends, workspaces, execution boundaries, Git delivery, recovery, private logs, and cleanup. `coding_runner/acceptance/` intentionally has no `__init__.py`; explicit Git/OS acceptance does not require Git in the Django application image.
+- App templates and static assets live under each app's `templates/` and `static/` directories; shared navigation is in `templates/base.html`.
+- `nightly_queue/` contains settings, root routing, ASGI/WSGI, and Celery configuration.
+- `nq/` remains a standalone standard-library HTTP CLI, independent of Django, runner code, and database access.
+- Tests live beside their app or runtime module. Run explicit deployment boundary checks with `python -m coding_runner.verify --boundary`; unsupported namespaces fail qualification.
 
 ## Build, Test, and Development Commands
 
@@ -19,7 +22,7 @@ python manage.py createsuperuser        # Enable project management in admin
 python manage.py runserver               # Serve locally on port 8000
 python -m pip install .                  # Install the nq CLI
 python manage.py test                    # Run all tests
-python manage.py test hello.test_api     # Run focused API tests
+python manage.py test work_queue.test_api     # Run focused API tests
 ./run.sh --build                         # Build and start Docker Compose services
 bash test.sh                            # Docker lint, migration, and test checks
 ```
@@ -44,7 +47,7 @@ python manage.py makemigrations --check --dry-run
 python manage.py check
 ```
 
-Keep queue operations in `hello/services.py` so submission paths share validation. Include migrations with model changes.
+Keep queue operations in `work_queue/services.py` so submission paths share validation. Include migrations with model changes.
 
 ## Testing Guidelines
 
@@ -60,7 +63,7 @@ History uses short, free-form subjects such as `switch to uv` and `wip`; no enfo
 
 ## Security & Configuration
 
-Keep tokens and `.env` untracked. Configure `NQ_API_TOKEN` for API access, `NQ_URL` for the CLI, and `POSTGRES_PASSWORD` for the database. PostgreSQL data lives in the `postgres-data` Docker volume. The planned `coding-runner` Compose service owns task execution schedules, coding agents, Git operations, and PR delivery through the queue API. Configure its GitHub and coding backend credentials separately from issue-import credentials. Celery Beat and its worker own scheduled issue imports; Celery's greeting task is only a demo. Follow `docs/coding-runner.md` for the architecture and implementation plan; the runner is not implemented yet.
+Keep tokens and `.env` untracked. Configure `NQ_API_TOKEN` for API access, `NQ_URL` for the CLI, and `POSTGRES_PASSWORD` for the database. PostgreSQL data lives in the `postgres-data` Docker volume. The release-gated `coding-runner` Compose service owns task execution schedules, coding agents, Git operations, and PR delivery through the queue API. Configure its GitHub and coding backend credentials separately from issue-import credentials. Celery Beat and its worker own scheduled issue imports; Celery's greeting task is only a demo. Follow `docs/coding-runner.md` for the architecture and implementation plan; normal execution remains blocked until real controlled release evidence qualifies the deployed image. See `docs/runner-operations.md` for bootstrap, retention, backup, recovery, and live acceptance.
 
 ## Rules
 
