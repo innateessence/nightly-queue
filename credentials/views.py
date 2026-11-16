@@ -1,5 +1,6 @@
 from django import forms
 from django.contrib import messages
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 
 from runner_control.configuration import configuration_document
@@ -21,8 +22,17 @@ from .models import APISettings, Credential
 
 
 def form_presentation_error(form, configuration):
-    values = [form[name].value() for name in form.fields]
-    for field in form.fields.values():
+    values = []
+    for name, field in form.fields.items():
+        bound = form[name]
+        if isinstance(field, forms.JSONField):
+            raw = bound.data if form.is_bound and not field.disabled else bound.initial
+            try:
+                values.append(field.to_python(raw))
+            except ValidationError:
+                return "Invalid JSON content is withheld; reload saved settings to correct the input."
+        else:
+            values.append(bound.value())
         if isinstance(field, forms.ModelChoiceField):
             values.extend(str(label) for _, label in field.choices)
     safe, error = present_configuration_payload(

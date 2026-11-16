@@ -998,3 +998,85 @@ class OperatorPresentationTests(TestCase):
         self.assertContains(response, "Unselected safe label")
         self.assertContains(response, "Save coding runner settings")
         self.assertContains(response, ">Save settings</button>", html=False)
+
+    def escaped_selected_token(self):
+        token = 'synthetic-quote-"-slash-\\-unicode-☃'
+        self.current.set_secret(token)
+        self.current.save()
+        return token
+
+    def assert_escaped_form_withheld(self, response, token):
+        from html import unescape
+
+        self.assertEqual(response.status_code, 200)
+        decoded = unescape(response.content.decode())
+        self.assertNotIn(token, decoded)
+        self.assertNotIn(json.dumps(token)[1:-1], decoded)
+        self.assertNotContains(response, "Save coding runner settings")
+        self.assertIn("no-store", response["Cache-Control"])
+
+    def test_json_settings_withhold_escaped_current_selected_material(self):
+        token = self.escaped_selected_token()
+        commands = ["/usr/bin/echo " + token]
+        self.settings.setup_commands = commands
+        self.settings.save()
+        response = self.client.get(reverse("api_settings"))
+        self.assert_escaped_form_withheld(response, token)
+        self.assertContains(response, "Selected credential content is withheld")
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.setup_commands, commands)
+        machine = self.client.get(reverse("runner_configuration"))
+        self.assertEqual(machine.json()["global"]["setup_commands"], commands)
+
+    def test_json_settings_withhold_escaped_historical_selected_material(self):
+        token = self.escaped_selected_token()
+        self.current.set_secret("new-current-value")
+        self.current.save()
+        self.settings.setup_commands = ["/usr/bin/echo " + token]
+        self.settings.save()
+        response = self.client.get(reverse("api_settings"))
+        self.assert_escaped_form_withheld(response, token)
+        self.assertContains(response, "Selected credential content is withheld")
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.setup_commands, ["/usr/bin/echo " + token])
+
+    def test_bound_json_settings_inspect_decoded_selected_material(self):
+        token = self.escaped_selected_token()
+        response = self.client.post(
+            reverse("api_settings"),
+            {
+                "section": "runner",
+                "runner-setup_commands": json.dumps(["/usr/bin/echo " + token]),
+            },
+        )
+        self.assert_escaped_form_withheld(response, token)
+        self.assertContains(response, "Selected credential content is withheld")
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.setup_commands, [])
+
+    def test_invalid_bound_json_withholds_partially_escaped_selected_material(self):
+        token = self.escaped_selected_token()
+        invalid = json.dumps(["/usr/bin/echo " + token])[:-1]
+        response = self.client.post(
+            reverse("api_settings"),
+            {"section": "runner", "runner-setup_commands": invalid},
+        )
+        self.assert_escaped_form_withheld(response, token)
+        self.assertContains(response, "Invalid JSON content is withheld")
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.setup_commands, [])
+
+    def test_unselected_corrupt_credential_does_not_block_safe_json_form(self):
+        from credentials.models import Credential
+
+        Credential.objects.create(
+            name="Unselected corrupt JSON fixture",
+            provider="codex",
+            kind="token",
+            encrypted_payload="invalid",
+        )
+        self.settings.setup_commands = ['echo safe-quote-"-slash-\\-unicode-☃']
+        self.settings.save()
+        response = self.client.get(reverse("api_settings"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Save coding runner settings")
