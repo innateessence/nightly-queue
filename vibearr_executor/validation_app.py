@@ -41,7 +41,15 @@ def main():
     check = sys.argv[1]
     os.chdir(WORK)
     os.umask(0o022)
+    dependencies = Path("/opt/candidate/venv/lib/python3.12/site-packages")
+    site = (
+        dependencies
+        if dependencies.exists()
+        else Path("/usr/local/lib/python3.12/site-packages")
+    )
+    sys.path.insert(0, str(site))
     sys.path.insert(0, str(WORK))
+    os.environ["PYTHONPATH"] = os.pathsep.join((str(site), str(WORK)))
     if check in {"migrations", "system", "django"}:
         from django.core.management import execute_from_command_line
         from django.test import LiveServerTestCase

@@ -40,6 +40,9 @@ test entrypoint uses a clean interpreter, the disposable PostgreSQL environment,
 normal test umask 022, and IPv4 container loopback for Django's live HTTP server.
 This keeps the actual authentication tests while IPv6 and external egress remain
 denied. The supervisor and credentialed agent retain their own private defaults.
+The check uses the image-owned interpreter with startup site hooks disabled;
+dependency-supplied Python executables and `.pth` startup files do not select or
+replace the required test entrypoint.
 
 ## Install and select a profile
 

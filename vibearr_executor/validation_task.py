@@ -117,10 +117,9 @@ def main() -> int:
             clean_exit=True,
         )
         return 0
-    candidate_python = Path("/opt/candidate/venv/bin/python")
-    executable = str(candidate_python) if candidate_python.exists() else sys.executable
     return subprocess.run(
-        [executable, "-I", str(ROOT / "validation_app.py"), check], check=False
+        [sys.executable, "-I", "-S", str(ROOT / "validation_app.py"), check],
+        check=False,
     ).returncode
 
 
