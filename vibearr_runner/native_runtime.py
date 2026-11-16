@@ -3,7 +3,7 @@
 from .policy import ExecutionPolicy
 
 
-def runtime_diagnostics(policy: dict, client=None) -> dict:
+def runtime_diagnostics(policy: dict, client=None, *, validation_profile=None) -> dict:
     try:
         from vibearr_executor.client import Client, ExecutorUnavailable
         from vibearr_executor.contracts import Limits, Rejected, sha256
@@ -41,7 +41,7 @@ def runtime_diagnostics(policy: dict, client=None) -> dict:
             from .native_validation import validation_diagnostics
 
             diagnostic = validation_diagnostics(
-                selected, executor, capabilities=capabilities
+                selected, executor, validation_profile, capabilities=capabilities
             )
             if not diagnostic["ready"]:
                 raise ValueError(diagnostic["reason"])

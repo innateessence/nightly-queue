@@ -75,6 +75,23 @@ class ServerCase(TestCase):
 
 
 class ClientTests(ServerCase):
+    def test_evidence_cursor_is_encoded_for_authenticated_read(self):
+        path = f"/api/v1/runner/runs/{uuid4()}/evidence/"
+        self.server.responses[path + "?after=12"] = (
+            200,
+            {"evidence": [], "has_more": False},
+        )
+        response = self.client.request("GET", path, query={"after": 12})
+        self.assertFalse(response["has_more"])
+        self.assertEqual(self.server.calls, [("GET", path + "?after=12")])
+
+    def test_query_parameters_cannot_change_a_mutation_endpoint(self):
+        with self.assertRaises(ValueError):
+            self.client.request(
+                "POST", "/api/v1/runner/runs/claim/", query={"after": 12}
+            )
+        self.assertEqual(self.server.calls, [])
+
     def test_superseded_source_response_is_typed_without_transport_retry(self):
         path = f"/api/v1/runner/runs/{uuid4()}/source/refresh/"
         self.server.responses[path] = (409, {"code": "source_observation_superseded"})
