@@ -8,6 +8,7 @@ from credentials.models import APISettings
 from projects.models import Project
 
 from .models import QueueItem
+from .test_selection import source_issue
 from .services import (
     claim_auto_sync,
     claim_item,
@@ -53,11 +54,12 @@ class ClaimConcurrencyTests(TransactionTestCase):
         self.assertCountEqual(claimed_ids, [self.item.pk, second.pk])
 
     def test_competing_workers_claim_manual_and_imported_items(self):
+        self.project.github_repository_id = 99
+        self.project.github_owner_id = 42
+        self.project.base_branch = "main"
         self.project.autonomous = True
         self.project.save()
-        import_issue(
-            project=self.project, number=1, title="Imported", body="", state="open"
-        )
+        import_issue(project=self.project, **source_issue(title="Imported", body=""))
         imported = QueueItem.objects.get(source="github")
         barrier = Barrier(2)
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -112,3 +114,183 @@ class ImportConcurrencyTests(TransactionTestCase):
             created = [future.result(timeout=10) for future in futures]
         self.assertCountEqual(created, [True, False])
         self.assertEqual(QueueItem.objects.count(), 1)
+
+
+class SourceClaimConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        from credentials.models import Credential
+        from runner_control.auth import token_digest
+        from runner_control.models import RunnerIdentity
+        from runner_control.settings_models import RunnerSettings
+        from .test_selection import selected_project
+
+        self.project = selected_project()
+        backend = Credential.objects.create(
+            name="Backend",
+            provider="codex",
+            kind="token",
+            encrypted_payload="controlled-fixture",
+        )
+        github = Credential.objects.create(
+            name="GitHub",
+            provider="github",
+            kind="token",
+            encrypted_payload="controlled-fixture",
+        )
+        settings = RunnerSettings.objects.get(pk=1)
+        settings.enabled = True
+        settings.implementation_backend = "codex"
+        settings.implementation_model = "test-model"
+        settings.implementation_credential = backend
+        settings.issue_credential = github
+        settings.repository_credential = github
+        settings.validation_commands = ["python -m unittest"]
+        settings.save()
+        self.runner = RunnerIdentity.objects.create(
+            name="Concurrent", token_digest=token_digest("test")
+        )
+        import_issue(project=self.project, **source_issue())
+        self.item = QueueItem.objects.get(project=self.project)
+
+    def bounded_connection(self):
+        with connection.cursor() as cursor:
+            cursor.execute("SET statement_timeout = '3s'")
+
+    def test_import_project_lock_does_not_deadlock_runner_settings_lock(self):
+        import uuid
+        from threading import Event
+        from django.db import transaction
+        from runner_control.configuration import configuration_document
+        from runner_control.services import claim_run, lock_controller
+        from runner_control.settings_models import RunnerSettings
+
+        project_locked = Event()
+        settings_locked = Event()
+        revision = configuration_document()["revision"]
+
+        def importer():
+            try:
+                self.bounded_connection()
+                with transaction.atomic():
+                    Project.objects.select_for_update().get(pk=self.project.pk)
+                    project_locked.set()
+                    self.assertTrue(settings_locked.wait(5))
+                    import_issue(project=self.project, **source_issue(state="closed"))
+            finally:
+                connections.close_all()
+
+        def runner():
+            try:
+                self.bounded_connection()
+                self.assertTrue(project_locked.wait(5))
+                with transaction.atomic():
+                    lock_controller(self.runner)
+                    RunnerSettings.objects.select_for_update().get(pk=1)
+                    settings_locked.set()
+                    run = claim_run(
+                        runner=self.runner,
+                        run_id=uuid.uuid4(),
+                        configuration_revision=revision,
+                    )
+                    return run.state
+            finally:
+                connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            imported = pool.submit(importer)
+            claimed = pool.submit(runner)
+            imported.result(timeout=10)
+            self.assertEqual(claimed.result(timeout=10), "empty")
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.issue_state, "closed")
+        self.assertEqual(self.item.status, "queued")
+
+    def test_refresh_racing_requeue_cannot_restore_stale_claim(self):
+        from threading import Event
+        from unittest.mock import patch
+        from django.core.exceptions import ValidationError
+        from .services import refresh_issue_for_launch, requeue_items
+
+        claimed = claim_next()
+        fetched = Event()
+        requeued = Event()
+
+        def provider(project, number, token):
+            fetched.set()
+            self.assertTrue(requeued.wait(5))
+            return source_issue()
+
+        def refresh():
+            try:
+                self.bounded_connection()
+                with self.assertRaises(ValidationError):
+                    refresh_issue_for_launch(
+                        item_id=claimed.pk,
+                        claim_token=claimed.claim_token,
+                        token="test",
+                    )
+            finally:
+                connections.close_all()
+
+        def retry():
+            try:
+                self.bounded_connection()
+                self.assertTrue(fetched.wait(5))
+                requeue_items(QueueItem.objects.filter(pk=claimed.pk))
+                requeued.set()
+            finally:
+                connections.close_all()
+
+        with (
+            patch("work_queue.github.issue_comments", return_value=[]),
+            patch("work_queue.github.read_issue", side_effect=provider),
+        ):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                refreshing = pool.submit(refresh)
+                retrying = pool.submit(retry)
+                refreshing.result(timeout=10)
+                retrying.result(timeout=10)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.status, "queued")
+        self.assertIsNone(self.item.claim_token)
+
+    def test_hold_requests_cancellation_without_rewriting_running_snapshot(self):
+        import uuid
+        from runner_control.configuration import configuration_document
+        from runner_control.services import claim_run
+
+        run = claim_run(
+            runner=self.runner,
+            run_id=uuid.uuid4(),
+            configuration_revision=configuration_document()["revision"],
+        )
+        snapshot = run.item.source_snapshot
+        import_issue(
+            project=self.project,
+            **source_issue(body="Edited after launch", labels=["vibearr:hold"]),
+        )
+        run.refresh_from_db()
+        run.item.refresh_from_db()
+        self.assertIsNotNone(run.cancellation_requested_at)
+        self.assertEqual(run.item.source_snapshot, snapshot)
+
+    def test_prior_delivery_cannot_be_selected_as_new_execution(self):
+        import uuid
+        from runner_control.configuration import configuration_document
+        from runner_control.models import RunEvidence
+        from runner_control.services import claim_run
+        from .services import requeue_items
+
+        run = claim_run(
+            runner=self.runner,
+            run_id=uuid.uuid4(),
+            configuration_revision=configuration_document()["revision"],
+        )
+        RunEvidence.objects.create(
+            run=run,
+            operation_id=uuid.uuid4(),
+            kind="verified_delivery",
+            payload={"controlled": "prior delivery fixture"},
+        )
+        requeue_items(QueueItem.objects.filter(pk=self.item.pk))
+        self.assertIsNone(claim_next())

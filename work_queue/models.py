@@ -32,6 +32,24 @@ class QueueItem(models.Model):
     issue_state = models.CharField(
         max_length=6, choices=IssueState.choices, blank=True, editable=False
     )
+    github_repository_id = models.PositiveBigIntegerField(
+        null=True, blank=True, editable=False
+    )
+    github_issue_id = models.PositiveBigIntegerField(
+        null=True, blank=True, editable=False
+    )
+    author_id = models.PositiveBigIntegerField(null=True, blank=True, editable=False)
+    author_login = models.CharField(max_length=100, blank=True, editable=False)
+    issue_labels = models.JSONField(default=list, blank=True, editable=False)
+    issue_created_at = models.DateTimeField(null=True, blank=True, editable=False)
+    issue_updated_at = models.DateTimeField(null=True, blank=True, editable=False)
+    issue_revision = models.CharField(max_length=64, blank=True, editable=False)
+    issue_synced_at = models.DateTimeField(null=True, blank=True, editable=False)
+    source_metadata = models.JSONField(default=dict, blank=True, editable=False)
+    source_snapshot = models.JSONField(default=dict, blank=True, editable=False)
+    requested_branch = models.CharField(max_length=200, blank=True, editable=False)
+    dependencies = models.JSONField(default=list, blank=True, editable=False)
+    selection_error = models.CharField(max_length=300, blank=True, editable=False)
     title = models.CharField(max_length=200)
     instructions = models.TextField(blank=True)
     priority = models.CharField(
@@ -56,6 +74,15 @@ class QueueItem(models.Model):
         ordering = ["created_at", "pk"]
         constraints = [
             models.UniqueConstraint(
+                fields=["project", "github_repository_id", "issue_number"],
+                name="unique_project_github_issue",
+            ),
+            models.UniqueConstraint(
+                fields=["project", "branch_name"],
+                condition=~models.Q(branch_name=""),
+                name="unique_project_work_branch",
+            ),
+            models.UniqueConstraint(
                 fields=["project", "issue_repository", "issue_number"],
                 name="unique_project_issue",
             ),
@@ -68,3 +95,22 @@ class QueueItem(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class MergeEvidence(models.Model):
+    repository_id = models.PositiveBigIntegerField()
+    issue_number = models.PositiveBigIntegerField()
+    pull_number = models.PositiveBigIntegerField()
+    merge_sha = models.CharField(max_length=64)
+    merged_at = models.DateTimeField()
+    recorded_at = models.DateTimeField(auto_now_add=True)
+    provenance = models.CharField(max_length=100)
+    operation_id = models.CharField(max_length=200, unique=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["repository_id", "issue_number"],
+                name="unique_issue_merge_evidence",
+            )
+        ]

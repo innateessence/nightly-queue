@@ -46,6 +46,7 @@ class SelectedSecretTests(TestCase):
         self.import_token = self.credential("Import", "github", "import-private-secret")
         APISettings.objects.create(github_credential=self.import_token)
         self.settings = RunnerSettings.objects.get(pk=1)
+        self.settings.enabled = True
         self.settings.research_backend = "codex"
         self.settings.implementation_backend = "codex"
         self.settings.research_model = "test-model"
@@ -630,3 +631,39 @@ class SelectedSecretTests(TestCase):
         self.settings.implementation_model = "claude-sonnet-5-5"
         self.settings.save()
         self.assertEqual(self.run_secret().status_code, 400)
+
+    def test_source_refresh_returns_owned_manual_snapshot(self):
+        self.claim()
+        response = self.client.post(
+            reverse("runner_refresh_source", args=[self.run.pk]),
+            json.dumps({"claim_token": str(self.run.item.claim_token)}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["source_snapshot"]["title"], "Task")
+
+    def test_source_refresh_rejects_stale_token(self):
+        self.claim()
+        response = self.client.post(
+            reverse("runner_refresh_source", args=[self.run.pk]),
+            json.dumps({"claim_token": str(uuid.uuid4())}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 409)
+
+    def test_source_refresh_fails_closed_on_provider_error(self):
+        from unittest.mock import patch
+        from work_queue.github import GitHubAPIError
+
+        self.claim()
+        with patch(
+            "runner_control.source_api.refresh_issue_for_launch",
+            side_effect=GitHubAPIError("offline"),
+        ):
+            response = self.client.post(
+                reverse("runner_refresh_source", args=[self.run.pk]),
+                json.dumps({"claim_token": str(self.run.item.claim_token)}),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("wait before launch", response.json()["error"])

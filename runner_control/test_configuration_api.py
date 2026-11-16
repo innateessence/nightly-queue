@@ -19,6 +19,7 @@ from .test_settings import ConfiguredProjectTestCase
 class RunnerConfigurationAPITests(ConfiguredProjectTestCase):
     def setUp(self):
         super().setUp()
+        RunnerSettings.objects.filter(pk=1).update(enabled=True)
         self.token = "runner-settings-token-" + "a" * 32
         self.runner = RunnerIdentity.objects.create(
             name="configuration-test", token_digest=token_digest(self.token)
@@ -93,7 +94,31 @@ class RunnerConfigurationAPITests(ConfiguredProjectTestCase):
         saved.validation_commands = []
         saved.save()
         response = self.claim(configuration_document()["revision"])
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
         item.refresh_from_db()
         self.assertEqual(item.status, QueueItem.Status.QUEUED)
-        self.assertFalse(Run.objects.exists())
+        self.assertIsNone(response.json()["item"])
+
+    def test_invalid_project_does_not_starve_valid_manual_work(self):
+        from projects.models import Project
+        from .settings_models import ProjectRunnerSettings
+
+        invalid = Project.objects.create(
+            name="Invalid", repository_url="https://github.com/example/invalid"
+        )
+        ProjectRunnerSettings.objects.create(
+            project=invalid, overrides={"validation_commands": {"mode": "clear"}}
+        )
+        waiting = enqueue_item(project=invalid, title="Invalid first")
+        valid = enqueue_item(project=self.project, title="Valid second")
+        response = self.claim(configuration_document()["revision"])
+        self.assertEqual(response.json()["item"]["id"], valid.pk)
+        waiting.refresh_from_db()
+        self.assertEqual(waiting.status, "queued")
+
+    def test_disabled_native_execution_does_not_claim_manual_work(self):
+        enqueue_item(project=self.project, title="Wait")
+        RunnerSettings.objects.filter(pk=1).update(enabled=False)
+        self.assertIsNone(
+            self.claim(configuration_document()["revision"]).json()["item"]
+        )

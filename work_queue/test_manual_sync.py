@@ -17,6 +17,14 @@ from .models import QueueItem
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY, CELERY_TASK_ALWAYS_EAGER=True)
 class ManualSyncTests(TestCase):
     def setUp(self):
+        metadata = patch(
+            "work_queue.tasks.repository_metadata",
+            side_effect=lambda url, token, identity=None: dict(
+                repository_id=99, owner_id=42, repository_url=url, default_branch="main"
+            ),
+        )
+        metadata.start()
+        self.addCleanup(metadata.stop)
         self.url = reverse("sync_issues")
         self.project = Project.objects.create(
             name="Auto",
@@ -59,8 +67,8 @@ class ManualSyncTests(TestCase):
         self.assertRedirects(response, reverse("index"))
         self.fetch.assert_has_calls(
             [
-                call(self.project.repository_url, "private-sync-token"),
-                call(second.repository_url, "private-sync-token"),
+                call(self.project.repository_url, "private-sync-token", etags={}),
+                call(second.repository_url, "private-sync-token", etags={}),
             ]
         )
         self.assertEqual(self.fetch.call_count, 2)

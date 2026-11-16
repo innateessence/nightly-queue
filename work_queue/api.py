@@ -9,7 +9,7 @@ from projects.api import project_data
 
 from .forms import QueueItemForm
 from .models import QueueItem
-from .services import claim_next, finish_item
+from .services import claim_next, finish_item, source_wait_reason
 
 
 def item_data(item, *, include_claim=False):
@@ -19,6 +19,11 @@ def item_data(item, *, include_claim=False):
         "issue_number": item.issue_number,
         "issue_repository": item.issue_repository,
         "issue_state": item.issue_state,
+        "github_repository_id": item.github_repository_id,
+        "author_id": item.author_id,
+        "issue_labels": item.issue_labels,
+        "issue_revision": item.issue_revision,
+        "waiting_reason": source_wait_reason(item) if item.status == "queued" else "",
         "project": project_data(item.project),
         "title": item.title,
         "instructions": item.instructions,
@@ -34,6 +39,7 @@ def item_data(item, *, include_claim=False):
     }
     if not include_claim:
         return data
+    data["source_snapshot"] = item.source_snapshot
     data["claim_token"] = str(item.claim_token)
     data["repository_url"] = item.repository_url
     data["base_branch"] = item.base_branch

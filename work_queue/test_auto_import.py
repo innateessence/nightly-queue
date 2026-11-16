@@ -16,6 +16,7 @@ from projects.models import Project
 
 from .github import GitHubAPIError, NoRedirect, repository_issues
 from .models import QueueItem
+from .test_selection import source_issue
 from .services import claim_next, finish_item, import_issue
 from .tasks import import_auto_issues
 
@@ -26,6 +27,14 @@ def issue(number=1, **changes):
         "title": f"Issue {number}",
         "body": "Issue context",
         "state": "open",
+        "id": 1000 + number,
+        "user": {"id": 42, "login": "owner"},
+        "labels": [],
+        **{
+            key: value
+            for key, value in source_issue(number).items()
+            if key not in ("number", "title", "body", "state")
+        },
     }
     data.update(changes)
     return data
@@ -61,7 +70,11 @@ class GitHubClientTests(SimpleTestCase):
         build_opener.return_value.open.return_value = self.response(data)
         results = list(repository_issues("https://github.com/example/repo", "token"))
         self.assertEqual(
-            results, [{"number": 2, "title": "Issue 2", "body": "", "state": "closed"}]
+            [
+                {key: result[key] for key in ("number", "title", "body", "state")}
+                for result in results
+            ],
+            [{"number": 2, "title": "Issue 2", "body": "", "state": "closed"}],
         )
 
     @patch("work_queue.github.build_opener")
@@ -104,10 +117,21 @@ class GitHubClientTests(SimpleTestCase):
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
 class AutoImportTests(TestCase):
     def setUp(self):
+        metadata = patch(
+            "work_queue.tasks.repository_metadata",
+            side_effect=lambda url, token, identity=None: dict(
+                repository_id=99, owner_id=42, repository_url=url, default_branch="main"
+            ),
+        )
+        metadata.start()
+        self.addCleanup(metadata.stop)
         self.project = Project.objects.create(
             name="Auto",
             repository_url="https://github.com/example/auto",
             autonomous=True,
+            github_repository_id=99,
+            github_owner_id=42,
+            base_branch="main",
         )
         self.manual = Project.objects.create(
             name="Manual", repository_url="https://github.com/example/manual"
@@ -131,7 +155,7 @@ class AutoImportTests(TestCase):
             with self.subTest(hours=hours):
                 last_sync = now - timedelta(hours=hours) + timedelta(seconds=1)
                 APISettings.objects.update(
-                    auto_sync_interval_hours=hours, last_auto_sync_at=last_sync
+                    auto_sync_interval_seconds=hours * 3600, last_auto_sync_at=last_sync
                 )
                 with patch("work_queue.services.timezone.now", return_value=now):
                     self.assertTrue(import_auto_issues(scheduled=True)["skipped"])
@@ -144,7 +168,7 @@ class AutoImportTests(TestCase):
             with self.subTest(hours=hours):
                 last_sync = now - timedelta(hours=hours)
                 APISettings.objects.update(
-                    auto_sync_interval_hours=hours, last_auto_sync_at=last_sync
+                    auto_sync_interval_seconds=hours * 3600, last_auto_sync_at=last_sync
                 )
                 with patch("work_queue.services.timezone.now", return_value=now):
                     self.assertEqual(import_auto_issues(scheduled=True)["projects"], 1)
@@ -162,10 +186,10 @@ class AutoImportTests(TestCase):
     def test_shortening_interval_applies_to_next_check(self, fetch):
         last_sync = timezone.now() - timedelta(hours=5)
         APISettings.objects.update(
-            auto_sync_interval_hours=24, last_auto_sync_at=last_sync
+            auto_sync_interval_seconds=86400, last_auto_sync_at=last_sync
         )
         self.assertTrue(import_auto_issues(scheduled=True)["skipped"])
-        APISettings.objects.update(auto_sync_interval_hours=4)
+        APISettings.objects.update(auto_sync_interval_seconds=14400)
         self.assertEqual(import_auto_issues(scheduled=True)["projects"], 1)
         fetch.assert_called_once()
 
@@ -175,7 +199,7 @@ class AutoImportTests(TestCase):
     ):
         last_sync = timezone.now()
         APISettings.objects.update(
-            auto_sync_interval_hours=24, last_auto_sync_at=last_sync
+            auto_sync_interval_seconds=86400, last_auto_sync_at=last_sync
         )
         self.assertEqual(import_auto_issues()["projects"], 1)
         self.assertEqual(APISettings.objects.get().last_auto_sync_at, last_sync)
@@ -201,7 +225,7 @@ class AutoImportTests(TestCase):
         fetch.return_value = [issue()]
         result = import_auto_issues()
         fetch.assert_called_once_with(
-            self.project.repository_url, "selected-private-token"
+            self.project.repository_url, "selected-private-token", etags={}
         )
         item = QueueItem.objects.get()
         self.assertEqual(item.source, QueueItem.Source.GITHUB)
@@ -230,6 +254,9 @@ class AutoImportTests(TestCase):
             name="Second",
             repository_url="https://github.com/example/second",
             autonomous=True,
+            github_repository_id=99,
+            github_owner_id=42,
+            base_branch="main",
         )
         fetch.side_effect = [GitHubAPIError("failed"), [issue()]]
         with self.assertLogs("work_queue.tasks", level="WARNING"):
@@ -267,10 +294,12 @@ class AutoImportTests(TestCase):
 
     def test_repository_change_keeps_issue_identity_separate(self):
         import_issue(project=self.project, **issue())
-        self.project.repository_url = "https://github.com/example/replacement"
-        self.project.save()
+        Project.objects.filter(pk=self.project.pk).update(
+            repository_url="https://github.com/example/renamed.git"
+        )
+        self.project.refresh_from_db()
         import_issue(project=self.project, **issue())
-        self.assertEqual(QueueItem.objects.count(), 2)
+        self.assertEqual(QueueItem.objects.count(), 1)
 
     def test_same_number_in_different_projects_is_imported(self):
         import_issue(project=self.project, **issue())
@@ -280,3 +309,131 @@ class AutoImportTests(TestCase):
     def test_long_issue_titles_do_not_block_import(self):
         import_issue(project=self.project, **issue(title="x" * 256))
         self.assertEqual(len(QueueItem.objects.get().title), 200)
+
+    @patch("work_queue.tasks.repository_issues", return_value=[])
+    def test_discovery_continues_while_native_execution_is_paused(self, fetch):
+        from runner_control.settings_models import RunnerSettings
+
+        RunnerSettings.objects.filter(pk=1).update(enabled=False, paused=True)
+        self.assertEqual(import_auto_issues()["projects"], 1)
+        fetch.assert_called_once()
+
+    @patch("work_queue.tasks.repository_issues", return_value=[])
+    def test_per_project_lease_prevents_overlapping_manual_sync(self, fetch):
+        nested = []
+
+        def repository(url, token, identity):
+            nested.append(import_auto_issues())
+            return dict(
+                repository_id=99, owner_id=42, repository_url=url, default_branch="main"
+            )
+
+        with patch("work_queue.tasks.repository_metadata", side_effect=repository):
+            self.assertEqual(import_auto_issues()["projects"], 1)
+        self.assertEqual(nested[0]["projects"], 0)
+        fetch.assert_called_once()
+
+    @patch("work_queue.tasks.repository_issues", side_effect=GitHubAPIError("offline"))
+    def test_failed_attempt_does_not_advance_success_timestamp(self, fetch):
+        last_success = timezone.now() - timedelta(days=1)
+        APISettings.objects.update(last_auto_sync_success_at=last_success)
+        with self.assertLogs("work_queue.tasks", level="WARNING"):
+            import_auto_issues()
+        self.assertEqual(
+            APISettings.objects.get().last_auto_sync_success_at, last_success
+        )
+        self.project.refresh_from_db()
+        self.assertIsNone(self.project.sync_success_at)
+        self.assertIsNotNone(self.project.sync_attempt_at)
+        self.assertIsNotNone(self.project.sync_not_before)
+
+    @patch("work_queue.tasks.repository_issues")
+    def test_rename_binds_legacy_identity_without_duplicating_work(self, fetch):
+        old = QueueItem.objects.create(
+            project=self.project,
+            source="github",
+            issue_number=1,
+            issue_repository=self.project.repository_url,
+            title="Legacy",
+        )
+        fetch.return_value = [issue()]
+        renamed = "https://github.com/example/renamed.git"
+        repository = dict(
+            repository_id=99, owner_id=42, repository_url=renamed, default_branch="main"
+        )
+        with patch("work_queue.tasks.repository_metadata", return_value=repository):
+            import_auto_issues()
+        self.assertEqual(QueueItem.objects.count(), 1)
+        old.refresh_from_db()
+        self.assertEqual(old.github_repository_id, 99)
+        self.assertEqual(old.issue_repository, renamed)
+
+    @patch("work_queue.tasks.repository_issues")
+    def test_blank_base_follows_changed_remote_default_for_new_claims(self, fetch):
+        Project.objects.filter(pk=self.project.pk).update(base_branch="")
+        repository = dict(
+            repository_id=99,
+            owner_id=42,
+            repository_url=self.project.repository_url,
+            default_branch="main",
+        )
+        fetch.return_value = [issue(1)]
+        with patch("work_queue.tasks.repository_metadata", return_value=repository):
+            import_auto_issues()
+        first = claim_next()
+        self.assertEqual(first.base_branch, "main")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.base_branch, "")
+        self.assertEqual(self.project.github_default_branch, "main")
+        fetch.return_value = [issue(1), issue(2)]
+        with patch(
+            "work_queue.tasks.repository_metadata",
+            return_value={**repository, "default_branch": "trunk"},
+        ):
+            import_auto_issues()
+        self.assertEqual(claim_next().base_branch, "trunk")
+        first.refresh_from_db()
+        self.assertEqual(first.base_branch, "main")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.base_branch, "")
+
+    @patch("work_queue.tasks.repository_issues")
+    def test_explicit_base_overrides_remote_default(self, fetch):
+        Project.objects.filter(pk=self.project.pk).update(base_branch="release")
+        fetch.return_value = [issue()]
+        repository = dict(
+            repository_id=99,
+            owner_id=42,
+            repository_url=self.project.repository_url,
+            default_branch="trunk",
+        )
+        with patch("work_queue.tasks.repository_metadata", return_value=repository):
+            import_auto_issues()
+        self.assertEqual(claim_next().base_branch, "release")
+
+
+class ConditionalImportTests(TestCase):
+    @patch("work_queue.github.github_read")
+    def test_not_modified_page_reuses_validated_cached_source(self, read):
+        cached = {"1": {"etag": '"version-1"', "issues": [issue()]}}
+        read.return_value = (None, {"not_modified": "true"})
+        results = list(
+            repository_issues("https://github.com/example/repo", "token", etags=cached)
+        )
+        self.assertEqual(results[0]["author_id"], 42)
+        self.assertEqual(read.call_args.args[2], '"version-1"')
+
+    @patch("work_queue.github.github_read")
+    def test_missing_conditional_cache_is_an_error(self, read):
+        read.return_value = (None, {})
+        with self.assertRaises(GitHubAPIError):
+            list(
+                repository_issues("https://github.com/example/repo", "token", etags={})
+            )
+
+    def test_rate_limit_headers_bound_retry_time(self):
+        from .github import retry_time
+
+        now = timezone.now()
+        retry = retry_time({"Retry-After": "300"})
+        self.assertGreaterEqual(retry, now + timedelta(seconds=300))

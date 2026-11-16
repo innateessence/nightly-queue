@@ -16,7 +16,11 @@ class ExecutionPolicyMigrationTests(TransactionTestCase):
     def migrate_legacy_run(self, *, consumed=False, enabled=True):
         self.addCleanup(self.restore_schema)
         executor = MigrationExecutor(connection)
-        target = [("runner_control", "0008_runner_health")]
+        target = [
+            ("runner_control", "0008_runner_health"),
+            ("projects", "0003_project_credential"),
+            ("work_queue", "0003_merge_queues"),
+        ]
         executor.migrate(target)
         apps = executor.loader.project_state(target).apps
         settings, _ = apps.get_model(
