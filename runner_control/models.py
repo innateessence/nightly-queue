@@ -69,6 +69,10 @@ class Run(models.Model):
     cancellation_requested_at = models.DateTimeField(null=True, blank=True)
     cancellation_confirmed_at = models.DateTimeField(null=True, blank=True)
     cancellation_reason = models.CharField(max_length=2000, blank=True)
+    native_status = models.JSONField(default=dict, blank=True, editable=False)
+    heartbeat_at = models.DateTimeField(null=True, blank=True, editable=False)
+    native_outcome = models.CharField(max_length=20, blank=True, editable=False)
+    retry_requested_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     class Meta:
         ordering = ["created_at", "pk"]

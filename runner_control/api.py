@@ -46,6 +46,12 @@ def run_data(run):
         "configuration_revision": run.configuration_revision,
         "configuration_snapshot": run.configuration_snapshot,
         "source_snapshot": run.source_snapshot,
+        "native_status": run.native_status,
+        "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
+        "native_outcome": run.native_outcome,
+        "retry_requested_at": (
+            run.retry_requested_at.isoformat() if run.retry_requested_at else None
+        ),
         "context_reference": run.context_reference,
         "plan_reference": run.plan_reference,
         "created_at": run.created_at.isoformat(),
@@ -108,7 +114,11 @@ def identity(request):
 
 @runner_api_view("POST")
 def claim(request):
-    data = read_body(request, ["run_id", "configuration_revision"])
+    data = read_body(request, ["run_id", "configuration_revision", "project_ids"])
+    if "project_ids" in data and data["project_ids"] is None:
+        raise ValidationError(
+            {"project_ids": "Send a bounded list of positive project IDs."}
+        )
     run_id = uuid_field(data, "run_id")
     revision = string_field(data, "configuration_revision", max_length=64)
 
@@ -117,6 +127,7 @@ def claim(request):
             runner=request.runner_identity,
             run_id=run_id,
             configuration_revision=revision,
+            project_ids=data.get("project_ids"),
         )
         include_claim = run.state == Run.State.ACTIVE
         return JsonResponse(response_data(run, include_claim=include_claim))
@@ -279,13 +290,14 @@ def write_evidence(request, run_id, data, kind, payload, updates=None):
 @sensitive_variables()
 def finish(request, run_id):
     data = bounded_data(
-        request, ["claim_token", "status", "result_url", "error_summary"]
+        request, ["claim_token", "status", "result_url", "error_summary", "outcome"]
     )
     token = uuid_field(data, "claim_token")
     result = {
         "status": string_field(data, "status", max_length=9),
         "result_url": string_field(data, "result_url", max_length=500),
         "error_summary": string_field(data, "error_summary", max_length=8000),
+        "outcome": string_field(data, "outcome", max_length=20),
     }
 
     @sensitive_variables()

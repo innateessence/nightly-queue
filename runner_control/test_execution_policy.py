@@ -216,9 +216,7 @@ class NativePolicyOwnershipTests(ConfiguredProjectTestCase):
         self.assertEqual(approval.decision, "pending")
 
     def test_native_delivery_cannot_use_legacy_success_contract(self):
-        with self.assertRaisesMessage(
-            ValidationError, "version 2 delivery authorization"
-        ):
+        with self.assertRaisesMessage(ValidationError, "Native delivery evidence"):
             record_evidence(
                 runner=self.runner,
                 run_id=self.run.pk,

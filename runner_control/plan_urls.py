@@ -4,6 +4,11 @@ from . import plan_views, operations_views
 
 urlpatterns = [
     path(
+        "runner/runs/<uuid:run_id>/retry/",
+        operations_views.retry,
+        name="runner_operator_retry",
+    ),
+    path(
         "runner/release/authorize/",
         operations_views.authorize_release,
         name="runner_release_authorize",

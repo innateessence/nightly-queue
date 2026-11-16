@@ -29,14 +29,33 @@ def unavailable(message="The selected credential is unavailable."):
 def selected_reference(data, runner, document):
     scope = string_field(data, "scope", max_length=20)
     if scope == "preflight":
-        if set(data) != {"scope", "backend", "credential_id"}:
+        github = data.get("backend") == "github"
+        expected = {"scope", "backend", "credential_id"} | (
+            {"project_id"} if github else set()
+        )
+        if set(data) != expected:
             unavailable("Preflight requires a configured backend account reference.")
         reference = data["credential_id"]
         backend = data["backend"]
-        selected = any(
-            account["backend"] == backend and account["credential_id"] == reference
-            for account in document["accounts"]
-        )
+        if type(reference) is not int or reference < 1:
+            unavailable("Preflight requires a positive selected credential ID.")
+        if github:
+            project_id = data["project_id"]
+            selected = type(project_id) is int and any(
+                project["project_id"] == project_id
+                and project["execution_kind"] == "native"
+                and reference
+                in {
+                    project["effective"].get("issue_credential_id"),
+                    project["effective"].get("repository_credential_id"),
+                }
+                for project in document["projects"]
+            )
+        else:
+            selected = any(
+                account["backend"] == backend and account["credential_id"] == reference
+                for account in document["accounts"]
+            )
         granted = (
             RunnerPreflightGrant.objects.select_for_update()
             .filter(runner=runner, credential_id=reference)
@@ -47,11 +66,30 @@ def selected_reference(data, runner, document):
         if type(reference) is not int or not selected or not granted:
             unavailable("This account is not selected for runner preflight.")
         return reference, backend
-    if scope != "run" or set(data) != {"scope", "run_id", "claim_token", "purpose"}:
+    if scope not in {"run", "reconciliation"} or set(data) != {
+        "scope",
+        "run_id",
+        "claim_token",
+        "purpose",
+    }:
         unavailable("Use a configured preflight account or an owned active run.")
     run = owned_run(runner, uuid_field(data, "run_id"))
-    verify_active(run, uuid_field(data, "claim_token"))
-    purpose = data["purpose"]
+    reconciliation = scope == "reconciliation"
+    verify_active(
+        run, uuid_field(data, "claim_token"), allow_cancellation=reconciliation
+    )
+    purpose = string_field(data, "purpose", max_length=30)
+    if reconciliation:
+        from .native_services import registered
+
+        if (
+            run.configuration_snapshot.get("execution_kind") != "native"
+            or not registered(run)
+            or purpose not in {"issue", "repository"}
+        ):
+            unavailable(
+                "Reconciliation credentials require registered owned native work and a GitHub read purpose."
+            )
     if (
         run.configuration_snapshot.get("execution_kind") == "native"
         and purpose == "research"
@@ -130,7 +168,7 @@ def secret_document(data, runner):
             unavailable(
                 "Unable to decrypt or validate the selected credential; replace it or check VIBEARR_CREDENTIAL_KEY."
             )
-        return {
+        result = {
             "schema_version": 1,
             "credential": {
                 "id": credential.pk,
@@ -140,6 +178,11 @@ def secret_document(data, runner):
             },
             "material": material,
         }
+        if data["scope"] == "reconciliation":
+            result["access_mode"] = "reconciliation-read-only"
+        elif data["scope"] == "preflight" and data["backend"] == "github":
+            result["access_mode"] = "preflight-read-only"
+        return result
 
 
 @never_cache
@@ -148,7 +191,15 @@ def secret_document(data, runner):
 def selected_secret(request):
     data = read_body(
         request,
-        ["scope", "backend", "credential_id", "run_id", "claim_token", "purpose"],
+        [
+            "scope",
+            "backend",
+            "credential_id",
+            "project_id",
+            "run_id",
+            "claim_token",
+            "purpose",
+        ],
     )
     try:
         return JsonResponse(secret_document(data, request.runner_identity))

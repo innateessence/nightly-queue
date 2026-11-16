@@ -68,7 +68,14 @@ def present_configuration_payload(
 
 def present_run(run):
     safe = copy(run)
-    fields = ("wait_reason", "error_summary", "result_url", "cancellation_reason")
+    fields = (
+        "wait_reason",
+        "error_summary",
+        "result_url",
+        "cancellation_reason",
+        "native_status",
+        "native_outcome",
+    )
     payload = [
         (
             (run.source_snapshot.get("title") or run.item.title)
@@ -80,7 +87,8 @@ def present_run(run):
     data, error = present_payload(run, payload)
     safe.presentation_error = error
     for index, field in enumerate(fields, 1):
-        setattr(safe, field, data[index] if data is not None else "")
+        empty = {} if field == "native_status" else ""
+        setattr(safe, field, data[index] if data is not None else empty)
     if error:
         safe.wait_reason = error
     if run.item_id:
