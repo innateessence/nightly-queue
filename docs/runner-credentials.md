@@ -70,7 +70,11 @@ and revoke them at the provider separately. Credential changes lock runner setti
 before credential rows, matching claim snapshot lock ordering. Metadata-only saves
 preserve a concurrent rotation and its version. Global selected
 references use PROTECT; project JSON replacement references are protected during
-instance and bulk deletion by a pre-delete check under the settings lock.
+instance and bulk deletion by a pre-delete check under the settings lock. Effective
+credential references in every retained run snapshot are also protected after live
+settings are changed, including completed and obsolete runs. This retains the material
+needed for safe reporting/recovery and historical readbacks. Admin deletion previews
+name blocking projects and runs without decrypting their credential references.
 
 Evidence, progress references, and finish errors redact the owned active run's selected
 credential values before storage or response. This includes raw material, SSH passphrases,

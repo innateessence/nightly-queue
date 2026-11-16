@@ -4,6 +4,7 @@ from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.views.decorators.debug import sensitive_variables
 
 from .models import Credential, CredentialSecretVersion
+from .references import snapshot_credential_ids
 from .validation import validate_structured_secret
 
 
@@ -27,16 +28,11 @@ def credential_values(credential):
 
 @sensitive_variables()
 def redact_run_payload(run, payload):
-    """Call after owned active-run verification within the controller transaction."""
+    """Call in a transaction after run authorization; mutations also require an active claim."""
     from runner_control.services import redact_payload
     from runner_control.settings_models import RunnerSettings
 
-    effective = run.configuration_snapshot.get("effective", {})
-    references = {
-        value
-        for field, value in effective.items()
-        if field.endswith("credential_id") and type(value) is int
-    }
+    references = snapshot_credential_ids(run.configuration_snapshot)
     if not references:
         return payload
     RunnerSettings.objects.get_or_create(pk=1)

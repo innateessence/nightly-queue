@@ -5,7 +5,7 @@ from django.views.decorators.debug import sensitive_post_parameters
 
 from .forms import CredentialForm
 from .models import Credential, RunnerPreflightGrant
-from .signals import selected_project_references
+from .signals import selected_project_references, selected_run_references
 
 
 @admin.register(Credential)
@@ -36,10 +36,13 @@ class CredentialAdmin(admin.ModelAdmin):
         deleted, counts, permissions, protected = super().get_deleted_objects(
             objs, request
         )
-        selected = selected_project_references({obj.pk for obj in objs})
+        references = {obj.pk for obj in objs}
+        selected = selected_project_references(references)
         protected.extend(
             f"Project runner settings: {saved.project}" for saved in selected
         )
+        runs = selected_run_references(references)
+        protected.extend(f"Runner run configuration: {run.pk}" for run in runs)
         return deleted, counts, permissions, protected
 
     @transaction.atomic

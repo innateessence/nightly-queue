@@ -3,6 +3,7 @@ from django.db.models.signals import pre_delete
 from django.dispatch import receiver
 
 from .models import Credential
+from .references import snapshot_credential_ids
 
 
 def selected_project_references(credential_ids):
@@ -19,6 +20,15 @@ def selected_project_references(credential_ids):
             yield saved
 
 
+def selected_run_references(credential_ids):
+    from runner_control.models import Run
+
+    runs = Run.objects.only("id", "configuration_snapshot").iterator()
+    for run in runs:
+        if snapshot_credential_ids(run.configuration_snapshot) & credential_ids:
+            yield run
+
+
 @receiver(pre_delete, sender=Credential)
 def protect_runner_selection(sender, instance, **kwargs):
     from runner_control.settings_models import RunnerSettings
@@ -28,4 +38,9 @@ def protect_runner_selection(sender, instance, **kwargs):
     if next(selected_project_references({instance.pk}), None) is not None:
         raise ProtectedError(
             "Credential is selected by project runner settings.", [instance]
+        )
+    if next(selected_run_references({instance.pk}), None) is not None:
+        raise ProtectedError(
+            "Credential is selected by a retained run configuration snapshot.",
+            [instance],
         )

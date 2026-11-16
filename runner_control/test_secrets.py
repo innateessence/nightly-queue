@@ -3,6 +3,8 @@ import uuid
 
 from cryptography.fernet import Fernet
 from django.test import TestCase, override_settings
+from django.db import transaction
+from django.db.models.deletion import ProtectedError
 from django.urls import reverse
 
 from credentials.models import APISettings, Credential, RunnerPreflightGrant
@@ -454,6 +456,125 @@ class SelectedSecretTests(TestCase):
         self.assertIn("NQ_CREDENTIAL_KEY", response.content.decode())
         self.assertNotIn("backend-private-secret", response.content.decode())
         self.assertFalse(self.run.evidence.exists())
+
+    def deselect_backend(self):
+        RunnerPreflightGrant.objects.filter(credential=self.backend).delete()
+        self.settings.research_credential = self.unselected
+        self.settings.implementation_credential = self.unselected
+        self.settings.save()
+
+    @override_settings(NQ_CREDENTIAL_KEY="")
+    def test_snapshot_selection_protects_deselected_credential(self):
+        self.claim()
+        self.deselect_backend()
+        with self.assertRaises(ProtectedError):
+            self.backend.delete()
+
+    def test_snapshot_selection_protects_bulk_credential_deletion(self):
+        self.claim()
+        self.deselect_backend()
+        with self.assertRaises(ProtectedError):
+            Credential.objects.filter(pk=self.backend.pk).delete()
+
+    def test_completed_snapshot_protects_deselected_credential(self):
+        self.claim()
+        self.run.state = Run.State.COMPLETED
+        self.run.active_slot = None
+        self.run.save()
+        self.deselect_backend()
+        with self.assertRaises(ProtectedError):
+            self.backend.delete()
+
+    def test_obsolete_snapshot_protects_deselected_credential(self):
+        self.claim()
+        requeue_items(self.item.__class__.objects.filter(pk=self.item.pk))
+        self.deselect_backend()
+        with self.assertRaises(ProtectedError):
+            self.backend.delete()
+
+    def test_deselection_and_deletion_attempt_allow_failed_finish(self):
+        self.claim()
+        self.deselect_backend()
+        try:
+            with transaction.atomic():
+                self.backend.delete()
+        except ProtectedError:
+            pass
+        response = self.client.post(
+            reverse("runner_finish", args=[self.run.pk]),
+            json.dumps(
+                {
+                    "claim_token": str(self.run.item.claim_token),
+                    "status": "failed",
+                    "error_summary": "backend-private-secret is no longer selected",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertNotIn("backend-private-secret", response.content.decode())
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.state, Run.State.COMPLETED)
+
+    @override_settings(NQ_CREDENTIAL_KEY="")
+    def test_admin_reports_snapshot_protection_before_deletion(self):
+        from django.contrib.auth import get_user_model
+
+        self.claim()
+        self.deselect_backend()
+        self.client.force_login(
+            get_user_model().objects.create_superuser("reviewer", password="test")
+        )
+        response = self.client.post(
+            reverse("admin:credentials_credential_delete", args=[self.backend.pk]),
+            {"post": "yes"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Cannot delete")
+        self.assertContains(response, str(self.run.pk))
+        self.assertNotContains(response, "backend-private-secret")
+        self.assertTrue(Credential.objects.filter(pk=self.backend.pk).exists())
+
+    def test_admin_reports_snapshot_protection_in_bulk_action(self):
+        from django.contrib.auth import get_user_model
+
+        self.claim()
+        self.deselect_backend()
+        self.client.force_login(
+            get_user_model().objects.create_superuser("reviewer", password="test")
+        )
+        response = self.client.post(
+            reverse("admin:credentials_credential_changelist"),
+            {
+                "action": "delete_selected",
+                "_selected_action": [self.backend.pk],
+                "post": "yes",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Cannot delete")
+        self.assertContains(response, str(self.run.pk))
+        self.assertTrue(Credential.objects.filter(pk=self.backend.pk).exists())
+
+    def test_snapshot_defaults_do_not_protect_unselected_credential(self):
+        ProjectRunnerSettings.objects.create(
+            project=self.project,
+            overrides={
+                "research_credential_id": {
+                    "mode": "replace",
+                    "value": self.unselected.pk,
+                },
+                "implementation_credential_id": {
+                    "mode": "replace",
+                    "value": self.unselected.pk,
+                },
+            },
+        )
+        self.claim()
+        self.deselect_backend()
+        reference = self.backend.pk
+        self.backend.delete()
+        self.assertFalse(Credential.objects.filter(pk=reference).exists())
 
     def test_arbitrary_id_in_run_request_is_rejected(self):
         self.claim()
