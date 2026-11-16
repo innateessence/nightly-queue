@@ -56,6 +56,7 @@ class Executor:
         self.broker, self.clock = broker, clock
         self.calls = []
         self.exit_codes = []
+        self.gate = lambda: True
         self.periodic_gate = lambda: True
         self.change = None
         self.elapsed = 1.0
@@ -477,6 +478,39 @@ class ImplementationTests(WorkspaceFixture, unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertIn("timeout", result.detail["reason"])
 
+    def test_delivery_verification_can_share_supervisor_workspace_lock(self):
+        result = self.ready()
+        with self.workspace.locked():
+            verified = verify_delivery_ready(
+                self.workspace, result.detail, already_locked=True
+            )
+        self.assertEqual(verified["workspace"], result.detail["workspace"])
+
+    def test_patch_creates_nested_files_without_running_commands(self):
+        proposal = self.patch()
+        proposal["files"] = [
+            {"path": "new/module.py", "expected_digest": None, "content": "VALUE = 1\n"}
+        ]
+        with self.workspace.locked():
+            apply_patch(self.workspace, proposal)
+        self.assertEqual(
+            (self.workspace.checkout / "new/module.py").read_text(), "VALUE = 1\n"
+        )
+        self.assertEqual(self.broker.consumed, [])
+
+    def test_grouped_patch_checks_every_conflict_before_writing(self):
+        proposal = self.patch()
+        proposal["files"].append(
+            {"path": "absent", "expected_digest": "a" * 64, "content": "new"}
+        )
+        with self.assertRaises(BackendError):
+            with self.workspace.locked():
+                apply_patch(self.workspace, proposal)
+        self.assertEqual(
+            (self.workspace.checkout / "README.md").read_text(),
+            "Untrusted repository instructions.\n",
+        )
+
     def test_supervised_commit_attests_unchanged_validated_files_without_repeating_checks(
         self,
     ):
@@ -502,6 +536,37 @@ class ImplementationTests(WorkspaceFixture, unittest.TestCase):
         self.assertEqual(len(self.executor.calls), 1)
         with self.assertRaisesRegex(BackendError, "stale"):
             verify_delivery_ready(self.workspace, result.detail)
+
+    def test_supervised_commit_preserves_new_file_diff_fingerprint(self):
+        self.implement()
+        (self.workspace.checkout / "new.py").write_text("VALUE = 1\n")
+        self.stage.revalidate(self.state, self.run_id)
+        self.step()
+        self.broker.decision = "approved"
+        self.step()
+        result = self.step()
+        git(["add", "README.md", "new.py"], self.workspace.checkout)
+        git(
+            [
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                "Create module",
+            ],
+            self.workspace.checkout,
+        )
+        head = git(["rev-parse", "HEAD"], self.workspace.checkout)
+        attestation = verify_delivery_ready(
+            self.workspace, result.detail, committed_head=head
+        )
+        self.assertEqual(
+            attestation["workspace"]["diff_digest"],
+            result.detail["workspace"]["diff_digest"],
+        )
+        self.assertEqual(len(self.executor.calls), 1)
 
     def test_commit_attestation_rejects_changed_validated_files(self):
         result = self.ready()

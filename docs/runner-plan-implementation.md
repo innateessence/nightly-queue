@@ -91,8 +91,9 @@ files: projects should choose stable validation commands.
 Delivery readiness contains schema version 1, plan/context IDs, plan digest,
 amendment history, current workspace fingerprint and passing validation records.
 The fingerprint includes task workspace ID, base revision, branch, HEAD,
-content digest, and diff digest relative to the recorded base (including untracked
-files). A later file change invalidates readiness. `revalidate(state, run_id)`
+content digest, and a diff digest binding that full content to the recorded base
+(including untracked files). The digest stays stable across staging/committing a
+new file because index membership is excluded. A later file change invalidates readiness. `revalidate(state, run_id)`
 resets to diff review and validation without another model call when validation
 alone is needed.
 
@@ -103,7 +104,9 @@ branch must still match and Git status must be clean. The returned attestation
 records validated HEAD and committed HEAD. Identical validated files do not need
 duplicate checks just because the supervisor committed them. Any changed file or
 diff requires fresh validation. This helper does not approve Git operations,
-verify a remote PR or finish a queue item.
+verify a remote PR or finish a queue item. A supervisor that already holds the
+workspace lock across verification, commit and push passes `already_locked=True`
+to avoid taking a second lock.
 
 ## Active time and recovery contract
 

@@ -3,10 +3,11 @@ import os
 import stat
 import tempfile
 import threading
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from .approvals import ActionSpec, digest
 from .backends import (
@@ -61,7 +62,7 @@ def workspace_evidence(workspace: Workspace) -> dict[str, str]:
         "head_revision": head,
         "content_digest": content,
         "diff_digest": digest(
-            {"diff": diff, "untracked": untracked, "content": content}
+            {"base_revision": workspace.base_revision, "content_digest": content}
         ),
         "changed": "yes" if diff or untracked else "no",
     }
@@ -72,8 +73,9 @@ def verify_delivery_ready(
     evidence: dict[str, Any],
     *,
     committed_head: str | None = None,
+    already_locked: bool = False,
 ) -> dict[str, Any]:
-    with workspace.locked():
+    with nullcontext() if already_locked else workspace.locked():
         current = workspace_evidence(workspace)
         validated = evidence["workspace"]
         expected = (
@@ -195,7 +197,9 @@ class ImplementationStage:
         self.snapshot = snapshot
         self.checkpoint, self.progress = checkpoint, progress
         self.stop = stop or threading.Event()
+        previous_gate = executor.gate
         previous_periodic = executor.periodic_gate
+        executor.gate = lambda: previous_gate() is True and self._periodic()
         executor.periodic_gate = (
             lambda: previous_periodic() is True and self._periodic()
         )
@@ -259,8 +263,9 @@ class ImplementationStage:
         validate_context(context["document"], item)
         if context["digest"] != digest(context["document"]):
             raise BackendOutputError("Context digest changed.")
+        context_id = str(UUID(document["context_id"]))
         origin = self.store.client.request(
-            "GET", f"/api/v1/runner/runs/{run_id}/contexts/{document['context_id']}/"
+            "GET", f"/api/v1/runner/runs/{run_id}/contexts/{context_id}/"
         )["context"]
         validate_context(origin["document"], item)
         validate_plan(
