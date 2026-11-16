@@ -1,4 +1,5 @@
 import uuid
+import json
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -201,6 +202,40 @@ class RetentionTests(TestCase):
 
     def test_machine_retention_endpoint_requires_machine_authorization(self):
         self.assertEqual(self.client.get(reverse("runner_retention")).status_code, 401)
+
+    def test_http_reporting_ack_requires_controller_volume_proof(self):
+        self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer test-token"
+        self.client.defaults["HTTP_X_NQ_CONTROLLER_SECRET"] = "incorrect-proof"
+        response = self.client.post(
+            reverse("runner_retention_ack", args=[self.run.pk]),
+            json.dumps(
+                {
+                    "claim_token": str(self.token),
+                    "finish_digest": self.run.finish_digest,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 409)
+        self.retention.refresh_from_db()
+        self.assertIsNone(self.retention.reporting_acknowledged_at)
+
+    def test_http_reporting_ack_releases_only_its_owned_terminal_run(self):
+        self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer test-token"
+        response = self.client.post(
+            reverse("runner_retention_ack", args=[self.run.pk]),
+            json.dumps(
+                {
+                    "claim_token": str(self.token),
+                    "finish_digest": self.run.finish_digest,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        plan_response = self.client.get(reverse("runner_retention"))
+        self.assertEqual(plan_response.json()["workspaces"], [str(self.run.pk)])
+        self.assertEqual(plan_response.headers["Cache-Control"], "no-store")
 
     def test_machine_token_cannot_replace_browser_csrf_for_controls(self):
         from django.test import Client
