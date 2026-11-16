@@ -7,6 +7,11 @@ from vibearr_runner.backend_registry import ScopedCredentials
 from vibearr_runner.native_runtime import runtime_diagnostics
 from vibearr_runner.policy import default_execution_policy
 
+if importlib.util.find_spec("vibearr_executor"):
+    from vibearr_executor import QUALIFICATION_VERSION
+else:
+    QUALIFICATION_VERSION = 0
+
 
 class ExecutorFixture:
     def __init__(self):
@@ -30,7 +35,7 @@ class ExecutorFixture:
         self.document = {
             "schema_version": 1,
             "protocol_version": 1,
-            "qualification_version": 2,
+            "qualification_version": QUALIFICATION_VERSION,
             "runtime": "docker-oci-v1",
             "qualified": True,
             "accepting_work": True,

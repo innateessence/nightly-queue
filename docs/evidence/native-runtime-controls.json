@@ -1,0 +1,288 @@
+{
+  "boundary": {
+    "binding": {
+      "cgroup_version": "2",
+      "denied_ips": [],
+      "docker_api_version": "1.56",
+      "docker_version": "29.9.3",
+      "engine_id": "d5874907-593c-4b38-923d-8a841b5d6c57",
+      "executor_source_digest": "2f08ff4de1b0859a73fddb272f553fb2ffbef89ad98323c3ef977d0d499660f1",
+      "images": {
+        "sha256:75b6ea6cdcd51d7ccb4d5d332c01f03e3b3aaebfe8ba73cd4006c91479316dc4": {
+          "installed_contract": true
+        },
+        "sha256:81edcaa5ff2923f7be9c1f43d3e5076f29c6c9c216c86964b5fd038959404429": {
+          "installed_contract": true
+        }
+      },
+      "kernel": "7.3.4-1-cachyos",
+      "max_active_runs": 1,
+      "profiles": {
+        "smoke-agent-v1": "7ca5682ee2de7721d292d287aad48784b6db4e8fef8c8998f9b7790683a4252d",
+        "smoke-controls-v1": "a5724f7e5390cbc3968e036622fc007618436bc0478031e081ff7304593a8a03",
+        "smoke-database-v1": "4659de11de662db677c084f8b98487dc0c7d2c3de30f22ce6822a5b262246502",
+        "smoke-leak-v1": "b51a57722998b555f488c01d8ddddaca204503f504cfe2fb80455a5e83760a57",
+        "smoke-limits-v1": "022d0f406967addd02aaf4e649cd0e852e70c876b7e2ca1fc90413ee9b7fe4f9",
+        "smoke-oom-v1": "8ce14a5d4f7d154d859023af7492bb60028cd88fc41d319b116b7d9a61658743",
+        "smoke-pid-hold-v1": "55e69d08b1444127ceb270719f826c6c89a9ad5d86050bfa78c1a633415033f4",
+        "smoke-setup-v1": "4204b404a41f39d9ab48afb009204ad8736d1fdc57f96236a0965b79a00aad9a",
+        "smoke-sleep-v1": "5bb81ab3947be3dda74e6a7146b9bda8a8888cf815f71523cc753afdcae329bd",
+        "smoke-validation-v1": "3cda2663757a098d8d21efff42db6277bb687eccb72aac53dd14eee4d6de6be3"
+      },
+      "protocol_version": 1,
+      "qualification_version": 3,
+      "security_options": [
+        "name=seccomp,profile=builtin",
+        "name=rootless",
+        "name=cgroupns"
+      ],
+      "storage_driver": "overlay2"
+    },
+    "checks": [
+      "agent-boundary-egress-artifacts",
+      "archive-and-rebinding-rejection",
+      "credential-and-receipt-isolation",
+      "credential-free-setup",
+      "disposable-database-isolation",
+      "memory-exhaustion",
+      "offline-validation",
+      "pause-resume-deadline",
+      "pid-exhaustion-stop",
+      "resource-enforcement",
+      "restart-and-descendant-stop",
+      "retry-and-auth-contract",
+      "terminal-retention"
+    ]
+  },
+  "completed_at": "2026-11-16T13:31:17.144878+00:00",
+  "controls": {
+    "pause": {
+      "container_id": "56d882f9b007a0f2224fd2913e7a7b50cf0b45fc9ba2d3b5e2516adce3baeaab",
+      "deadline": "2026-11-16T13:40:43.736979+00:00",
+      "frozen_counter": 3,
+      "operation_id": "9e93ca84-3b11-460c-93ca-92fb2ce62078",
+      "pid": 2162783,
+      "resumed_counter": 12
+    },
+    "paused_expiry": {
+      "container_id": "b51c9c638f98bbbe9410716cc7d16dc842a2045dbb58f1f8e37ad4412639765a",
+      "descendants_terminated": true,
+      "operation_id": "e969bf9f-e3e8-422b-9d0f-5a8ae54fc5cf",
+      "paused": false,
+      "result": {
+        "canceled": false,
+        "ended_at": 1794835862.115332,
+        "exit_code": null,
+        "export_error": "Forced termination; no verified workspace export.",
+        "operation_id": "e969bf9f-e3e8-422b-9d0f-5a8ae54fc5cf",
+        "run_id": "f9f85511-0046-4dbf-9b5d-fbdadbfe4e61",
+        "schema_version": 1,
+        "terminated": true,
+        "termination": "paused-deadline",
+        "timed_out": true
+      },
+      "state": "exited"
+    },
+    "retention": {
+      "container_id": "5b81527d0e045a16566aff334a3c24ed3c18ace2b9345530fc85ab08b73f9547",
+      "descendants_terminated": true,
+      "operation_id": "656f19ee-11fc-416c-8aae-0115188365fa",
+      "paused": false,
+      "receipt_digest": "3286ef9841a6457b9d8bab6c28e70f66f8150a8878ab71726a4860d1c00d486a",
+      "removed_at": {
+        "logs": "2026-11-16T13:31:16.488274+00:00",
+        "source": "2026-11-16T13:31:16.486923+00:00"
+      },
+      "resources_removed": [
+        "logs",
+        "source"
+      ],
+      "result": {
+        "artifact_digests": {
+          "manifest_digest": "66228ee5558a9f7b2dff4047db88e53e0752d8136d6b25af131fbe3ddc666559",
+          "result_digest": "a1d5b90d08cb13a7d01b708e2341066459a6a7960ff758a4462b16bc8be59c52",
+          "source_digest": "2e36cc6a1e42219e52a01c03ea8991021006bd2c5340734b2be4bc5ea21d098c"
+        },
+        "canceled": false,
+        "ended_at": 1794835875.0027676,
+        "exit_code": 0,
+        "log_bytes": 214,
+        "log_digest": "9809d755393417c1db774986796f11b33ced6ad760db05ed77cfb4e2c4e04b40",
+        "log_truncated": false,
+        "operation_id": "656f19ee-11fc-416c-8aae-0115188365fa",
+        "run_id": "cb6cfcf2-c332-434e-aa5b-e761fec216cc",
+        "schema_version": 1,
+        "started_at": 1794835872.095691,
+        "terminated": true,
+        "timed_out": false
+      },
+      "state": "exited",
+      "tombstone": true
+    },
+    "unlaunched_expiry": {
+      "descendants_terminated": true,
+      "operation_id": "275d2a79-7525-46c1-8bc7-893cfb78d072",
+      "paused": false,
+      "result": {
+        "canceled": false,
+        "ended_at": 1794835865.717542,
+        "exit_code": null,
+        "export_error": "Forced termination; no verified workspace export.",
+        "operation_id": "275d2a79-7525-46c1-8bc7-893cfb78d072",
+        "run_id": "5cfd2a6c-b168-427a-853e-3b7c40859fdc",
+        "schema_version": 1,
+        "terminated": true,
+        "termination": "expired-before-start",
+        "timed_out": true
+      },
+      "state": "exited"
+    }
+  },
+  "dependency_build": {
+    "before_setup": {
+      "available": false,
+      "build_id": "926dbf4a-f84f-4670-b6e4-d0e094be90da",
+      "pause_requested": true,
+      "pause_state": "paused",
+      "paused": true,
+      "run_id": "d7df8d13-1048-4a3d-8dbd-8f99f6a62f01",
+      "state": "prepared"
+    },
+    "between_phases": {
+      "available": false,
+      "build_id": "926dbf4a-f84f-4670-b6e4-d0e094be90da",
+      "pause_requested": true,
+      "pause_state": "paused",
+      "paused": true,
+      "run_id": "d7df8d13-1048-4a3d-8dbd-8f99f6a62f01",
+      "state": "assembling"
+    },
+    "during_qualification": {
+      "available": false,
+      "build_id": "926dbf4a-f84f-4670-b6e4-d0e094be90da",
+      "image": "sha256:9dd13cc272d93cc6e6a4a4230866330da0ed8d63271c6145afcf532e122cc5c8",
+      "pause_requested": true,
+      "pause_state": "pausing-at-checkpoint",
+      "paused": false,
+      "run_id": "d7df8d13-1048-4a3d-8dbd-8f99f6a62f01",
+      "state": "qualifying"
+    },
+    "parent_image_preserved": true,
+    "ready_paused": {
+      "available": false,
+      "build_id": "926dbf4a-f84f-4670-b6e4-d0e094be90da",
+      "image": "sha256:9dd13cc272d93cc6e6a4a4230866330da0ed8d63271c6145afcf532e122cc5c8",
+      "pause_requested": true,
+      "pause_state": "paused",
+      "paused": true,
+      "run_id": "d7df8d13-1048-4a3d-8dbd-8f99f6a62f01",
+      "state": "ready"
+    },
+    "resumed": {
+      "available": true,
+      "build_id": "926dbf4a-f84f-4670-b6e4-d0e094be90da",
+      "image": "sha256:9dd13cc272d93cc6e6a4a4230866330da0ed8d63271c6145afcf532e122cc5c8",
+      "pause_requested": false,
+      "pause_state": "running",
+      "paused": false,
+      "run_id": "d7df8d13-1048-4a3d-8dbd-8f99f6a62f01",
+      "state": "ready"
+    },
+    "setup_paused": {
+      "build": {
+        "available": false,
+        "build_id": "926dbf4a-f84f-4670-b6e4-d0e094be90da",
+        "pause_requested": true,
+        "pause_state": "paused",
+        "paused": true,
+        "run_id": "d7df8d13-1048-4a3d-8dbd-8f99f6a62f01",
+        "state": "setup"
+      },
+      "operation": {
+        "container_id": "8cd19876419a7f5987046dd68e77530a076a09bbaab886202b58b23cabfa95df",
+        "operation_id": "926dbf4a-f84f-4670-b6e4-d0e094be90da",
+        "paused": true,
+        "state": "running"
+      }
+    },
+    "source_purge": {
+      "available": false,
+      "build_id": "926dbf4a-f84f-4670-b6e4-d0e094be90da",
+      "image": "sha256:9dd13cc272d93cc6e6a4a4230866330da0ed8d63271c6145afcf532e122cc5c8",
+      "pause_requested": false,
+      "pause_state": "running",
+      "paused": false,
+      "resources_removed": [
+        "source"
+      ],
+      "run_id": "d7df8d13-1048-4a3d-8dbd-8f99f6a62f01",
+      "state": "ready",
+      "tombstone": false
+    },
+    "tombstone": {
+      "available": false,
+      "build_id": "926dbf4a-f84f-4670-b6e4-d0e094be90da",
+      "image": "sha256:9dd13cc272d93cc6e6a4a4230866330da0ed8d63271c6145afcf532e122cc5c8",
+      "pause_requested": false,
+      "pause_state": "running",
+      "paused": false,
+      "resources_removed": [
+        "logs",
+        "source"
+      ],
+      "run_id": "d7df8d13-1048-4a3d-8dbd-8f99f6a62f01",
+      "state": "purged",
+      "tombstone": true
+    }
+  },
+  "edge_cases": {
+    "pause_replay": {
+      "container_id": "dd2c5e97099cdd4a9c85c7d28370156a5753a3d5b249c6229a56138fa9d4253c",
+      "operation_id": "10a1f3c5-45ba-45d2-97f0-84b176ddb570",
+      "paused": true,
+      "state": "running"
+    },
+    "reconciled_stop": {
+      "container_id": "dd2c5e97099cdd4a9c85c7d28370156a5753a3d5b249c6229a56138fa9d4253c",
+      "container_state": {
+        "exit_code": null,
+        "finished_at": null,
+        "oom_killed": null,
+        "status": "missing"
+      },
+      "descendants_terminated": true,
+      "operation_id": "10a1f3c5-45ba-45d2-97f0-84b176ddb570",
+      "paused": false,
+      "result": {
+        "exit_code": null,
+        "export_error": "Forced termination; no verified workspace export.",
+        "operation_id": "10a1f3c5-45ba-45d2-97f0-84b176ddb570",
+        "run_id": "3c39862c-20bd-4505-9ec6-6589c997afc8",
+        "schema_version": 1,
+        "terminated": true,
+        "termination": "forced-stop"
+      },
+      "state": "exited"
+    },
+    "replaced_identity": {
+      "container_id": "dd2c5e97099cdd4a9c85c7d28370156a5753a3d5b249c6229a56138fa9d4253c",
+      "container_state": {
+        "exit_code": null,
+        "finished_at": null,
+        "oom_killed": null,
+        "status": "missing"
+      },
+      "operation_id": "10a1f3c5-45ba-45d2-97f0-84b176ddb570",
+      "paused": true,
+      "state": "unknown",
+      "wait_reason": "Container identity changed; recovery is required."
+    },
+    "resume_replay": {
+      "container_id": "dd2c5e97099cdd4a9c85c7d28370156a5753a3d5b249c6229a56138fa9d4253c",
+      "operation_id": "10a1f3c5-45ba-45d2-97f0-84b176ddb570",
+      "paused": false,
+      "state": "running"
+    }
+  },
+  "schema_version": 1
+}

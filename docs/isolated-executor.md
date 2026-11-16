@@ -7,6 +7,9 @@ project validation recipes, and 04 owns queue dispatch and delivery. Native queu
 readiness remains false until those integrations exist. Historical proposal
 qualification never authorizes this runtime.
 
+[Native runtime controls](native-runtime-controls.md) documents pause/resume,
+deadline reconciliation, terminal artifact retention and state identity checks.
+
 ## Deployment
 
 Run the executor on a dedicated Linux runner host/account with Docker engine

@@ -25,6 +25,7 @@ from .contracts import (
     sha256,
 )
 from .engine import Docker, EngineError
+from . import operation_controls, retention
 
 
 def durable(path: Path, content: bytes, mode: int = 0o600) -> None:
@@ -227,7 +228,11 @@ class Runtime:
             unpack(source)
             if (self.artifacts / manifest.context_digest).stat().st_size > MAX_CONTEXT:
                 raise Rejected("Context artifact exceeds its limit.")
-            if len(list(self.operations.iterdir())) >= 1000:
+            retained = sum(
+                not retention.fully_purged(self.record(path.name))
+                for path in self.operations.iterdir()
+            )
+            if retained >= 1000:
                 raise Rejected(
                     "Operation journal is full; retain active work and archive completed operations."
                 )
@@ -263,6 +268,7 @@ class Runtime:
                 "name": f"vibearr-exec-{self.instance[:8]}-{operation_id}",
                 "launch_intent": False,
                 "gate_intent": False,
+                **operation_controls.deadline_record(data),
             }
             self.save(record)
             return self.public(record)
@@ -276,6 +282,10 @@ class Runtime:
             raise Rejected("Invalid backend credential material.")
         with self.lock:
             record = self.record(operation_id)
+            retention.require_available(record, "source")
+            if "manifest" in record and operation_controls.expired(record):
+                operation_controls.forced_stop(self, record, timed_out=True)
+                raise Rejected("Expired operation cannot receive backend credentials.")
             if not record.get("profile", {}).get("backend_secret_env"):
                 raise Rejected("This profile cannot receive backend credentials.")
             secret_digest = digest(secret.encode())
@@ -564,6 +574,10 @@ class Runtime:
                         and existing["State"]["Running"]
                         and not record.get("gate_opened")
                     ):
+                        if operation_controls.expired(record):
+                            return operation_controls.forced_stop(
+                                self, record, timed_out=True
+                            )
                         if not self.profile_is_current(record):
                             return self.fenced_status(record, revoked)
                         try:
@@ -581,13 +595,11 @@ class Runtime:
                 raise Rejected(
                     "Deliver the selected backend credential before agent launch."
                 )
-            if (
-                time.time()
-                >= __import__("datetime")
-                .datetime.fromisoformat(record["manifest"]["deadline"])
-                .timestamp()
-            ):
+            if operation_controls.expired(record):
                 raise Rejected("Job deadline expired before launch.")
+            if record.get("pause_intent"):
+                return self.public(record)
+            operation_controls.launch_binding(self, record)
             record["launch_intent"] = True
             self.save(record)
             network, destinations, job = self.infrastructure(record)
@@ -709,6 +721,8 @@ class Runtime:
             self.save(record)
             if not self.profile_is_current(record):
                 return self.fenced_status(record, revoked)
+            if operation_controls.expired(record):
+                return operation_controls.forced_stop(self, record, timed_out=True)
             self.docker.run("exec", record["name"], "touch", "/state/go")
             record["gate_opened"] = True
             self.save(record)
@@ -775,6 +789,8 @@ class Runtime:
             self.docker.remove("network", record["name"] + suffix)
         durable(self.path(record["operation_id"]) / "input" / "secret", b"")
         record["state"] = "exited"
+        record["paused"] = False
+        record["pause_intent"] = False
         record.pop("wait_reason", None)
         record["descendants_terminated"] = True
         self.save(record)
@@ -782,6 +798,13 @@ class Runtime:
     def status(self, operation_id: str) -> dict:
         with self.lock:
             record = self.record(operation_id)
+            if (
+                "manifest" in record
+                and record["state"] != "exited"
+                and not record.get("launch_intent")
+            ):
+                if operation_controls.expired(record):
+                    return operation_controls.forced_stop(self, record, timed_out=True)
             if (
                 "manifest" not in record
                 or not record.get("launch_intent")
@@ -800,6 +823,8 @@ class Runtime:
             if record.get("result"):
                 self.cleanup(record)
             elif inspected is not None and inspected["State"]["Running"]:
+                if operation_controls.observe_pause(self, record, inspected):
+                    return self.public(record)
                 try:
                     complete = self.harvest(record)
                 except ResultInvalid:
@@ -838,9 +863,13 @@ class Runtime:
             record = self.record(operation_id)
             if "manifest" not in record or record["state"] == "exited":
                 return self.public(record)
+            if not record.get("launch_intent"):
+                return operation_controls.forced_stop(self, record)
             record["stop_intent"] = True
             self.save(record)
             inspected = self.owned(record, record["name"])
+            if inspected is not None and inspected["State"].get("Paused"):
+                return operation_controls.forced_stop(self, record)
             if inspected is not None and inspected["State"]["Running"]:
                 self.docker.run("kill", "--signal", "TERM", record["name"])
                 deadline = time.monotonic() + 20
@@ -878,8 +907,22 @@ class Runtime:
             "result",
             "wait_reason",
             "container_state",
+            "paused",
+            "resources_removed",
+            "tombstone",
+            "receipt_digest",
+            "removed_at",
         )
         return {key: record[key] for key in keys if key in record}
+
+    def pause(self, operation_id: str) -> dict:
+        return operation_controls.pause(self, operation_id)
+
+    def resume(self, operation_id: str) -> dict:
+        return operation_controls.resume(self, operation_id)
+
+    def purge(self, operation_id: str, run_id: str, resources) -> dict:
+        return retention.purge(self, operation_id, run_id, resources)
 
     def logs(self, operation_id: str, offset: int, limit: int) -> bytes:
         if (
@@ -890,10 +933,11 @@ class Runtime:
         ):
             raise Rejected("Invalid bounded log range.")
         status = self.status(operation_id)
+        record = self.record(operation_id)
+        retention.require_available(record, "logs")
         path = self.path(operation_id) / "logs.bin"
         if not path.exists():
-            record = self.record(operation_id)
-            if status["state"] != "running":
+            if status["state"] != "running" or status.get("paused"):
                 return b""
             content = self.docker.read(record["name"], "logs.bin", MAX_LOG)
             return (content or b"")[offset : offset + limit]
@@ -903,6 +947,7 @@ class Runtime:
 
     def export(self, operation_id: str) -> tuple[dict, bytes]:
         status = self.status(operation_id)
+        retention.require_available(self.record(operation_id), "source")
         if (
             status.get("state") != "exited"
             or not status.get("descendants_terminated")

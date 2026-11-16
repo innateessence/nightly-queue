@@ -10,7 +10,14 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .contracts import MAX_ARCHIVE, Conflict, Profile, Rejected, canonical
+from .contracts import (
+    MAX_ARCHIVE,
+    ArtifactRemoved,
+    Conflict,
+    Profile,
+    Rejected,
+    canonical,
+)
 from .engine import EngineError
 from .runtime import Runtime
 
@@ -70,6 +77,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise Rejected("Supply a JSON object.")
             self.reply(200, self.route(data))
+        except ArtifactRemoved as exc:
+            self.reply(410, {"error": str(exc)})
         except Conflict as exc:
             self.reply(409, {"error": str(exc)})
         except Rejected as exc:
@@ -112,16 +121,28 @@ class Handler(BaseHTTPRequestHandler):
             len(parts) == 5
             and parts[:3] == ["", "v1", "dependency-builds"]
             and not data
-            and parts[4] in {"start", "status", "stop"}
+            and parts[4] in {"start", "status", "stop", "pause", "resume"}
         ):
             return getattr(runtime.dependency_builds, parts[4])(parts[3])
+        if (
+            len(parts) == 5
+            and parts[:3] == ["", "v1", "dependency-builds"]
+            and parts[4] == "purge"
+        ):
+            if set(data) == {"run_id", "resources"}:
+                return runtime.dependency_builds.purge(
+                    parts[3], data["run_id"], data["resources"]
+                )
+            raise Rejected("Supply the expected run and retention resources.")
         if len(parts) != 5 or parts[:3] != ["", "v1", "operations"]:
             raise Rejected("Unsupported endpoint.")
         operation_id, action = parts[3:]
         if action == "secret" and set(data) == {"secret"}:
             return runtime.supply_secret(operation_id, data["secret"])
-        if action in {"start", "status", "stop"} and not data:
+        if action in {"start", "status", "stop", "pause", "resume"} and not data:
             return getattr(runtime, action)(operation_id)
+        if action == "purge" and set(data) == {"run_id", "resources"}:
+            return runtime.purge(operation_id, data["run_id"], data["resources"])
         if action == "logs" and set(data) == {"offset", "limit"}:
             value = runtime.logs(operation_id, data["offset"], data["limit"])
             return {
@@ -137,6 +158,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def monitor(runtime: Runtime, stop: threading.Event):
     while not stop.wait(1):
+        try:
+            runtime.dependency_builds.enforce_controls()
+        except (Rejected, EngineError, OSError, ValueError):
+            pass
         for path in runtime.operations.iterdir():
             try:
                 runtime.status(path.name)

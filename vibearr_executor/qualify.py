@@ -28,6 +28,8 @@ from .runtime import Runtime, durable
 
 
 def smoke_profiles(image: str, database_image: str = "") -> list[Profile]:
+    from .control_qualification import control_profile
+
     profiles = []
     for kind, phase in (
         ("agent", "agent"),
@@ -57,6 +59,7 @@ def smoke_profiles(image: str, database_image: str = "") -> list[Profile]:
             "VIBEARR_SMOKE_KEY" if kind in {"agent", "leak"} else "",
         )
         profiles.append(Profile.parse(profile.data()))
+    profiles.append(control_profile(image))
     if database_image:
         profiles.append(
             Profile(
@@ -690,6 +693,9 @@ def qualify_one(
                 pass
             else:
                 raise RuntimeError("Rebound private DNS destination was accepted")
+        from .control_qualification import qualify_controls
+
+        observations["controls"] = qualify_controls(harness, source, operations)
         require(
             harness.client.capabilities()["binding_digest"] == initial_binding,
             "Runtime binding changed during boundary probes; qualification is revoked.",

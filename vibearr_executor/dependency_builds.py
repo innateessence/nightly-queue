@@ -16,6 +16,7 @@ from .contracts import Conflict, Rejected, canonical, digest, identifier, sha256
 from .dependency_artifacts import MAX_DEPENDENCIES, manifest, read_layer
 from .engine import EngineError
 from .validation_profile import BUILD_ARGV, ValidationProfile
+from . import build_controls, retention
 
 
 class DependencyBuilds:
@@ -24,6 +25,7 @@ class DependencyBuilds:
         self.directory = runtime.directory / "dependency-builds"
         self.directory.mkdir(mode=0o700, exist_ok=True)
         self.threads: dict[str, threading.Thread] = {}
+        self.control_lock = threading.RLock()
 
     def path(self, build_id):
         return self.directory / identifier(build_id)
@@ -43,7 +45,8 @@ class DependencyBuilds:
 
     def blocked(self, operation_id):
         return any(
-            self.read(path.name)["state"] not in {"ready", "failed", "canceled"}
+            self.read(path.name)["state"]
+            not in {"ready", "failed", "canceled", "purged"}
             and path.name != operation_id
             for path in self.directory.iterdir()
         )
@@ -113,7 +116,11 @@ class DependencyBuilds:
                 raise Rejected(
                     "Candidate source occupies the reserved dependency workspace."
                 )
-            if len(list(self.directory.iterdir())) >= 32:
+            retained = sum(
+                not retention.fully_purged(self.read(path.name))
+                for path in self.directory.iterdir()
+            )
+            if retained >= 32:
                 raise Rejected(
                     "Dependency-build journal is full; retain uncertain work and archive completed builds."
                 )
@@ -167,10 +174,13 @@ class DependencyBuilds:
             self.save(saved)
             return self.public(saved)
 
-    def start(self, build_id):
+    def start(self, build_id, *, observe_paused=False):
         with self.runtime.lock:
             record = self.read(build_id)
-            if record["state"] in {"ready", "failed", "canceled", "unknown"}:
+            if record["state"] in {"ready", "failed", "canceled", "unknown", "purged"}:
+                return self.public(record)
+            if build_controls.gated(self, build_id) and not observe_paused:
+                build_controls.checkpoint(self, record)
                 return self.public(record)
             thread = self.threads.get(build_id)
             if thread is None or not thread.is_alive():
@@ -181,8 +191,7 @@ class DependencyBuilds:
                 thread.start()
             return self.public(record)
 
-    @staticmethod
-    def public(record):
+    def public(self, record):
         keys = (
             "state",
             "image",
@@ -190,10 +199,20 @@ class DependencyBuilds:
             "requirements_digest",
             "dependency_digest",
             "wait_reason",
+            "resources_removed",
+            "tombstone",
+            "deadline_expired",
         )
         value = {key: record[key] for key in keys if key in record}
         value["build_id"] = record["request"]["build_id"]
         value["run_id"] = record["request"]["run_id"]
+        value.update(build_controls.public(self, record))
+        value["available"] = record["state"] == "ready" and not build_controls.gated(
+            self, value["build_id"]
+        )
+        if retention.removed(record, "source"):
+            value.pop("profile", None)
+            value["available"] = False
         if record["state"] == "ready" and record.get("provenance"):
             value["provenance"] = record["provenance"]
         return value
@@ -253,6 +272,7 @@ class DependencyBuilds:
                         "failed",
                         "canceled",
                         "unknown",
+                        "purged",
                     }:
                         return
                     if (
@@ -262,14 +282,15 @@ class DependencyBuilds:
                         raise Rejected(
                             "Parent runtime/profile binding changed during dependency construction."
                         )
-                    if (
-                        time.time()
-                        >= datetime.fromisoformat(
-                            record["request"]["deadline"]
-                        ).timestamp()
-                    ):
+                    if build_controls.expired(self.runtime.record(build_id)):
+                        if build_controls.gated(self, build_id):
+                            build_controls.expire(self, record)
+                            return
                         raise TimeoutError("Dependency-build deadline expired.")
-                    if self.step(record):
+                    if build_controls.gated(self, build_id):
+                        if not build_controls.checkpoint(self, record):
+                            return
+                    elif self.step(record):
                         return
                 time.sleep(0.5)
         except Exception as exc:
@@ -642,7 +663,12 @@ class DependencyBuilds:
             record = self.read(path.name)
             if run_id is not None and record["request"]["run_id"] != run_id:
                 continue
-            if record["state"] == "ready" and self.qualified(record):
+            if (
+                record["state"] == "ready"
+                and not retention.removed(record, "source")
+                and not build_controls.gated(self, path.name)
+                and self.qualified(record)
+            ):
                 selected = ValidationProfile.parse(record["profile"])
                 for profile in selected.executor_profiles():
                     old = profiles.get(profile.profile_id) or self.runtime.profiles.get(
@@ -683,7 +709,7 @@ class DependencyBuilds:
     def stop(self, build_id):
         with self.runtime.lock:
             record = self.read(build_id)
-            if record["state"] in {"ready", "canceled"}:
+            if record["state"] in {"ready", "canceled", "purged"}:
                 return self.public(record)
             record["cancel_requested"] = True
             self.save(record)
@@ -707,6 +733,21 @@ class DependencyBuilds:
         record["state"] = "canceled"
         self.save(record)
         return self.public(record)
+
+    def pause(self, build_id):
+        return build_controls.pause(self, build_id)
+
+    def resume(self, build_id):
+        return build_controls.resume(self, build_id)
+
+    def purge(self, build_id, run_id, resources):
+        from . import build_retention
+
+        return build_retention.purge(self, build_id, run_id, resources)
+
+    def enforce_controls(self):
+        for path in self.directory.iterdir():
+            build_controls.enforce(self, path.name)
 
     def cleanup_qualification(self, record):
         from .runtime import Runtime

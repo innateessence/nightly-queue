@@ -20,6 +20,10 @@ class ExecutorRejected(ExecutorUnavailable):
     pass
 
 
+class ExecutorArtifactRemoved(ExecutorRejected):
+    pass
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *_args, **_kwargs):
         raise ExecutorUnavailable("Executor redirects are forbidden.")
@@ -86,6 +90,10 @@ class Client:
                     raise ExecutorUnavailable("Invalid executor response.")
                 return value
         except urllib.error.HTTPError as exc:
+            if exc.code == 410:
+                raise ExecutorArtifactRemoved(
+                    "Executor artifact was removed by retention.", http_status=410
+                ) from exc
             error = ExecutorRejected if 400 <= exc.code < 500 else ExecutorUnavailable
             raise error(
                 (
@@ -108,9 +116,25 @@ class Client:
 
     def dependencies(self, build_id: str, action: str) -> dict:
         identifier(build_id)
-        if action not in {"start", "status", "stop"}:
+        if action not in {"start", "status", "stop", "pause", "resume"}:
             raise Rejected("Unknown dependency-build operation.")
         return self.request(f"/v1/dependency-builds/{build_id}/{action}", {})
+
+    def pause_dependencies(self, build_id: str) -> dict:
+        return self.dependencies(build_id, "pause")
+
+    def resume_dependencies(self, build_id: str) -> dict:
+        return self.dependencies(build_id, "resume")
+
+    def purge_dependencies(
+        self, build_id: str, *, run_id: str, resources=("source", "logs")
+    ) -> dict:
+        identifier(build_id)
+        identifier(run_id)
+        return self.request(
+            f"/v1/dependency-builds/{build_id}/purge",
+            {"run_id": run_id, "resources": list(resources)},
+        )
 
     def upload(self, kind: str, content: bytes) -> dict:
         return self.request(
@@ -129,7 +153,17 @@ class Client:
         self, operation_id: str, action: str, data: dict | None = None
     ) -> dict:
         identifier(operation_id)
-        if action not in {"start", "status", "stop", "logs", "secret", "result"}:
+        if action not in {
+            "start",
+            "status",
+            "stop",
+            "pause",
+            "resume",
+            "purge",
+            "logs",
+            "secret",
+            "result",
+        }:
             raise Rejected("Unknown executor operation.")
         return self.request(f"/v1/operations/{operation_id}/{action}", data or {})
 
@@ -141,6 +175,20 @@ class Client:
 
     def stop(self, operation_id: str) -> dict:
         return self.operation(operation_id, "stop")
+
+    def pause(self, operation_id: str) -> dict:
+        return self.operation(operation_id, "pause")
+
+    def resume(self, operation_id: str) -> dict:
+        return self.operation(operation_id, "resume")
+
+    def purge(
+        self, operation_id: str, *, run_id: str, resources=("source", "logs")
+    ) -> dict:
+        identifier(run_id)
+        return self.operation(
+            operation_id, "purge", {"run_id": run_id, "resources": list(resources)}
+        )
 
     def supply_secret(self, operation_id: str, secret: str) -> dict:
         return self.operation(operation_id, "secret", {"secret": secret})
