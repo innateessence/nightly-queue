@@ -230,6 +230,7 @@ class CodexTaskTests(unittest.TestCase):
                 os.environ,
                 {
                     "DATABASE_URL": "postgresql://production-db/private",
+                    DATABASE_ENV: "",
                     "POSTGRES_PASSWORD": "host-password",
                 },
             ):
