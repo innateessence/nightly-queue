@@ -187,6 +187,10 @@ PID exhaustion may temporarily prevent protected engine-exec readback. A known
 running container retains its identity/fence and exposes a wait reason until
 readback recovers. A confirmed launch gate is never opened again on a start retry.
 Result integrity failures instead become unknown and require recovery.
+Qualification also holds all32 configured PID slots occupied, checks occupancy
+through engine-side statistics, retries the same operation, then cancels without
+raising its PID limit. It requires confirmed descendant/container termination and
+a verified export containing the pre-cancellation workspace marker.
 
 The trusted UID 0 init alone retains minimal setup/termination capabilities. Tasks
 cannot read/write its private `/state`, signal it, forge receipts by printing JSON,

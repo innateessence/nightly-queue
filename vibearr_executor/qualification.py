@@ -19,6 +19,7 @@ REQUIRED_CHECKS = {
     "disposable-database-isolation",
     "credential-free-setup",
     "credential-and-receipt-isolation",
+    "pid-exhaustion-stop",
 }
 
 

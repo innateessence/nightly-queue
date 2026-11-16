@@ -35,6 +35,7 @@ def smoke_profiles(image: str, database_image: str = "") -> list[Profile]:
         ("validation", "validation"),
         ("limits", "validation"),
         ("sleep", "agent"),
+        ("pid-hold", "agent"),
     ):
         profile = Profile(
             f"smoke-{kind}-v1",
@@ -43,8 +44,8 @@ def smoke_profiles(image: str, database_image: str = "") -> list[Profile]:
             phase,
             ("python", "-I", "/opt/executor/vibearr_executor/smoke.py", kind),
             Limits(
-                memory_mb=256 if kind == "limits" else 512,
-                pids=32 if kind == "limits" else 64,
+                memory_mb=256 if kind in {"limits", "pid-hold"} else 512,
+                pids=32 if kind in {"limits", "pid-hold"} else 64,
             ),
             (
                 ("api.openai.com",)
@@ -368,6 +369,66 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
             "container_id": first["container_id"],
             "stopped": stopped,
         }
+        from .engine import Docker
+
+        docker = Docker()
+        held = harness.prepare("pid-hold", source)
+        held_op = held["operation_id"]
+        operations.append(held_op)
+        held_start = harness.client.start(held_op)
+        held_id = held_start["container_id"]
+        deadline = time.monotonic() + 30
+        occupied = 0
+        while time.monotonic() < deadline:
+            occupied = int(
+                docker.run(
+                    "stats", "--no-stream", "--format", "{{.PIDs}}", held_id
+                ).strip()
+            )
+            if occupied == held["limits"]["pids"]:
+                break
+            time.sleep(0.1)
+        require(
+            occupied == 32,
+            "PID-hold fixture did not occupy all configured process slots",
+        )
+        held_status = harness.client.status(held_op)
+        require(
+            held_status["state"] == "running"
+            and held_status["container_id"] == held_id,
+            "PID exhaustion lost the running operation identity",
+        )
+        require(
+            harness.client.start(held_op)["container_id"] == held_id,
+            "Retry during PID exhaustion replaced the container",
+        )
+        held_stop = harness.client.stop(held_op)
+        require(
+            held_stop["state"] == "exited" and held_stop.get("descendants_terminated"),
+            "Stop during full PID occupancy did not confirm termination",
+        )
+        require(
+            held_stop["container_id"] == held_id and docker.inspect(held_id) is None,
+            "PID-hold container identity or removal evidence is invalid",
+        )
+        require(
+            held_stop["result"]["exit_code"] == -9
+            and held_stop["result"].get("canceled") is True,
+            "PID-hold cancellation did not preserve its actual terminated result",
+        )
+        _, held_export = harness.client.export(held_op, source)
+        require(
+            "pids-full.txt" in unpack(held_export),
+            "Full-PID cancellation lost the verified workspace marker",
+        )
+        observations["pid_exhaustion_stop"] = {
+            "operation_id": held_op,
+            "container_id": held_id,
+            "occupied_pids": occupied,
+            "configured_pids": 32,
+            "status_while_full": held_status,
+            "stopped": held_stop,
+        }
         first_db = harness.prepare("database", source, canonical({"hold_seconds": 20}))
         first_op = first_db["operation_id"]
         operations.append(first_op)
@@ -375,9 +436,6 @@ def qualify_one(state: Path, profiles: list[Profile]) -> dict:
         record = json.loads(
             (state / "operations" / first_op / "record.json").read_bytes()
         )
-        from .engine import Docker
-
-        docker = Docker()
         database = docker.inspect(record["name"] + "-db")
         if database is None:
             raise RuntimeError("Disposable database container is absent")
