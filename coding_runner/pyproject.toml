@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nightly-queue-runner"
+version = "0.1.0"
+description = "Standalone nightly queue runner supervisor"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+coding-runner = "coding_runner.__main__:main"
+
+[tool.setuptools]
+packages = ["coding_runner"]
+package-dir = {coding_runner = "."}

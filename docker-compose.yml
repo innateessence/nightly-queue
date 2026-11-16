@@ -29,6 +29,9 @@ services:
         condition: service_healthy
     volumes:
       - ./:/app
+    networks:
+      - default
+      - runner-api
 
   postgres:
     image: postgres:17
@@ -99,6 +102,35 @@ services:
     volumes:
       - ./:/app
 
+  coding-runner:
+    profiles: ["runner"]
+    build:
+      context: .
+      dockerfile: coding_runner/Dockerfile
+    image: nightly-queue-coding-runner
+    environment:
+      NQ_URL: "http://nightly-queue:8000"
+      NQ_RUNNER_API_TOKEN: "${NQ_RUNNER_API_TOKEN:-}"
+    volumes:
+      - runner-data:/var/lib/coding-runner
+    networks:
+      - runner-api
+      - runner-egress
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+networks:
+  runner-api:
+    internal: true
+  runner-egress:
+
 volumes:
   postgres-data:
   valkey-data:
+  runner-data:
