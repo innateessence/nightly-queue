@@ -1,15 +1,18 @@
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+import subprocess
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
 from vibearr_runner.client import AmbiguousRequest
-from vibearr_runner.delivery import DeliveryUnknown
+from vibearr_runner.delivery import DeliveryUnknown, SupervisorGit
 from vibearr_runner.native_delivery import NativeDelivery
 from vibearr_runner.native_sessions import NativeSession
+from vibearr_runner.native_reads import read, NativeReadWait
 from vibearr_runner.policy import ExecutionPolicy
 from vibearr_runner.recovery import ReconciliationRequired
 from vibearr_runner.workspaces import Workspace
@@ -58,7 +61,7 @@ class Transport:
     def observed_remote(self, workspace):
         return self.remote
 
-    def push(self, workspace, commit):
+    def push_once(self, workspace, commit):
         self.pushes += 1
         self.remote = commit
         if self.lose_push:
@@ -205,6 +208,57 @@ class NativePublicationTests(unittest.TestCase):
             if result == "reporting_pending":
                 return result
         self.fail("Publication did not reach completion reporting")
+
+    def exercise_transient_transport(self, failing_read):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.host.workspace_value = replace(
+            self.host.workspace_value, directory=Path(temporary.name)
+        )
+        self.host.read = lambda key, operation: read(self.host, key, operation)
+        transport = SupervisorGit(token="fixture-token", read=self.host.read)
+        calls = []
+        remote, reads = "", 0
+        commit = self.host.native["candidate"]["workspace"]["commit_sha"]
+
+        def execute(arguments, **kwargs):
+            nonlocal remote, reads
+            if "push" in arguments:
+                calls.append("push")
+                remote = commit
+                return subprocess.CompletedProcess(arguments, 0, b"", b"")
+            calls.append("read")
+            reads += 1
+            if reads == failing_read:
+                return subprocess.CompletedProcess(
+                    arguments, 128, b"", b"Could not resolve host: github.com"
+                )
+            output = (remote + "\trefs/heads/task/native\n").encode() if remote else b""
+            return subprocess.CompletedProcess(arguments, 0, output, b"")
+
+        with patch.object(
+            NativeDelivery, "clients", return_value=(self.github, transport)
+        ):
+            with patch("vibearr_runner.delivery.processes.run", side_effect=execute):
+                with self.assertRaises(NativeReadWait):
+                    NativeDelivery(self.host).step()
+                dispatched = bool(self.host.native["delivery"].get("push_dispatched"))
+                for record in self.host.native["transport_reads"].values():
+                    record["retry_at"] = 0
+                self.complete()
+        return calls, dispatched
+
+    def test_pre_push_read_failure_preserves_undispatched_publication(self):
+        calls, dispatched = self.exercise_transient_transport(1)
+        self.assertFalse(dispatched)
+        self.assertEqual(calls.count("push"), 1)
+        self.assertEqual(self.github.creates, 1)
+
+    def test_post_push_read_failure_reconciles_without_repeating_push(self):
+        calls, dispatched = self.exercise_transient_transport(2)
+        self.assertTrue(dispatched)
+        self.assertEqual(calls.count("push"), 1)
+        self.assertEqual(self.github.creates, 1)
 
     def test_lost_push_response_reconciles_the_same_ref_without_another_push(self):
         self.git.lose_push = True

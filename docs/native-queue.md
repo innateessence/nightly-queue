@@ -94,13 +94,19 @@ if the queue API cannot accept another write. A graceful supervisor restart
 preserves its durable invocation. A transient queue outage pauses work and
 prevents new actions until current authorization can be checked again.
 
-Transient GitHub GET and Git remote-ref reads use at most three attempts with
+Transient GitHub GET and Git clone, fetch and remote-ref reads use at most three attempts with
 backoff. Their attempt counts and next retry times survive supervisor restarts;
 GitHub Retry-After and rate-reset headers extend the wait. Normal controller
 cycles keep cancellation, pause, ownership and original deadline checks active
 during that wait. Exhaustion fails ordinary work, while an unresolved publication
 keeps its claim and reports reconciliation required. Push and PR mutations retain
 their original identities and are never repeated as transport read retries.
+Native push dispatch is recorded immediately before the push command; remote-ref
+reads run separately before dispatch and after the command for reconciliation.
+Clone recovery records the exact owned destination before launch. A partial
+checkout is removed only after tracked process termination is confirmed; a
+durably completed clone resumes local setup without another clone. Unregistered
+incomplete checkouts require operator reconciliation.
 
 Completion acknowledgement permits existing server-directed retention. Native
 source and logs expire independently, including executor artifacts, dependency
@@ -130,3 +136,6 @@ completion reporting, then reads the acknowledged server delivery back. It
 refuses another project/issue and never clears an unknown invocation to continue.
 The ordinary background service keeps one supervisor process; this driver adds
 frequent restarts to exercise its durable recovery path.
+
+The [issue #99 acceptance record](acceptance/feature04-issue99.md) contains actual
+PR-only delivery receipts, supervisor restart checkpoints and run screenshots.
