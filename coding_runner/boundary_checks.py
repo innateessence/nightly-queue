@@ -157,6 +157,25 @@ class BoundaryChecks(WorkspaceFixture, unittest.TestCase):
         subprocess.run(["/usr/bin/sleep", "2.2"], check=True)
         self.assertFalse((self.workspace.checkout / "escaped").exists())
 
+    def test_process_exit_during_kill_still_collects_result(self):
+        action = self.action(["/usr/bin/sleep", "30"])
+        killpg = os.killpg
+
+        def disappearing_group(pid, sig):
+            killpg(pid, sig)
+            raise ProcessLookupError
+
+        executor = ApprovedExecutor(
+            OnePermit(self.workspace.workspace_id),
+            self.sources,
+            lambda: True,
+            periodic_gate=lambda: False,
+        )
+        with patch("coding_runner.sandbox.os.killpg", side_effect=disappearing_group):
+            result = executor.execute(self.workspace, action, str(uuid4()))
+        self.assertTrue(result.interrupted)
+        self.assertLess(result.exit_code, 0)
+
     def test_child_cannot_survive_successful_parent_exit(self):
         script = "import os,time; child=os.fork(); time.sleep(1) if child == 0 else None; open('/workspace/escaped','w').write('bad') if child == 0 else os._exit(0)"
         self.assertEqual(self.execute(script).exit_code, 0)

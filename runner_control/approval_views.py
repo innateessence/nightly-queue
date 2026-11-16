@@ -1,18 +1,28 @@
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
-from .approvals import decide_approval
+from .approvals import approval_data, decide_approval
 from .models import ActionApproval
 from .services import RunConflict, RunNotFound
 
 
 @require_GET
+@transaction.atomic
 def inbox(request):
     approvals = ActionApproval.objects.select_related("run__item").order_by(
         "-created_at"
     )[:100]
+    try:
+        approvals = [approval_data(approval) for approval in approvals]
+    except ValidationError:
+        response = HttpResponse(
+            "Approval content is unavailable for safe display.", status=503
+        )
+        response["Cache-Control"] = "no-store"
+        return response
     response = render(
         request, "runner_control/approvals.html", {"approvals": approvals}
     )

@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
@@ -17,6 +18,7 @@ from .services import owned_run, uuid_field
 
 
 @runner_api_view("POST")
+@transaction.atomic
 def create(request, run_id):
     if len(request.body) > 32768:
         raise ValidationError({"body": "Use at most 32768 bytes."})
@@ -44,6 +46,7 @@ def create(request, run_id):
 
 
 @runner_api_view("GET")
+@transaction.atomic
 def listing(request, run_id):
     def operation():
         run = owned_run(request.runner_identity, run_id)
@@ -56,6 +59,7 @@ def listing(request, run_id):
 
 
 @runner_api_view("GET")
+@transaction.atomic
 def detail(request, run_id, approval_id):
     def operation():
         approval = owned_approval(request.runner_identity, run_id, approval_id)
@@ -65,6 +69,7 @@ def detail(request, run_id, approval_id):
 
 
 @runner_api_view("POST")
+@transaction.atomic
 def consume(request, run_id, approval_id):
     data = read_body(request, ["claim_token", "binding_digest", "execution_id"])
     token = uuid_field(data, "claim_token")

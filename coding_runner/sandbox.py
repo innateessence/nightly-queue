@@ -205,7 +205,10 @@ class ApprovedExecutor:
                     time.sleep(min(0.1, timeout))
             finally:
                 if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
                 process.wait()
             output.seek(0)
             captured = output.read(1048576)

@@ -4,8 +4,8 @@
 {% block content %}
 {% for approval in approvals %}
 <section class="card" style="padding:1.5rem; margin-bottom:1.5rem; overflow-wrap:anywhere">
-  <h2>{{ approval.run.item.title }}</h2>
-  <p><strong>{{ approval.get_decision_display }}</strong>{% if approval.consumed_at %} · Execution permit consumed {{ approval.consumed_at }}{% endif %}</p>
+  <h2>{{ approval.item_title }}</h2>
+  <p><strong>{{ approval.decision_display }}</strong>{% if approval.consumed_at %} · Execution permit consumed {{ approval.consumed_at }}{% endif %}</p>
   <p>Run {{ approval.run_id }} · Requested {{ approval.created_at }}</p>
   <p>Source: <strong>{{ approval.action.source_kind }}</strong> · {{ approval.action.source_reference }}</p>
   <p>Interpretation: <strong>{{ approval.action.mode }}</strong> · Working directory: <code>/workspace</code> · Network: disabled</p>
@@ -18,7 +18,8 @@
     <p>Content digest: <code>{{ approval.action.content_digest }}</code></p>
     <p>Action binding: <code>{{ approval.binding_digest }}</code></p>
   </details>
-  {% if approval.decision == 'pending' and approval.run.state == 'active' %}
+  {% if approval.content_withheld %}<p>Credential content was withheld. Request a new action without credentials.</p>
+  {% elif approval.decision == 'pending' and approval.run_state == 'active' %}
   <form method="post" action="{% url 'runner_approval_decide' approval.id %}">
     {% csrf_token %}
     <input type="hidden" name="binding_digest" value="{{ approval.binding_digest }}">

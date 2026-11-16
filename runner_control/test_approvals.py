@@ -2,10 +2,13 @@ import json
 from uuid import uuid4
 from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from coding_runner.approvals import ActionSpec
+from credentials.models import Credential
+from credentials.test_models import TEST_KEY
 from projects.models import Project
 from work_queue.services import enqueue_item, requeue_items
 
@@ -15,7 +18,7 @@ from .models import ActionApproval, Run, RunnerIdentity
 from .services import RunConflict
 
 
-@override_settings(NQ_API_TOKEN="generic-test-token")
+@override_settings(NQ_API_TOKEN="generic-test-token", NQ_CREDENTIAL_KEY=TEST_KEY)
 class ApprovalTests(TestCase):
     def setUp(self):
         snapshot = patch(
@@ -83,6 +86,22 @@ class ApprovalTests(TestCase):
 
     def approve(self, approval):
         decide_approval(approval.pk, "approved", approval.binding_digest)
+
+    def selected_credential(self, secret, *, provider="codex", kind="token"):
+        credential = Credential(name="Selected", provider=provider, kind=kind)
+        credential.set_secret(secret)
+        credential.save()
+        snapshot = {"effective": {"research_credential_id": credential.pk}}
+        Run.objects.filter(pk=self.run_id).update(configuration_snapshot=snapshot)
+        return credential
+
+    def legacy_approval(self, secret):
+        approval = self.approval()
+        approval.action["argv"].append(secret)
+        approval.binding_digest = ActionSpec.from_data(approval.action).binding_digest
+        approval.decision_note = secret
+        approval.save()
+        return approval
 
     def test_injected_command_is_only_pending_data(self):
         approval = self.approval()
@@ -191,6 +210,168 @@ class ApprovalTests(TestCase):
             self.assertEqual(response.status_code, 400)
             self.assertNotIn(secret, response.content.decode())
         self.assertEqual(ActionApproval.objects.count(), 0)
+
+    def test_escaped_bearer_is_rejected_as_actual_string(self):
+        token = 'runner-"quote\\unicode-é'
+        self.runner.token_digest = token_digest(token)
+        self.runner.save()
+        self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer " + token
+        action = {**self.action, "argv": ["/usr/bin/printf", token]}
+        self.assertEqual(self.request_approval(action=action).status_code, 400)
+        self.assertEqual(ActionApproval.objects.count(), 0)
+
+    def test_selected_secret_in_argv_is_rejected_without_persistence(self):
+        secret = 'selected-private-"quote\\unicode-é'
+        self.selected_credential(secret)
+        action = {**self.action, "argv": ["/usr/bin/printf", secret]}
+        response = self.request_approval(action=action)
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn(secret, response.content.decode())
+        self.assertEqual(ActionApproval.objects.count(), 0)
+
+    def test_selected_secret_in_provenance_is_rejected(self):
+        self.selected_credential("selected-private-secret")
+        action = {**self.action, "source_reference": "selected-private-secret"}
+        self.assertEqual(self.request_approval(action=action).status_code, 400)
+        self.assertEqual(ActionApproval.objects.count(), 0)
+
+    def test_rotated_selected_secret_is_still_rejected(self):
+        credential = self.selected_credential("old-selected-private-secret")
+        credential.set_secret("new-selected-private-secret")
+        credential.save()
+        action = {
+            **self.action,
+            "argv": ["/usr/bin/printf", "old-selected-private-secret"],
+        }
+        self.assertEqual(self.request_approval(action=action).status_code, 400)
+        self.assertEqual(ActionApproval.objects.count(), 0)
+
+    def test_nested_selected_connection_key_is_rejected(self):
+        material = {"provider": "openai", "api_key": "nested-selected-private-key"}
+        self.selected_credential(
+            json.dumps(material), provider="opencode", kind="connection"
+        )
+        action = {**self.action, "argv": ["/usr/bin/printf", material["api_key"]]}
+        self.assertEqual(self.request_approval(action=action).status_code, 400)
+
+    def test_secret_validation_does_not_decrypt_unselected_credentials(self):
+        self.selected_credential("selected-private-secret")
+        Credential.objects.create(
+            name="Unselected",
+            provider="codex",
+            kind="token",
+            encrypted_payload="invalid",
+        )
+        self.assertEqual(self.request_approval().status_code, 200)
+
+    def test_foreign_run_is_rejected_before_selected_secret_decryption(self):
+        credential = self.selected_credential("selected-private-secret")
+        Credential.objects.filter(pk=credential.pk).update(encrypted_payload="invalid")
+        RunnerIdentity.objects.create(
+            name="foreign", token_digest=token_digest("foreign-token")
+        )
+        self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer foreign-token"
+        self.assertEqual(self.request_approval().status_code, 404)
+
+    def test_stale_claim_is_rejected_before_selected_secret_decryption(self):
+        credential = self.selected_credential("selected-private-secret")
+        Credential.objects.filter(pk=credential.pk).update(encrypted_payload="invalid")
+        requeue_items(type(self.item).objects.filter(pk=self.item.pk))
+        self.assertEqual(self.request_approval().status_code, 409)
+
+    def test_missing_encryption_key_blocks_requests_without_persistence(self):
+        self.selected_credential("selected-private-secret")
+        with override_settings(NQ_CREDENTIAL_KEY=""):
+            self.assertEqual(self.request_approval().status_code, 400)
+        self.assertEqual(ActionApproval.objects.count(), 0)
+
+    def test_legacy_readbacks_redact_selected_secrets_without_changing_binding(self):
+        secret = "selected-private-secret"
+        self.selected_credential(secret)
+        approval = self.legacy_approval(secret)
+        urls = [
+            reverse("runner_approvals", args=[self.run_id]),
+            reverse("runner_approval", args=[self.run_id, approval.pk]),
+            reverse("runner_approval_inbox"),
+        ]
+        for url in urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn(secret, response.content.decode())
+        self.assertNotContains(response, "Approve this exact action once")
+        approval.refresh_from_db()
+        self.assertIn(secret, approval.action["argv"])
+        self.assertEqual(
+            approval.binding_digest,
+            ActionSpec.from_data(approval.action).binding_digest,
+        )
+        self.assertEqual(approval.decision_note, secret)
+
+    def test_missing_key_blocks_legacy_api_and_ui_displays(self):
+        self.selected_credential("selected-private-secret")
+        approval = self.legacy_approval("selected-private-secret")
+        with override_settings(NQ_CREDENTIAL_KEY=""):
+            detail = self.client.get(
+                reverse("runner_approval", args=[self.run_id, approval.pk])
+            )
+            inbox = self.client.get(reverse("runner_approval_inbox"))
+        self.assertEqual(detail.status_code, 400)
+        self.assertEqual(inbox.status_code, 503)
+        self.assertNotIn("selected-private-secret", detail.content.decode())
+        self.assertNotIn("selected-private-secret", inbox.content.decode())
+
+    def test_selected_secret_in_legacy_action_prevents_decision(self):
+        self.selected_credential("selected-private-secret")
+        approval = self.legacy_approval("selected-private-secret")
+        with self.assertRaises(ValidationError):
+            self.approve(approval)
+        approval.refresh_from_db()
+        self.assertEqual(approval.decision, "pending")
+
+    def test_inbox_redacts_selected_secret_from_task_title(self):
+        self.selected_credential("selected-private-secret")
+        self.approval()
+        self.item.title = "Task selected-private-secret"
+        self.item.save()
+        response = self.client.get(reverse("runner_approval_inbox"))
+        self.assertNotContains(response, "selected-private-secret")
+        self.assertContains(response, "Task [redacted]")
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.title, "Task selected-private-secret")
+
+    def test_inbox_redacts_selected_secret_from_binding_metadata(self):
+        approval = self.approval()
+        self.selected_credential(approval.binding_digest)
+        response = self.client.get(reverse("runner_approval_inbox"))
+        self.assertNotContains(response, approval.binding_digest)
+        self.assertNotContains(response, "Approve this exact action once")
+        approval.refresh_from_db()
+        self.assertEqual(
+            approval.binding_digest,
+            ActionSpec.from_data(approval.action).binding_digest,
+        )
+
+    def test_selected_secret_in_legacy_action_prevents_consumption(self):
+        self.selected_credential("selected-private-secret")
+        approval = self.legacy_approval("selected-private-secret")
+        approval.decision = "approved"
+        approval.save()
+        self.assertEqual(self.consume(approval).status_code, 400)
+        approval.refresh_from_db()
+        self.assertIsNone(approval.consumed_at)
+
+    def test_decision_note_redacts_selected_secret(self):
+        self.selected_credential("selected-private-secret")
+        approval = self.approval()
+        decide_approval(
+            approval.pk,
+            "approved",
+            approval.binding_digest,
+            "used selected-private-secret",
+        )
+        approval.refresh_from_db()
+        self.assertEqual(approval.decision_note, "used [redacted]")
 
     def test_stale_claim_after_requeue_cannot_consume_approval(self):
         approval = self.approval()

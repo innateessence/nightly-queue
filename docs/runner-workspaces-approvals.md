@@ -72,6 +72,13 @@ The action workspace UUID must match the claimed run UUID. The API rejects a
 mismatch when requesting, deciding, or consuming approval; the broker and executor
 also reject cross-run dispatch before issuing a permit or starting a process.
 
+Actions containing the run's selected credentials, including previous versions and
+nested session/connection tokens, are rejected before storage, decision or permit
+consumption. Credentials cannot be substituted with redaction markers in an
+immutable command binding. Decision notes and historical API/inbox displays use
+scoped redacted copies. Historical secret-bearing commands have no approval
+button, and unavailable encryption material blocks display and authorization.
+
 Only the CSRF-protected browser POST at `/runner/approvals/<uuid>/decision/`
 records approve/deny, matching the displayed digest. Decisions are immutable;
 denied, obsolete, changed, consumed, or undecided actions cannot execute. The inbox

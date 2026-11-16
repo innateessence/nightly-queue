@@ -1,10 +1,10 @@
-import json
-
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
+from django.views.decorators.debug import sensitive_variables
 
 from coding_runner.approvals import ActionSpec
+from credentials.redaction import redact_run_payload
 
 from .models import ActionApproval, Run
 from .services import (
@@ -12,6 +12,7 @@ from .services import (
     RunNotFound,
     lock_controller,
     owned_run,
+    redact_payload,
     verify_active,
 )
 
@@ -30,14 +31,18 @@ def verify_workspace(action, run):
         raise RunConflict("Action workspace does not match the claimed run.")
 
 
+@sensitive_variables()
 def approval_data(approval):
-    return {
+    data = {
         "id": str(approval.pk),
         "run_id": str(approval.run_id),
+        "run_state": approval.run.state,
+        "item_title": approval.run.item.title if approval.run.item else "",
         "operation_id": str(approval.operation_id),
         "action": approval.action,
         "binding_digest": approval.binding_digest,
         "decision": approval.decision,
+        "decision_display": approval.get_decision_display(),
         "decision_note": approval.decision_note,
         "decided_at": approval.decided_at.isoformat() if approval.decided_at else None,
         "created_at": approval.created_at.isoformat(),
@@ -46,15 +51,28 @@ def approval_data(approval):
         ),
         "execution_id": str(approval.execution_id) if approval.execution_id else None,
     }
+    safe = redact_run_payload(approval.run, data)
+    safe["content_withheld"] = safe != data
+    return safe
+
+
+@sensitive_variables()
+def reject_selected_secrets(run, action):
+    if redact_run_payload(run, action) != action:
+        raise ValidationError(
+            {"action": "Selected credentials must not be included in proposed actions."}
+        )
 
 
 @transaction.atomic
+@sensitive_variables()
 def request_approval(*, runner, run_id, claim_token, operation_id, action):
     lock_controller(runner)
     run = owned_run(runner, run_id)
     verify_active(run, claim_token)
     parsed = parse_action(action)
     verify_workspace(parsed, run)
+    reject_selected_secrets(run, parsed.to_data())
     previous = ActionApproval.objects.filter(run=run, operation_id=operation_id).first()
     if previous is not None:
         if previous.binding_digest != parsed.binding_digest:
@@ -85,6 +103,7 @@ def owned_approval(runner, run_id, approval_id):
 
 
 @transaction.atomic
+@sensitive_variables()
 def consume_approval(
     *, runner, run_id, claim_token, approval_id, binding_digest, execution_id
 ):
@@ -96,6 +115,7 @@ def consume_approval(
         raise RunConflict("Approval binding changed; request a new human decision.")
     parsed = parse_action(approval.action)
     verify_workspace(parsed, run)
+    reject_selected_secrets(run, parsed.to_data())
     if parsed.binding_digest != binding_digest:
         raise RunConflict("Stored action changed; request a new human decision.")
     if approval.decision != ActionApproval.Decision.APPROVED:
@@ -109,6 +129,7 @@ def consume_approval(
 
 
 @transaction.atomic
+@sensitive_variables()
 def decide_approval(approval_id, decision, binding_digest, note=""):
     lock_controller()
     try:
@@ -128,20 +149,21 @@ def decide_approval(approval_id, decision, binding_digest, note=""):
         raise ValidationError("The displayed action changed; reload before deciding.")
     parsed = parse_action(approval.action)
     verify_workspace(parsed, run)
+    reject_selected_secrets(run, parsed.to_data())
     if parsed.binding_digest != binding_digest:
         raise RunConflict("Stored action changed; request a new human decision.")
     if approval.decision != ActionApproval.Decision.PENDING:
         raise RunConflict("This approval already has a decision.")
     approval.decision = decision
-    approval.decision_note = note
+    approval.decision_note = redact_run_payload(run, note)
     approval.decided_at = timezone.now()
     approval.save(update_fields=["decision", "decision_note", "decided_at"])
     return approval
 
 
+@sensitive_variables()
 def reject_secrets(action, secrets):
-    encoded = json.dumps(action).lower()
-    if any(secret and secret.lower() in encoded for secret in secrets):
+    if redact_payload(action, secrets) != action:
         raise ValidationError(
             {
                 "action": "Credentials and claim tokens must not be included in proposed actions."
