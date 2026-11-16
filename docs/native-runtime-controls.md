@@ -90,6 +90,24 @@ service restart, same PID/container identity, frozen writes, forced expiry,
 never-started secret erasure, and selective/shared-reference retention. Rerun host
 qualification after upgrading the executor; protocol version 1 remains unchanged.
 
+Frozen-write qualification samples the counter after pause is acknowledged and
+again after service restart while the original task is still paused. The samples
+must match exactly. Resume and subsequent counter advancement are checked
+separately; RPC latency never enters the frozen comparison. A fixed one-shot
+observer joins only that owned task's PID namespace in its own bounded cgroup.
+It has no mounts, network or credentials and reads only the fixed integer counter
+through `/proc/1/root/work/pause-count.txt`. Its two read capabilities,
+`SYS_PTRACE` and `DAC_READ_SEARCH`, belong only to this qualification observer.
+Task capabilities remain unchanged. Durable ownership, strict configuration/ID
+checks and cleanup bind the observer to its original operation. The journal and
+report retain its image, recipe digest, target identity and actual samples.
+
+Historical report PR96 identified an RPC-window measurement defect at `8c6c6b4`:
+the earlier probe sampled before pause and after resume, so ordinary unpaused RPC
+latency could exceed its eight-tick allowance. That failure did not establish
+writes while frozen. The strict paused-sample comparison replaces that allowance;
+slow-RPC and measurement-order regressions cover the correction.
+
 ## Implementation evidence
 
 [Recorded host evidence](evidence/native-runtime-controls.json) comes from actual
@@ -116,7 +134,7 @@ readback after purge, missing 404, unauthorized 401 and malformed-UUID 400. The
 current source passed all thirteen OCI checks again; evidence identifies the
 source digest for each proof.
 
-Validation included 164 executor unit tests, 1,615 Django tests (four expected
+Validation included 171 executor unit tests, 1,622 Django tests (four expected
 skips), four distribution artifact tests, repository-wide Black/Ruff/mypy,
 migration and system checks, and an installed executor wheel outside the checkout. Mocked cases additionally cover
 engine uncertainty, binding changes, independent phase gates, resume generation

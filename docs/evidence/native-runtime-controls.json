@@ -6,7 +6,7 @@
       "docker_api_version": "1.56",
       "docker_version": "29.9.3",
       "engine_id": "d5874907-593c-4b38-923d-8a841b5d6c57",
-      "executor_source_digest": "553daee7b684a60969c845730dd6a9c780c2bc7f5a642c084731783c26c81e71",
+      "executor_source_digest": "bb447de81c9a7956daf800981033c0325949e316126c81ac8d975bf7c4c74b6f",
       "images": {
         "sha256:75b6ea6cdcd51d7ccb4d5d332c01f03e3b3aaebfe8ba73cd4006c91479316dc4": {
           "installed_contract": true
@@ -54,28 +54,47 @@
       "terminal-retention"
     ]
   },
-  "completed_at": "2026-11-16T14:04:24.535744+00:00",
+  "completed_at": "2026-11-16T14:29:44.658463+00:00",
   "controls": {
     "pause": {
-      "container_id": "7b073639cd7f441978ef388d5004e697d1aaf5458c1dfcc3fe180c94acefc8bf",
-      "deadline": "2026-11-16T14:13:56.226983+00:00",
+      "container_id": "0f21a612562f11e3bde34a16bf4dbbaa411e3e3aa7590e50c4a9da7130aaf689",
+      "deadline": "2026-11-16T14:39:07.681642+00:00",
       "frozen_counter": 3,
-      "operation_id": "04e57e1e-0f49-4cfb-b501-e63e40b08ace",
-      "pid": 2609597,
-      "resumed_counter": 9
+      "observer_reads": [
+        {
+          "counter": 3,
+          "image": "sha256:75b6ea6cdcd51d7ccb4d5d332c01f03e3b3aaebfe8ba73cd4006c91479316dc4",
+          "observer_container_id": "a02b1ebe60a6a332a32e8bc578cd67d129088d3dad54227b34e125595e65cd42",
+          "recipe_digest": "2ea862b6f4db20df4c78ee0c1e4290fcd1f55e5b22c8a6b1fa7cf6beb140a6b0",
+          "target_container_id": "0f21a612562f11e3bde34a16bf4dbbaa411e3e3aa7590e50c4a9da7130aaf689",
+          "target_pid": 2756093
+        },
+        {
+          "counter": 3,
+          "image": "sha256:75b6ea6cdcd51d7ccb4d5d332c01f03e3b3aaebfe8ba73cd4006c91479316dc4",
+          "observer_container_id": "fe123cbac18acfdb29077cc9da75a0490ea44beb7b79cbee319c761266dece82",
+          "recipe_digest": "2ea862b6f4db20df4c78ee0c1e4290fcd1f55e5b22c8a6b1fa7cf6beb140a6b0",
+          "target_container_id": "0f21a612562f11e3bde34a16bf4dbbaa411e3e3aa7590e50c4a9da7130aaf689",
+          "target_pid": 2756093
+        }
+      ],
+      "operation_id": "2973bc97-b8e7-47b2-a164-940ca37faa2e",
+      "pid": 2756093,
+      "recovered_counter": 3,
+      "resumed_counter": 6
     },
     "paused_expiry": {
-      "container_id": "a69929c462bc27897aef9651ef21f6c364712be1ca33bae53ecd4f1697b9444a",
+      "container_id": "40b23fcc5120d580fb2f21ceb3eb009bebf33b3d494e9285a1154aa7e74a032e",
       "descendants_terminated": true,
-      "operation_id": "36230fa4-66c7-4cbe-b3f3-aeda550b9a6e",
+      "operation_id": "88942b2a-bcac-4f74-9a23-4698a72c9cb0",
       "paused": false,
       "result": {
         "canceled": false,
-        "ended_at": 1794837853.2722383,
+        "ended_at": 1794839373.811469,
         "exit_code": null,
         "export_error": "Forced termination; no verified workspace export.",
-        "operation_id": "36230fa4-66c7-4cbe-b3f3-aeda550b9a6e",
-        "run_id": "eb041a85-5b12-455c-b9fb-1126dcab0851",
+        "operation_id": "88942b2a-bcac-4f74-9a23-4698a72c9cb0",
+        "run_id": "c1a7a824-b536-4828-9d92-2f9d300ca2ab",
         "schema_version": 1,
         "terminated": true,
         "termination": "paused-deadline",
@@ -84,14 +103,14 @@
       "state": "exited"
     },
     "retention": {
-      "container_id": "835f829dcccc680dd53248b12bd995b4f4e564903080011fadd00a3c2d98cfef",
+      "container_id": "95f0d7b157eba5f7fe0a4f24fc19f94fefa3d3ff5f9a00150b8b30ea2f5419e7",
       "descendants_terminated": true,
-      "operation_id": "582d8861-b95c-4895-a7af-5c504a95553e",
+      "operation_id": "ee791bdb-050d-4458-8c0e-e4b8c7bfb860",
       "paused": false,
-      "receipt_digest": "2dcc574a047222d3528f507ac78c0d4904d87a16c9a75773d7a907b42eb12eb5",
+      "receipt_digest": "fbf1cbb8a1173b30b6a4b3943b6ccb6be43ab06133fee4eba6f7ffa493835bf2",
       "removed_at": {
-        "logs": "2026-11-16T14:04:23.881553+00:00",
-        "source": "2026-11-16T14:04:23.880122+00:00"
+        "logs": "2026-11-16T14:29:43.996370+00:00",
+        "source": "2026-11-16T14:29:43.994792+00:00"
       },
       "resources_removed": [
         "logs",
@@ -99,20 +118,20 @@
       ],
       "result": {
         "artifact_digests": {
-          "manifest_digest": "dcaa32da640fd36e22a30f2475380df708b0ea8b73dbc82524a7353f9679aed3",
-          "result_digest": "791bd78428cbeaa455335a48d101d8c44f64c481d6926cff1245902b99795c7e",
-          "source_digest": "5d0e69bc0e7ebcc42af5f79e5c57fdc635552ab60a15f6760e01a35e472721de"
+          "manifest_digest": "429fc10d6bac298ce45d6ce1197741557cb4f6d35efa67a4c25f8e1300485d2d",
+          "result_digest": "d1502e11ee3d34ef82f0b564cfd9d353786e02734d82288ba11bfc4f00fcefdc",
+          "source_digest": "62a3db64611e73a8188c33b5b9091f868643458fe421c22b366c002bd1b2272c"
         },
         "canceled": false,
-        "ended_at": 1794837862.489699,
+        "ended_at": 1794839382.5745544,
         "exit_code": 0,
         "log_bytes": 214,
         "log_digest": "9809d755393417c1db774986796f11b33ced6ad760db05ed77cfb4e2c4e04b40",
         "log_truncated": false,
-        "operation_id": "582d8861-b95c-4895-a7af-5c504a95553e",
-        "run_id": "fea726e8-0e17-42e6-88fb-1967de7aa36b",
+        "operation_id": "ee791bdb-050d-4458-8c0e-e4b8c7bfb860",
+        "run_id": "21113225-ce89-4041-88fe-a7447cbae614",
         "schema_version": 1,
-        "started_at": 1794837859.5538964,
+        "started_at": 1794839379.633041,
         "terminated": true,
         "timed_out": false
       },
@@ -121,15 +140,15 @@
     },
     "unlaunched_expiry": {
       "descendants_terminated": true,
-      "operation_id": "5e3e5c92-dd0e-431c-8211-45394497ae42",
+      "operation_id": "f1a7affb-18b0-4c23-a942-219580605522",
       "paused": false,
       "result": {
         "canceled": false,
-        "ended_at": 1794837856.562143,
+        "ended_at": 1794839376.9700189,
         "exit_code": null,
         "export_error": "Forced termination; no verified workspace export.",
-        "operation_id": "5e3e5c92-dd0e-431c-8211-45394497ae42",
-        "run_id": "6be63ea6-1939-40e4-adc2-470be69184db",
+        "operation_id": "f1a7affb-18b0-4c23-a942-219580605522",
+        "run_id": "64ea94fd-b3f5-4422-ac2c-6780ed50b5f4",
         "schema_version": 1,
         "terminated": true,
         "termination": "expired-before-start",
@@ -378,6 +397,12 @@
       "state": "running"
     }
   },
+  "measurement_fix": {
+    "historical_head": "8c6c6b43143e532f89e81ae5d8831d4e393425b6",
+    "historical_report_pr": 96,
+    "measurement": "Compare exact counter samples after pause acknowledgement and after service restart, both before resume; verify advancement separately.",
+    "reason": "Unpaused RPC latency entered the old fixed-tick comparison."
+  },
   "prepared_build_expiry": {
     "build": {
       "available": false,
@@ -437,35 +462,35 @@
   },
   "presence_api": {
     "after_purge": {
-      "instance_id": "024765fa-81b5-4565-99c6-fc1dbed13aba",
-      "manifest_digest": "8d7ba2b22cd8acfa8d84f3563fa61fc60bc81d9bfb5b2604db64d67d38152ac4",
-      "operation_id": "09d9884f-19e6-4f2b-940e-6caf73aa537c",
-      "receipt_digest": "12932102c2c60659fa0c3c5232271b60b6275624daa698a7b839b17e4ea12836",
+      "instance_id": "f4ef05d5-a6a4-4a67-9c21-2c03973cb8c3",
+      "manifest_digest": "67d2af0c345ef4b02a8215d6d47da35239114133bf28c96166d2f91541adbdd2",
+      "operation_id": "a0724517-91d7-4cf2-a1dd-e32773298758",
+      "receipt_digest": "708d0ca030a388dd44b3df247861969d966e961734715f61dacf52bb2ec613ed",
       "resources_terminated": true,
-      "run_id": "c620273c-da5a-401d-91a8-95f3df0bc4e0",
+      "run_id": "2eeb673c-9e90-434e-9bf3-665d67d09728",
       "schema_version": 1,
       "state": "exited"
     },
     "auth_http_status": 401,
-    "executor_source_digest": "553daee7b684a60969c845730dd6a9c780c2bc7f5a642c084731783c26c81e71",
+    "executor_source_digest": "bb447de81c9a7956daf800981033c0325949e316126c81ac8d975bf7c4c74b6f",
     "invalid_http_uuid_status": 400,
     "missing_http_status": 404,
     "prepared": {
-      "instance_id": "024765fa-81b5-4565-99c6-fc1dbed13aba",
-      "manifest_digest": "8d7ba2b22cd8acfa8d84f3563fa61fc60bc81d9bfb5b2604db64d67d38152ac4",
-      "operation_id": "09d9884f-19e6-4f2b-940e-6caf73aa537c",
+      "instance_id": "f4ef05d5-a6a4-4a67-9c21-2c03973cb8c3",
+      "manifest_digest": "67d2af0c345ef4b02a8215d6d47da35239114133bf28c96166d2f91541adbdd2",
+      "operation_id": "a0724517-91d7-4cf2-a1dd-e32773298758",
       "resources_terminated": false,
-      "run_id": "c620273c-da5a-401d-91a8-95f3df0bc4e0",
+      "run_id": "2eeb673c-9e90-434e-9bf3-665d67d09728",
       "schema_version": 1,
       "state": "not-started"
     },
     "terminal": {
-      "instance_id": "024765fa-81b5-4565-99c6-fc1dbed13aba",
-      "manifest_digest": "8d7ba2b22cd8acfa8d84f3563fa61fc60bc81d9bfb5b2604db64d67d38152ac4",
-      "operation_id": "09d9884f-19e6-4f2b-940e-6caf73aa537c",
-      "receipt_digest": "12932102c2c60659fa0c3c5232271b60b6275624daa698a7b839b17e4ea12836",
+      "instance_id": "f4ef05d5-a6a4-4a67-9c21-2c03973cb8c3",
+      "manifest_digest": "67d2af0c345ef4b02a8215d6d47da35239114133bf28c96166d2f91541adbdd2",
+      "operation_id": "a0724517-91d7-4cf2-a1dd-e32773298758",
+      "receipt_digest": "708d0ca030a388dd44b3df247861969d966e961734715f61dacf52bb2ec613ed",
       "resources_terminated": true,
-      "run_id": "c620273c-da5a-401d-91a8-95f3df0bc4e0",
+      "run_id": "2eeb673c-9e90-434e-9bf3-665d67d09728",
       "schema_version": 1,
       "state": "exited"
     }

@@ -779,6 +779,9 @@ class Runtime:
         return True
 
     def cleanup(self, record: dict) -> None:
+        from .qualification_counter import cleanup
+
+        cleanup(self.docker, self.path(record["operation_id"]), record, self.instance)
         for suffix in ("", "-guard", "-proxy", "-db"):
             name = record["name"] + suffix
             if self.owned(record, name) is not None:

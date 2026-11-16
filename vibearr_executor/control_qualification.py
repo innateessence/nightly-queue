@@ -94,6 +94,51 @@ def short_manifest(harness: Harness, kind: str, source: bytes, seconds: int) -> 
     return manifest
 
 
+def pause_resume_interval(
+    harness: Harness, docker: Docker, operation: str, container: str, original_pid: int
+) -> dict:
+    from .qualification_counter import CounterObserver
+
+    paused = harness.client.pause(operation)
+    require(
+        paused["paused"] and paused["state"] == "running", "Actual task did not pause"
+    )
+    observer = CounterObserver(harness.state, operation, docker)
+    baseline = observer.read()
+    time.sleep(1)
+    harness.shutdown()
+    harness.start()
+    recovered = harness.client.pause(operation)
+    require(
+        recovered["container_id"] == container and recovered["paused"],
+        "Pause restart lost original identity",
+    )
+    still_paused = observer.read()
+    require(
+        baseline["counter"] == still_paused["counter"],
+        f"Frozen counter changed: before={baseline['counter']} after={still_paused['counter']} container={container}",
+    )
+    resumed = harness.client.resume(operation)
+    require(
+        resumed["container_id"] == container and not resumed["paused"],
+        "Resume replaced or failed to unfreeze the invocation",
+    )
+    advanced = wait_counter(docker, container, baseline["counter"])
+    inspected = docker.inspect(container)
+    require(inspected is not None, "Resumed control container is missing")
+    assert inspected is not None
+    require(
+        inspected["State"]["Pid"] == original_pid,
+        "Resume replaced the original task PID",
+    )
+    return {
+        "frozen_counter": baseline["counter"],
+        "recovered_counter": still_paused["counter"],
+        "resumed_counter": advanced,
+        "observer_reads": [baseline, still_paused],
+    }
+
+
 def qualify_controls(harness: Harness, source: bytes, operations: list[str]) -> dict:
     docker = Docker()
     manifest = harness.prepare("controls", source)
@@ -112,36 +157,8 @@ def qualify_controls(harness: Harness, source: bytes, operations: list[str]) -> 
         require(exc.http_status == 409, "Running purge returned an unexpected outcome")
     else:
         raise RuntimeError("Running operation was purged")
-    frozen = counter(docker, container)
-    paused = harness.client.pause(operation)
-    require(
-        paused["paused"] and paused["state"] == "running", "Actual task did not pause"
-    )
-    time.sleep(1)
-    harness.shutdown()
-    harness.start()
-    recovered = harness.client.pause(operation)
-    require(
-        recovered["container_id"] == container and recovered["paused"],
-        "Pause restart lost original identity",
-    )
-    resumed = harness.client.resume(operation)
-    require(
-        resumed["container_id"] == container and not resumed["paused"],
-        "Resume replaced or failed to unfreeze the invocation",
-    )
-    advanced = counter(docker, container)
-    require(
-        0 <= advanced - frozen <= 8,
-        "Candidate counter advanced during the frozen interval",
-    )
-    advanced = wait_counter(docker, container, advanced)
-    inspected = docker.inspect(container)
-    require(inspected is not None, "Resumed control container is missing")
-    assert inspected is not None
-    require(
-        inspected["State"]["Pid"] == original_pid,
-        "Resume replaced the original task PID",
+    pause_proof = pause_resume_interval(
+        harness, docker, operation, container, original_pid
     )
     harness.client.pause(operation)
     stopped = harness.client.stop(operation)
@@ -247,8 +264,7 @@ def qualify_controls(harness: Harness, source: bytes, operations: list[str]) -> 
             "operation_id": operation,
             "container_id": container,
             "pid": original_pid,
-            "frozen_counter": frozen,
-            "resumed_counter": advanced,
+            **pause_proof,
             "deadline": manifest["deadline"],
         },
         "paused_expiry": expired,
