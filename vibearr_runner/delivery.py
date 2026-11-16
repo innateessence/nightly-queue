@@ -408,6 +408,11 @@ class SupervisorGit:
             return
         if checkpoint is not None:
             checkpoint()
+        self.push_once(workspace, commit)
+        if self.observed_remote(workspace) != commit:
+            raise DeliveryUnknown("Pushed branch could not be verified.")
+
+    def push_once(self, workspace: Workspace, commit: str):
         # Push itself remains a non-forced fast-forward check, including races.
         self.remote(
             workspace,
@@ -419,8 +424,6 @@ class SupervisorGit:
                 commit + ":refs/heads/" + workspace.branch_name,
             ],
         )
-        if self.observed_remote(workspace) != commit:
-            raise DeliveryUnknown("Pushed branch could not be verified.")
 
 
 def description(plan: dict, evidence: dict) -> str:
