@@ -91,15 +91,13 @@ not being used as packaging evidence.
 
 ## CI and remaining limits
 
-At report preparation, exact reviewed-head
+All four required checks passed on the exact reviewed source head:
 [Native Codex image](https://github.com/innateessence/nightly-queue/actions/runs/43883328591)
 and [Executor boundary](https://github.com/innateessence/nightly-queue/actions/runs/43883328616),
-and [Tests](https://github.com/innateessence/nightly-queue/actions/runs/43883328648)
-were successful;
-[Vibearr validation](https://github.com/innateessence/nightly-queue/actions/runs/43883328876)
-was still running. This report does not claim completion of pending CI. Root
-must inspect all required checks at the exact reviewed and report heads before
-any serial merge.
+[Tests](https://github.com/innateessence/nightly-queue/actions/runs/43883328648), and
+[Vibearr validation](https://github.com/innateessence/nightly-queue/actions/runs/43883328876).
+Root must also inspect all required checks at the exact report head before any
+serial merge.
 
 The server correctly keeps `execution_ready` false and reports structural
 `native_dispatch_available` separately from supervisor-required host readiness.
