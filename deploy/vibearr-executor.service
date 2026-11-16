@@ -1,0 +1,24 @@
+[Unit]
+Description=vibearr trusted OCI executor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vibearr-executor
+Group=vibearr-executor
+EnvironmentFile=/etc/vibearr-executor/engine.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/vibearr-executor/bin/python -I -m vibearr_executor.server --state /var/lib/vibearr-executor --profiles /etc/vibearr-executor/profiles.json --token-file /etc/vibearr-executor/control-token
+Restart=on-failure
+RestartSec=5
+StateDirectory=vibearr-executor
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/vibearr-executor
+
+[Install]
+WantedBy=multi-user.target

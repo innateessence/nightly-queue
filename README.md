@@ -213,11 +213,14 @@ The independent runner has its own verification entry point:
 
 ```sh
 python -m vibearr_runner.verify
-python -m vibearr_runner.verify --boundary
+python -m vibearr_runner.verify --boundary --executor-image sha256:<id> --database-image sha256:<id>
 ```
 
 Boundary checks must pass on the intended execution host. Portable tests alone
-do not establish that an agent environment works in deployment.
+do not establish that an agent environment works in deployment. The independent
+[OCI executor](docs/isolated-executor.md) owns engine access, registered immutable
+profiles, and automated host qualification; the supervisor uses its authenticated
+control API. Runtime readiness is separate from native coding-agent readiness.
 
 ## Keeping your data
 

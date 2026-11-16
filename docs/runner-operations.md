@@ -10,8 +10,10 @@ before finishing/retrying that work. Do not restore an old approved command mere
 because its decision still reads Approved.
 
 New claims snapshot native policy and a version 2 delivery contract. Research-only
-settings no longer gate native execution. Native runtime/adapter qualification is
-not yet installed in this feature, so normal execution remains unavailable. The
+settings no longer gate native execution. The [OCI executor](isolated-executor.md)
+now supplies automated runtime/profile qualification on the dedicated Docker host.
+Native adapter/authentication and dispatch remain separate, so normal execution
+remains unavailable. Runtime diagnostics work before any production claim. The
 controlled proposal qualification procedure below is retained for historical
 recovery/readback and cannot qualify native work. Use the [MVP release
 contract](vibearr-mvp.md) for the replacement automated qualification path.
@@ -38,8 +40,10 @@ UI publicly as an authenticated multi-user service.
    state volume) outside the UI. The service has no database or encryption key.
 5. Run the authenticated `--check` command. It reads configuration without binding
    new ownership or claiming work. Use the same private volume on every restart.
-6. Keep execution disabled until the controlled live qualification below passes.
-   A successful qualification still requires the separate **Enabled** setting.
+6. Install and qualify the [OCI executor](isolated-executor.md). Keep execution
+   disabled until the native adapter/authentication, validation and dispatch path
+   is installed. The historical controlled proposal qualification below cannot
+   authorize native execution.
 
 Before upgrading, pause through Settings, wait for a safe checkpoint, and stop
 supervisor and all recorded children. Snapshot the entire private runner volume,

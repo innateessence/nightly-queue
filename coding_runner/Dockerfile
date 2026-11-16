@@ -13,5 +13,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /opt/runner
 COPY coding_runner /opt/runner/coding_runner
 COPY vibearr_runner /opt/runner/vibearr_runner
+COPY vibearr_executor /opt/runner/vibearr_executor
 USER 10001:10001
 ENTRYPOINT ["python", "-m", "vibearr_runner"]

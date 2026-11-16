@@ -39,9 +39,11 @@ identifiers, not commands or images selected by task data. Delivery mode is
 The runtime must resolve and enforce allowed host addresses, private-network
 restrictions, mounts, and resource limits. A policy document alone does not
 implement isolation. Default profile names are contract identifiers, not installed
-runtime capabilities. Until runtime and native adapters are available, readiness
-is false even if settings are structurally valid or historical release evidence
-was qualified.
+runtime capabilities. The [OCI executor](isolated-executor.md) now enforces the
+runtime boundary and publishes authenticated installed profile/binding diagnostics.
+Its automated qualification requires no prior production claim or proposal proof.
+Native adapter/authentication and dispatch readiness remain separate and false
+until those integrations are installed, regardless of historical release evidence.
 
 Native configuration requires an implementation backend/model/credential and
 GitHub issue/delivery credentials. Codex initially accepts an API token, not a

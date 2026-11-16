@@ -25,7 +25,10 @@ class ScopedCredentials:
             raise ValueError("Owned-run credentials require a stage and claim token.")
 
     def qualification(self, account):
-        proof = self.client.configuration().get("release_verification", {})
+        configuration = self.client.configuration()
+        if configuration.get("execution_kind") == "native":
+            return None
+        proof = configuration.get("release_verification", {})
         if proof.get("qualified") is not True:
             return None
         for entry in proof.get("accounts", []):
