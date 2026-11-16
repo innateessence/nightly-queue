@@ -153,11 +153,15 @@ No currently tested production policy is available in this branch.
 Run the deterministic suites and deployment acceptance separately:
 
 ```sh
-python -m unittest coding_runner.test_workspaces
+python -m unittest coding_runner.test_workspaces coding_runner.acceptance.test_workspaces
 python manage.py test runner_control.test_approvals
 python -m unittest coding_runner.boundary_checks
 python manage.py test runner_control.boundary_http_checks
 ```
+
+The acceptance directory intentionally has no package initializer so Django discovery
+does not run Git-dependent checks in the application image. The explicit commands
+above retain those checks without adding runner tooling to Django.
 
 The explicit boundary suite performs real access/process/command tests and fails
 when namespaces are unavailable; it never marks missing isolation as a passing
