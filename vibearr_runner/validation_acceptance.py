@@ -19,6 +19,7 @@ class ValidationDatabaseIsolationTests(unittest.TestCase):
                 cursor.execute("select to_regclass('public.vibearr_validation_marker')")
                 self.assertIsNone(cursor.fetchone()[0])
                 cursor.execute("create table vibearr_validation_marker (id integer)")
+                print("validation-database-marker-created")
 """
 FAILURE_TEST = """import unittest
 
@@ -111,6 +112,19 @@ def acceptance(client, source, profile, state: Path):
                 "cases": cases,
                 "result": {"state": "failed", "case": name},
             }
+        if (
+            "validation-database-marker-created"
+            not in (output / "django.log").read_text()
+        ):
+            return {
+                "schema_version": 1,
+                "cases": cases,
+                "result": {
+                    "state": "failed",
+                    "case": name,
+                    "reason": "Database isolation test did not execute.",
+                },
+            }
     failing = fixture(
         source,
         state / "failing-source",
@@ -152,6 +166,21 @@ def acceptance(client, source, profile, state: Path):
                 "schema_version": 1,
                 "cases": cases,
                 "result": {"state": "failed", "case": name},
+            }
+        expected_log = {
+            "django": "Intentional validation acceptance failure",
+            "black": "deliberately_broken.py",
+            "mypy": "validation_type_error.py",
+        }[expected_check]
+        if expected_log not in (output / (expected_check + ".log")).read_text():
+            return {
+                "schema_version": 1,
+                "cases": cases,
+                "result": {
+                    "state": "failed",
+                    "case": name,
+                    "reason": "The intended regression was not observed in protected logs.",
+                },
             }
     requirements = unpack(source.archive)["requirements.txt"][1]
     dependent = fixture(
