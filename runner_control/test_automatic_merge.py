@@ -1,10 +1,11 @@
 import copy
+import hashlib
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import datetime, timedelta
 from threading import Barrier
 from unittest.mock import Mock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 
 from django.core.exceptions import ValidationError
 from django.db import connection, connections
@@ -15,6 +16,7 @@ from credentials.test_models import TEST_KEY
 from projects.models import Project
 from vibearr_runner import native_contract as contract
 from vibearr_runner.delivery import DeliveryError
+from vibearr_executor.artifacts import pack
 from work_queue.models import MergeEvidence, QueueItem
 
 from .configuration import configuration_document
@@ -317,9 +319,221 @@ class MergeProtocolMixin(NativeProtocolMixin):
         self.revision_entry = self.write("native_revision", result)
         return result
 
+    def local_validation(self, workspace, *, archive=None, finished=True):
+        archive = self.changed if archive is None else archive
+        candidate = workspace.payload
+        session = copy.deepcopy(self.validation_intent.payload["data"])
+        session.pop("workspace_id")
+        session.pop("provenance")
+        session.update(
+            profile=self.profile.data(),
+            attempt_id=str(uuid4()),
+            source_digest=candidate["source_digest"],
+            tree_sha=candidate["workspace"]["tree_sha"],
+        )
+        context_digest = contract.digest(
+            {
+                "schema_version": 1,
+                "kind": "validation",
+                "tree_sha": session["tree_sha"],
+                "source_digest": session["source_digest"],
+                "validation_profile_digest": self.profile.digest,
+            }
+        )
+        for operation in session["operations"]:
+            operation["manifest"].update(
+                operation_id=str(uuid5(UUID(session["attempt_id"]), operation["id"])),
+                source_digest=session["source_digest"],
+                context_digest=context_digest,
+            )
+        intent = self.write(
+            "native_intent",
+            contract.validation_intent(
+                **{**self.common(), "attempt": candidate["attempt"]},
+                session=session,
+                workspace_id=str(workspace.operation_id),
+            ),
+        )
+        self.intent_ids.append(str(intent.operation_id))
+        if not finished:
+            return intent
+        observations = [
+            self.observed(
+                operation["manifest"]["operation_id"],
+                archive,
+                archive,
+                exit_code=1 if operation["id"] == "cli" else 0,
+            )
+            for operation in session["operations"]
+        ]
+        self.operations.extend(observations)
+        return self.write(
+            "native_validation",
+            contract.validation_result(
+                intent_id=str(intent.operation_id),
+                session=session,
+                operations=observations,
+            ),
+        )
+
+    def repair_invocation(self, workspace, *, attempt=2, deadline=None):
+        manifest = {
+            **self.session.manifest,
+            "operation_id": str(uuid4()),
+            "source_digest": workspace.payload["source_digest"],
+            "deadline": deadline or self.deadline,
+        }
+        session = replace(self.session, manifest=manifest)
+        return contract.agent_intent(
+            **{**self.common(), "attempt": attempt},
+            session=session,
+            workspace_id=str(workspace.operation_id),
+        )
+
+    def remote_repair_candidate(self):
+        self.complete_delivery()
+        revision = self.revision_intent(reason="ci_repair")
+        with patch("runner_control.merge_services.provider_revision"):
+            revision_entry = self.write("native_intent", revision)
+        self.intent_ids.append(str(revision_entry.operation_id))
+        payload = self.repair_invocation(self.workspace_entry, attempt=1)
+        intent = self.write("native_intent", payload)
+        self.intent_ids.append(str(intent.operation_id))
+        session = replace(self.session, manifest=payload["data"]["session"]["manifest"])
+        archive = pack(
+            {
+                "requirements.txt": (0o644, b"example==1.0\n"),
+                "file.py": (0o644, b"repaired\n"),
+            }
+        )
+        observed = self.observed(
+            session.manifest["operation_id"], self.changed, archive
+        )
+        self.operations.append(observed)
+        outcome = {
+            "result": observed["result"],
+            "artifact": observed["result"]["artifact"],
+            "source": archive,
+            "successful": True,
+            "session_id": "ses-first-repair",
+            "agent_version": session.agent_version,
+        }
+        self.write(
+            "native_agent",
+            contract.agent_result(
+                intent_id=str(intent.operation_id),
+                session=session,
+                outcome=outcome,
+                observed=observed,
+            ),
+        )
+        source_digest = hashlib.sha256(archive).hexdigest()
+        workspace = {**self.workspace, "commit_sha": "7" * 40, "tree_sha": "8" * 40}
+        entry = self.write(
+            "native_workspace",
+            contract.workspace_record(
+                context_id=str(self.context.pk),
+                context_digest=self.context.digest,
+                attempt=1,
+                agent_intent_id=str(intent.operation_id),
+                workspace=workspace,
+                source_digest=source_digest,
+                export_digest=source_digest,
+                requirements_digest=self.profile.dependency_digest,
+            ),
+        )
+        return entry, archive
+
 
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
 class AutomaticMergeTests(MergeProtocolMixin, TestCase):
+    def test_failed_local_validation_after_base_update_allows_remaining_agent_repair(
+        self,
+    ):
+        self.complete_revision()
+        validation = self.local_validation(self.revision_entry)
+        self.assertEqual(validation.payload["state"], "failed")
+        self.assertEqual(len(validation.payload["checks"]), 9)
+        accepted = self.write(
+            "native_intent", self.repair_invocation(self.revision_entry)
+        )
+        self.assertEqual(accepted.payload["attempt"], 2)
+        self.assertEqual(
+            accepted.payload["data"]["session"]["manifest"]["deadline"], self.deadline
+        )
+        self.assertEqual(
+            self.run.evidence.filter(
+                kind="native_intent", payload__kind="agent"
+            ).count(),
+            2,
+        )
+        self.assertFalse(
+            self.run.evidence.filter(
+                kind="native_intent", payload__kind="revision", payload__attempt=2
+            ).exists()
+        )
+
+    def test_failed_local_validation_after_remote_ci_repair_allows_remaining_repair(
+        self,
+    ):
+        workspace, archive = self.remote_repair_candidate()
+        validation = self.local_validation(workspace, archive=archive)
+        cli = next(
+            entry for entry in validation.payload["checks"] if entry["id"] == "cli"
+        )
+        self.assertEqual(cli["receipt"]["exit_code"], 1)
+        accepted = self.write("native_intent", self.repair_invocation(workspace))
+        self.assertEqual(accepted.payload["attempt"], 2)
+        self.assertEqual(
+            accepted.payload["data"]["session"]["manifest"]["deadline"], self.deadline
+        )
+        self.assertEqual(
+            self.run.evidence.filter(
+                kind="native_intent", payload__kind="agent"
+            ).count(),
+            3,
+        )
+
+    def test_unpublished_revision_cannot_start_repair_without_failed_validation(self):
+        self.complete_revision()
+        with self.assertRaisesMessage(RunConflict, "latest failed local validation"):
+            self.write("native_intent", self.repair_invocation(self.revision_entry))
+
+    def test_pending_latest_validation_cannot_reuse_older_local_failure(self):
+        self.complete_revision()
+        self.local_validation(self.revision_entry)
+        self.local_validation(self.revision_entry, finished=False)
+        with self.assertRaisesMessage(RunConflict, "latest failed local validation"):
+            self.write("native_intent", self.repair_invocation(self.revision_entry))
+
+    def test_published_candidate_still_requires_explicit_remote_repair_intent(self):
+        self.complete_delivery()
+        self.local_validation(self.workspace_entry)
+        with self.assertRaisesMessage(
+            RunConflict, "explicit publication revision intent"
+        ):
+            self.write(
+                "native_intent", self.repair_invocation(self.workspace_entry, attempt=1)
+            )
+
+    def test_unpublished_local_repair_cannot_extend_original_agent_deadline(self):
+        self.complete_revision()
+        self.local_validation(self.revision_entry)
+        deadline = (
+            datetime.fromisoformat(self.deadline) + timedelta(seconds=60)
+        ).isoformat()
+        with self.assertRaisesMessage(RunConflict, "original stage deadline"):
+            self.write(
+                "native_intent",
+                self.repair_invocation(self.revision_entry, deadline=deadline),
+            )
+
+    def test_local_repair_cannot_use_older_inspected_workspace(self):
+        self.complete_revision()
+        self.local_validation(self.revision_entry)
+        with self.assertRaisesMessage(RunConflict, "latest inspected workspace"):
+            self.write("native_intent", self.repair_invocation(self.workspace_entry))
+
     def test_malformed_intent_data_rejects_without_server_error(self):
         with self.assertRaises(ValidationError):
             self.write("native_intent", {"kind": "merge", "data": []})

@@ -516,6 +516,21 @@ def workspace_fact(run, operation_id, ctx):
     return entry
 
 
+def failed_local_validation(run, workspace_id, attempt):
+    intent = run.evidence.filter(
+        kind="native_intent",
+        payload__kind="validation",
+        payload__attempt=attempt,
+        payload__data__workspace_id=workspace_id,
+    ).last()
+    if intent is None:
+        return False
+    result = run.evidence.filter(
+        kind="native_validation", payload__intent_id=str(intent.operation_id)
+    ).last()
+    return result is not None and result.payload["state"] == "failed"
+
+
 def validation_profile_binding(run, value, workspace, ctx):
     selected = contract.profile_from_reference(value["profile"])
     if selected.dependency_digest != workspace["requirements_digest"]:
@@ -638,22 +653,38 @@ def validate_intent_binding(run, value, operation_id=None):
             )
         expected_source = ctx.document["source_digest"]
         if value["attempt"]:
-            previous = workspace_fact(run, data["workspace_id"], ctx).payload
+            from .merge_services import latest_workspace
+
+            previous_entry = workspace_fact(run, data["workspace_id"], ctx)
+            previous = previous_entry.payload
+            if previous_entry.pk != latest_workspace(run).pk:
+                raise RunConflict(
+                    "Native repair requires the latest inspected workspace."
+                )
             if previous["attempt"] != value["attempt"] - 1:
                 raise RunConflict(
                     "Native repair must use the preceding inspected workspace."
                 )
             expected_source = previous["source_digest"]
-            if run.evidence.filter(
-                kind="native_delivery", payload__pull_request__isnull=False
-            ).exclude(payload__pull_request=None).exists() and (
-                repair_revision is None
-                or repair_revision.payload["data"]["workspace_id"]
-                != data["workspace_id"]
-            ):
-                raise RunConflict(
-                    "Published CI repair requires its explicit publication revision intent."
+            if run.evidence.filter(kind="native_delivery").exists():
+                published = run.evidence.filter(
+                    kind="native_delivery", payload__workspace_id=data["workspace_id"]
+                ).exists()
+                explicit_revision = (
+                    repair_revision is not None
+                    and repair_revision.payload["data"]["workspace_id"]
+                    == data["workspace_id"]
                 )
+                if published and not explicit_revision:
+                    raise RunConflict(
+                        "Published CI repair requires its explicit publication revision intent."
+                    )
+                if not published and not failed_local_validation(
+                    run, data["workspace_id"], previous["attempt"]
+                ):
+                    raise RunConflict(
+                        "Unpublished candidate repair requires its latest failed local validation."
+                    )
         elif data["workspace_id"] is not None:
             raise RunConflict("Initial native work starts from the inspected base.")
         if session.manifest["source_digest"] != expected_source:
