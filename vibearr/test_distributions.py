@@ -137,6 +137,7 @@ result = runtime_diagnostics(default_execution_policy())
 assert result['runtime_ready'] is False and 'vibearr-executor' in result['reason']
 """
         self.run_command([str(executable), "-I", "-c", missing], root)
+        self.run_command([str(executable), "-I", "-m", "vibearr_runner.verify"], root)
         wheel = self.executor_wheel(root)
         self.run_command(
             [
@@ -190,7 +191,7 @@ import pathlib, sys
 import vibearr_executor, vibearr_executor.client, vibearr_executor.server
 root = pathlib.Path(vibearr_executor.__file__).parent
 assert root.is_relative_to(sys.prefix)
-for name in ('Dockerfile', 'worker.py', 'firewall.py', 'proxy.py', 'smoke.py', 'pg_smoke.py'):
+for name in ('Dockerfile', 'Codex.Dockerfile', 'codex_task.py', 'secret_material.py', 'worker.py', 'firewall.py', 'proxy.py', 'smoke.py', 'pg_smoke.py'):
     assert (root / name).is_file(), name
 assert 'django' not in sys.modules
 """
