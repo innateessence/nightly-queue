@@ -120,6 +120,14 @@ def redact_payload(value, secrets, depth=0):
     if depth > 20:
         raise ValidationError({"body": "Reduce JSON nesting to at most 20 levels."})
     if isinstance(value, str):
+        if "\x00" in value:
+            raise ValidationError(
+                {"body": "JSON strings cannot contain null characters."}
+            )
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ValidationError({"body": "Send valid Unicode strings."}) from None
         for secret in secrets:
             if secret:
                 value = re.sub(re.escape(secret), "[redacted]", value, flags=re.I)

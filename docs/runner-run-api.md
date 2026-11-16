@@ -87,7 +87,8 @@ Progress and artifacts are append-only through the API. A UUID operation ID is
 unique across all evidence kinds for its run. An exact sanitized replay returns
 the original entry; different content returns 409. Replaying older progress never
 rolls back newer stage/reference updates. Each request is limited to 64 KiB,
-20 JSON nesting levels, finite numbers, and 1,000 evidence entries per run.
+20 JSON nesting levels, finite numbers, valid Unicode strings without null
+characters, and 1,000 evidence entries per run.
 Uploads require the active claim; obsolete or completed claims cannot append.
 
 Clients must redact credentials before uploading display evidence. The API also

@@ -393,6 +393,52 @@ class RunnerAPITests(TestCase):
             self.artifact(token, data={"number": float("nan")}).status_code, 400
         )
 
+    def test_evidence_rejects_null_characters(self):
+        token = self.claim_token()
+        response = self.artifact(token, data={"message": "log\x00entry"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(RunEvidence.objects.count(), 0)
+
+    def test_evidence_rejects_unpaired_surrogates(self):
+        token = self.claim_token()
+        response = self.artifact(token, data={"message": "\ud800"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(RunEvidence.objects.count(), 0)
+
+    def test_evidence_rejects_null_characters_in_keys(self):
+        token = self.claim_token()
+        response = self.artifact(token, data={"log\x00key": "entry"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(RunEvidence.objects.count(), 0)
+
+    def test_evidence_preserves_unicode_and_literal_json_escapes(self):
+        token = self.claim_token()
+        payload = {"message": "Saved \U0001f600 \u00e9", "escape": r"\u0000"}
+        response = self.artifact(token, data=payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(RunEvidence.objects.get().payload, payload)
+
+    def test_progress_rejects_null_characters_in_references(self):
+        token = self.claim_token()
+        response = self.post(
+            "runner_progress",
+            {
+                "claim_token": token,
+                "operation_id": str(uuid.uuid4()),
+                "stage": "research",
+                "context_reference": "context\x00reference",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(RunEvidence.objects.count(), 0)
+
+    def test_finish_rejects_null_characters_in_error_summary(self):
+        token = self.claim_token()
+        response = self.finish(token, error_summary="error\x00message")
+        self.assertEqual(response.status_code, 400)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.status, "running")
+
     def test_evidence_is_bounded_and_paginated(self):
         token = self.claim_token()
         operation_ids = []
