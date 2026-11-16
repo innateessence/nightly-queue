@@ -19,8 +19,10 @@ The reproduction command is the bootstrap guide's boundary-verifier command,
 using the three immutable image IDs in the record and a new private state path.
 Preserve the exact generated registry when starting its read/control service.
 
-This record proves runtime preparation only. Real selected-account authentication,
+This is a historical runtime-preparation observation from before accepted04
+main9dd2e8e. It proves runtime preparation only. Real selected-account authentication,
 the deliberate failing queue validation, two useful source PRs, restart receipts
-and timing measurements remain separate acceptance work behind the accepted04
-main gate. A selected session copy is not a dedicated API-key live test. The
+and timing measurements remain separate acceptance work; that gate has since
+opened and these preparation records are not task results. A selected session
+copy is not a dedicated API-key live test. The
 original live stack and root's pre-existing control project/cutoff remain untouched.

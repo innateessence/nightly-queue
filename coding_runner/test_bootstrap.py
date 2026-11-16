@@ -193,7 +193,8 @@ class AcceptanceTests(unittest.TestCase):
     def test_scenarios_keep_merge_ui_work_separate_from_cli_work(self):
         scenarios = self_acceptance.scenario_tasks()
         self.assertEqual(scenarios["delivery"]["order"][0], "version-regression")
-        self.assertEqual(scenarios["delivery"]["repair_limit"], 0)
+        self.assertEqual(scenarios["delivery"]["failure_repair_limit"], 0)
+        self.assertEqual(scenarios["delivery"]["normal_repair_limit"], 2)
         self.assertIn("status-filter", scenarios["merge"]["tasks"][0]["body"])
         self.assertNotIn("Add a queue status filter", repr(scenarios["delivery"]))
         self.assertFalse(scenarios["merge"]["available"])
@@ -207,6 +208,41 @@ class AcceptanceTests(unittest.TestCase):
         result = self_acceptance.evidence_entries(queue, str(uuid4()))
         self.assertEqual(result, [{"id": 1}, {"id": 2}])
         self.assertEqual(queue.request.call_args.kwargs["query"], {"after": 1})
+
+    def test_source_improvement_cannot_claim_under_failure_only_repair_policy(self):
+        queue = Mock()
+        queue.active.return_value = {"run": None, "item": None}
+        queue.configuration.return_value = {
+            "projects": [
+                {
+                    "project_id": 1,
+                    "execution_policy": {
+                        "repair_limit": 0,
+                        "delivery_mode": "pull_request",
+                    },
+                }
+            ]
+        }
+        self_acceptance.verify_phase_policy(queue, 1, 3, failed=True)
+        with self.assertRaisesRegex(ValueError, "restore normal repair_limit"):
+            self_acceptance.verify_phase_policy(queue, 1, 4, failed=False)
+        queue.configuration.return_value["projects"][0]["execution_policy"][
+            "repair_limit"
+        ] = 2
+        self_acceptance.verify_phase_policy(queue, 1, 4, failed=False)
+
+    def test_matching_active_attempt_reconciles_without_demanding_a_new_claim_policy(
+        self,
+    ):
+        queue = Mock()
+        queue.active.return_value = {
+            "run": {"id": "original"},
+            "item": {"project": {"id": 1}, "issue_number": 3},
+        }
+        self_acceptance.verify_phase_policy(
+            queue, 1, 3, failed=True, existing_run="original"
+        )
+        queue.configuration.assert_not_called()
 
     def test_evidence_nonadvancing_cursor_is_rejected(self):
         queue = Mock()

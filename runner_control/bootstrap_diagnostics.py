@@ -37,6 +37,7 @@ def diagnose(
 ):
     request = validate_request(request)
     components = []
+    journal = journal or {}
 
     def add(component, status, detail, fix=""):
         components.append(
@@ -113,10 +114,15 @@ def diagnose(
     )
     controls = RunnerSettings.objects.filter(pk=1).first() or RunnerSettings()
     interval, boundary = schedule(settings_values(controls), datetime.now(timezone.utc))
+    started = (
+        journal.get("gates", {}).get("counts", {}).get(interval.id, 0)
+        if interval
+        else 0
+    )
     add(
         "schedule",
-        "ready" if interval else "wait",
-        f'One active run; schedule={preview["schedule"]}; next boundary={boundary.isoformat() if boundary else None}.',
+        "ready" if interval and started < controls.tasks_per_window else "wait",
+        f'One active run; schedule={preview["schedule"]}; task-window starts={started}/{controls.tasks_per_window}; next boundary={boundary.isoformat() if boundary else None}.',
         "Normal processing honors the saved window; bootstrap does not change it.",
     )
     add(

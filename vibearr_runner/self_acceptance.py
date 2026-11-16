@@ -62,7 +62,8 @@ def scenario_tasks():
         "schema_version": 1,
         "delivery": {
             "order": ["version-regression", "instructions-file", "version"],
-            "repair_limit": 0,
+            "failure_repair_limit": 0,
+            "normal_repair_limit": 2,
             "tasks": [
                 document(FAILURE_TASK),
                 *[document(value) for value in DELIVERY_TASKS],
@@ -241,10 +242,13 @@ def collect_run(
     failed=False,
     review_observer=None,
     snapshot=None,
+    delivery_mode="pull_request",
 ):
     from .native_contract import validate_native_artifact
     from vibearr_executor.validation_profile import CHECK_IDS
 
+    if delivery_mode not in {"pull_request", "merge"}:
+        raise ValueError("Choose pull_request or merge delivery readback.")
     response = queue.reconcile(run_id)
     run, item = response["run"], response["item"]
     if snapshot is not None and any(
@@ -266,7 +270,9 @@ def collect_run(
         raise ValueError(
             "Acceptance result is not a completed owned run for the selected issue/project."
         )
-    expected = "failed" if failed else "delivered"
+    expected = (
+        "failed" if failed else ("merged" if delivery_mode == "merge" else "delivered")
+    )
     if run["native_outcome"] != expected or run["result_status"] != (
         "failed" if failed else "succeeded"
     ):
@@ -402,11 +408,11 @@ def collect_run(
     delivery = validate_native_evidence(verified[0]["data"])
     if (
         delivery["run_id"] != run_id
-        or delivery["delivery"]["mode"] != "pull_request"
+        or delivery["delivery"]["mode"] != delivery_mode
         or delivery["workspace"]["repository_id"] != repository_id
     ):
         raise ValueError(
-            "Acceptance requires the selected run/repository and PR-only policy."
+            "Acceptance requires the selected run/repository and requested delivery policy."
         )
     checks = delivery["validation"]["checks"]
     if {value["id"] for value in checks} != set(CHECK_IDS):
@@ -429,7 +435,9 @@ def collect_run(
         )
     pull = delivery["delivery"]["pull_request"]
     workspace = delivery["workspace"]
-    observed, provider_snapshot, current = observe_pull(github, delivery, snapshot)
+    observed, provider_snapshot, current = observe_pull(
+        github, delivery, snapshot if delivery_mode == "pull_request" else None
+    )
     matches = pulls_for_branch(
         github, name, workspace["branch"], workspace["base_branch"]
     )
@@ -602,9 +610,9 @@ def restart_evidence(record, receipt):
 
 
 def execute(directory, project_id, issues, evidence, max_seconds):
-    if len(issues) not in {2, 3} or len(set(issues)) != len(issues):
+    if len(issues) not in {1, 2, 3} or len(set(issues)) != len(issues):
         raise ValueError(
-            "Select distinct failure/improvementA issues and optionally improvementB after A's reviewed merge."
+            "Select a failure issue, then optionally improvementA after restoring repair policy and improvementB after A's reviewed merge."
         )
     with Journal(directory):
         selection_path = directory / "self-acceptance-selection.json"
@@ -639,6 +647,21 @@ def execute(directory, project_id, issues, evidence, max_seconds):
             raise ValueError(
                 "Acceptance receipt belongs to another selected issue/outcome."
             )
+        if not completed:
+            queue = configured_queue(directory)
+            progress_path = directory / f"acceptance-progress-{issue}.json"
+            prior = private_json(progress_path) if progress_path.exists() else {}
+            verify_phase_policy(
+                queue,
+                project_id,
+                issue,
+                failed=index == 0,
+                existing_run=prior.get("run_id"),
+            )
+            if index and receipts[0].get("reporting_acknowledged") is not True:
+                raise ValueError(
+                    "Confirm the failed run's acknowledgement before claiming the independent source improvement."
+                )
         result = (
             {"run_id": completed["run_id"]}
             if completed
@@ -654,6 +677,10 @@ def execute(directory, project_id, issues, evidence, max_seconds):
         )
         runs.append((result["run_id"], issue))
         receipts.append(private_json(receipt))
+        if receipts[-1].get("reporting_acknowledged") is not True:
+            raise ValueError(
+                "Acceptance requires actual completion acknowledgement before the next phase."
+            )
         queue, github = observers(directory, project_id)
         snapshot_path = directory / f"acceptance-observation-{issue}.json"
         saved_snapshot = private_json(snapshot_path) if snapshot_path.exists() else None
@@ -687,7 +714,11 @@ def execute(directory, project_id, issues, evidence, max_seconds):
             "schema_version": 1,
             "scenario": "delivery",
             "passed": False,
-            "pending": "Publish improvementB only after independent review/CI and root's merge of improvementA.",
+            "pending": (
+                "Restore the normal repair allowance and preserve task-window counts before publishing improvementA."
+                if len(runs) == 1
+                else "Publish improvementB only after independent review/CI and root's merge of improvementA."
+            ),
             "records": [
                 collect_run(
                     queue,
@@ -716,10 +747,7 @@ def execute(directory, project_id, issues, evidence, max_seconds):
 
 
 def observers(directory, project_id):
-    with Journal(directory) as journal:
-        state = journal.load()
-    queue = client()
-    queue.controller_secret = state["controller_secret"]
+    queue = configured_queue(directory)
     project = next(
         value
         for value in queue.configuration()["projects"]
@@ -736,6 +764,43 @@ def observers(directory, project_id):
         },
     )
     return queue, NativeGitHub(grant["material"]["secret"], read_only=True)
+
+
+def configured_queue(directory):
+    with Journal(directory) as journal:
+        state = journal.load()
+    queue = client()
+    queue.controller_secret = state.get("controller_secret")
+    return queue
+
+
+def verify_phase_policy(queue, project_id, issue_number, *, failed, existing_run=None):
+    active = queue.active()
+    if active.get("run") is not None:
+        item = active.get("item") or {}
+        matching = (
+            item.get("project", {}).get("id") == project_id
+            and item.get("issue_number") == issue_number
+        )
+        if not matching or existing_run not in {None, active["run"]["id"]}:
+            raise ValueError(
+                "Reconcile the other active owned run before starting an acceptance phase."
+            )
+        return
+    if existing_run is not None:
+        return
+    project = next(
+        value
+        for value in queue.configuration()["projects"]
+        if value["project_id"] == project_id
+    )
+    policy = project["execution_policy"]
+    repairs = policy["repair_limit"]
+    correct = type(repairs) is int and (repairs == 0 if failed else 0 < repairs <= 2)
+    if not correct or policy["delivery_mode"] != "pull_request":
+        raise ValueError(
+            "Select repair_limit0 for the failure phase or restore normal repair_limit1..2 for source improvements, with PR-only delivery, before claim."
+        )
 
 
 def main():
@@ -761,9 +826,12 @@ def main():
     identities = (
         args.project_id,
         args.failure_issue,
-        args.first_issue,
     )
+    if args.first_issue is not None:
+        identities += (args.first_issue,)
     if args.second_issue is not None:
+        if args.first_issue is None:
+            parser.error("Select improvementA before improvementB.")
         identities += (args.second_issue,)
     if (
         any(type(value) is not int or not 0 < value < 2**63 for value in identities)

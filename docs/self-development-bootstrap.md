@@ -204,20 +204,30 @@ python -m vibearr_runner.self_acceptance --export-scenarios
 
 Use a dedicated disposable app/DB/controller/executor. Before claiming, explicitly
 select `repair_limit=0` on that acceptance project's policy; retain all nine fixed
-checks. Publish the test-only missing-`--version` regression first, then the
-independent `--instructions-file` production improvement. The first must fail a
-real validation check with no push/PR, and the improvement must execute afterward.
+checks. Configure a finite task-window limit of3 for F/A/B without resetting
+existing counters. Publish only the test-only missing-`--version` regression first.
+It must fail a real validation check with no push/PR and confirm termination,
+completion acknowledgement and slot release before proceeding.
 Hold unrelated already-manually-implemented work explicitly during this bounded
 rehearsal. Do not run two workers against the same issue/branch.
 
 ```sh
 python -m vibearr_runner.self_acceptance --execute --scenario delivery \
   --state /private/acceptance-controller --project-id <id> \
-  --failure-issue <failure-id> --first-issue <instructions-id> \
+  --failure-issue <failure-id> \
   --evidence /private/delivery-report.json
 ```
 
-This first phase produces a partial report, preserving real receipts. After fresh
+This failure-only phase produces a partial report with immutable receipts. Restore
+the operator-owned project policy to its normal repair allowance2, preserving F's
+frozen snapshot, the same controller journal and task-window counts. Publish the
+independent `--instructions-file` source improvement, then repeat with
+`--first-issue <instructions-id>`. The driver rejects a new improvement claim
+under the stale failure-only repair policy; reconciliation of an existing attempt
+remains possible. These are explicit negative-case setup steps, not task-controlled
+permissions or confirmation gates.
+
+After fresh
 independent/root review and CI, the authorized operator merges the first real PR
 and publishes the separate `--version` improvement. Repeat the same command with
 `--second-issue <version-id>` to resume; completed tasks are reconciled, not run

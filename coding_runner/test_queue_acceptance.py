@@ -9,6 +9,55 @@ from vibearr_runner import queue_acceptance
 
 
 class QueueAcceptanceTests(unittest.TestCase):
+    def test_resuming_after_completion_ack_never_cycles_to_claim_another_issue(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "controller"
+            with Journal(directory) as journal:
+                state = journal.load()
+                state["completion_receipts"] = [
+                    {"run_id": "original", "finish_digest": "a" * 64}
+                ]
+                journal.save(state)
+            (directory / "queue-acceptance.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "project_id": 1,
+                        "issue_number": 3,
+                        "run_id": "original",
+                        "observed": {},
+                        "generations": 2,
+                    }
+                )
+            )
+            queue = SimpleNamespace(
+                controller_secret=None,
+                reconcile=Mock(
+                    return_value={
+                        "run": {"state": "completed", "finish_digest": "a" * 64}
+                    }
+                ),
+            )
+            with (
+                patch.object(queue_acceptance, "client", return_value=queue),
+                patch.object(
+                    queue_acceptance,
+                    "evidence_document",
+                    return_value={"run_id": "original"},
+                ) as report,
+                patch.object(queue_acceptance, "cycle_once") as cycle,
+                patch.object(queue_acceptance.subprocess, "run") as process,
+            ):
+                result = queue_acceptance.run_acceptance(
+                    directory, 1, 3, directory / "receipt.json", 60
+                )
+            self.assertEqual(result["run_id"], "original")
+            report.assert_called_once()
+            cycle.assert_not_called()
+            process.assert_not_called()
+
     def test_progress_file_cannot_replace_the_controller_journal(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

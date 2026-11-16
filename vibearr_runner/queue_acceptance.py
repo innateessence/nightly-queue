@@ -171,7 +171,8 @@ def run_acceptance(
         )
     if expected_outcome not in {"delivered", "failed"}:
         raise ValueError("Choose delivered or failed acceptance outcome.")
-    with Journal(directory):
+    with Journal(directory) as journal:
+        initial_state = journal.load()
         progress_file = directory / progress_name
         saved = (
             json.loads(progress_file.read_text())
@@ -189,6 +190,39 @@ def run_acceptance(
         raise ValueError(
             "Acceptance progress belongs to another explicitly selected task."
         )
+    if saved["run_id"]:
+        queue = client()
+        queue.controller_secret = initial_state.get("controller_secret")
+        remote = queue.reconcile(saved["run_id"])["run"]
+        completed = remote["state"] == "completed"
+        acknowledged = bool(remote.get("finish_digest")) and any(
+            value.get("run_id") == saved["run_id"]
+            and value.get("finish_digest") == remote.get("finish_digest")
+            for value in initial_state.get("completion_receipts", [])
+        )
+        local = (initial_state.get("run") or {}).get("run", {})
+        if completed and acknowledged:
+            if local.get("id") == saved["run_id"]:
+                cycle_once(directory, project_id, issue_number)
+            return evidence_document(
+                directory,
+                saved["run_id"],
+                project_id,
+                issue_number,
+                saved["observed"],
+                saved["generations"],
+                evidence,
+                expected_outcome=expected_outcome,
+                executor_observations=saved.get("executor_observations", {}),
+            )
+        if (
+            completed
+            and local.get("id") != saved["run_id"]
+            or remote["state"] not in {"active", "completed"}
+        ):
+            raise RuntimeError(
+                "The original acceptance run requires explicit ownership/acknowledgement reconciliation; no replacement may be claimed."
+            )
     deadline = time.monotonic() + max_seconds
     command = [
         sys.executable,
@@ -348,7 +382,9 @@ def evidence_document(
         "executor_observations": executor_observations or {},
         "completed_at": run["finished_at"],
         "reporting_acknowledged": any(
-            value["run_id"] == run_id for value in state.get("completion_receipts", [])
+            value["run_id"] == run_id
+            and value.get("finish_digest") == run["finish_digest"]
+            for value in state.get("completion_receipts", [])
         ),
     }
     atomic_bytes(evidence, json.dumps(document, sort_keys=True, indent=2).encode())
