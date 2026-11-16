@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "credentials",
     "projects",
     "work_queue",
+    "runner_control",
 ]
 
 MIDDLEWARE = [
