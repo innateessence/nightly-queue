@@ -1,8 +1,9 @@
-from typing import Any
+import time
+from typing import Any, Callable
 from uuid import UUID, uuid4
 
 from .client import NotFoundError
-from .context import GitHubContextClient, digest, manual_context
+from .context import GitHubContextClient, check_deadline, digest, manual_context
 from .plans import register_context_sources, validate_context, validate_plan
 
 
@@ -14,16 +15,31 @@ class ContextPlanStore:
         self.sources = sources
 
     def _post(
-        self, endpoint: str, payload: dict[str, Any], operation_id: str | None
+        self,
+        endpoint: str,
+        payload: dict[str, Any],
+        operation_id: str | None,
+        *,
+        deadline: float | None = None,
+        checkpoint: Callable[[], bool] | None = None,
+        inflight_checkpoint: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         body = {
             "claim_token": self.claim_token,
             "operation_id": str(UUID(operation_id)) if operation_id else str(uuid4()),
             **payload,
         }
-        return self.client.request(
-            "POST", f"/api/v1/runner/runs/{self.run_id}/{endpoint}/", body
+        remaining = check_deadline(deadline, checkpoint)
+        limits: dict[str, Any] = {}
+        if remaining is not None:
+            limits["timeout"] = remaining
+        if inflight_checkpoint is not None:
+            limits["checkpoint"] = inflight_checkpoint
+        result = self.client.request(
+            "POST", f"/api/v1/runner/runs/{self.run_id}/{endpoint}/", body, **limits
         )
+        check_deadline(deadline, checkpoint)
+        return result
 
     def refresh(
         self,
@@ -34,15 +50,24 @@ class ContextPlanStore:
         resolved_base_branch: str | None = None,
         reason: str = "Refresh discussion and inspect base before handoff",
         operation_id: str | None = None,
+        deadline: float | None = None,
+        checkpoint: Callable[[], bool] | None = None,
+        inflight_checkpoint: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         if item.get("source") == "manual":
             document = manual_context(item)
         elif issue_client is not None:
-            document = issue_client.fetch(item)
+            document = issue_client.fetch(
+                item,
+                deadline=deadline,
+                checkpoint=checkpoint,
+                inflight_checkpoint=inflight_checkpoint,
+            )
         else:
             raise ValueError(
                 "Complete current issue context is required; no issue client is configured."
             )
+        check_deadline(deadline, checkpoint)
         validate_context(document, item)
         resolved = resolved_base_branch or item.get("base_branch")
         if not resolved:
@@ -57,6 +82,9 @@ class ContextPlanStore:
                 "reason": reason,
             },
             operation_id,
+            deadline=deadline,
+            checkpoint=checkpoint,
+            inflight_checkpoint=inflight_checkpoint,
         )["context"]
         if saved.get("presentation_only") or saved.get("unavailable"):
             raise ValueError(
@@ -98,12 +126,25 @@ class ContextPlanStore:
         issue_client: GitHubContextClient | None = None,
         resolved_base_branch: str | None = None,
         operation_id: str | None = None,
+        timeout_seconds: float | None = None,
+        checkpoint: Callable[[], bool] | None = None,
+        inflight_checkpoint: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
+        deadline = (
+            None if timeout_seconds is None else time.monotonic() + timeout_seconds
+        )
         if operation_id:
             operation_id = str(UUID(operation_id))
             path = f"/api/v1/runner/runs/{self.run_id}/handoff/{operation_id}/"
             try:
-                previous = self.client.request("GET", path)
+                remaining = check_deadline(deadline, checkpoint)
+                limits: dict[str, Any] = {}
+                if remaining is not None:
+                    limits["timeout"] = remaining
+                if inflight_checkpoint is not None:
+                    limits["checkpoint"] = inflight_checkpoint
+                previous = self.client.request("GET", path, **limits)
+                check_deadline(deadline, checkpoint)
                 saved = previous["context"]
                 documents = [saved, previous["plan"]]
                 if any(
@@ -134,11 +175,17 @@ class ContextPlanStore:
             base_commit,
             issue_client=issue_client,
             resolved_base_branch=resolved_base_branch,
+            deadline=deadline,
+            checkpoint=checkpoint,
+            inflight_checkpoint=inflight_checkpoint,
         )
         saved = self._post(
             "handoff",
             {"context_id": current["id"], "base_commit": base_commit},
             operation_id,
+            deadline=deadline,
+            checkpoint=checkpoint,
+            inflight_checkpoint=inflight_checkpoint,
         )
         documents = [saved["context"], saved["plan"]]
         if any(

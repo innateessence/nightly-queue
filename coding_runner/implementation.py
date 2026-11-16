@@ -18,7 +18,8 @@ from .backends import (
     BackendRequest,
 )
 from .budgets import ActiveBudget, BudgetExceeded
-from .context import canonical_bytes
+from .client import APIError
+from .context import ContextError, ContextInterrupted, canonical_bytes
 from .journal import Journal
 from .plans import validate_context, validate_plan
 from .research import checkout_inventory, read_checkout
@@ -281,6 +282,26 @@ class ImplementationStage:
     def _periodic(self) -> bool:
         return self._allowed() and self.budget.checkpoint()
 
+    def _local_periodic(self) -> bool:
+        return not self.stop.is_set() and self.budget.checkpoint()
+
+    def _origin_context(self, run_id, context_id, remaining):
+        if not self._periodic():
+            raise ContextInterrupted(
+                "Discussion refresh interrupted by execution controls."
+            )
+        response = self.store.client.request(
+            "GET",
+            f"/api/v1/runner/runs/{run_id}/contexts/{context_id}/",
+            timeout=min(remaining, self.budget.remaining("research")),
+            checkpoint=self._local_periodic,
+        )
+        if not self._periodic():
+            raise ContextInterrupted(
+                "Discussion refresh interrupted by execution controls."
+            )
+        return response["context"]
+
     def step(
         self,
         state: dict[str, Any],
@@ -301,7 +322,20 @@ class ImplementationStage:
             )
         try:
             return self._step(state, run_id, item, workspace, request, issue_client)
-        except BudgetExceeded as exc:
+        except (BudgetExceeded, ContextError, APIError) as exc:
+            if not isinstance(exc, BudgetExceeded):
+                if self.budget.remaining("research") > 0:
+                    if isinstance(exc, ContextInterrupted) or self.stop.is_set():
+                        return ImplementationResult(
+                            "wait",
+                            {
+                                "reason": "Discussion refresh interrupted by execution controls."
+                            },
+                        )
+                    raise
+                exc = BudgetExceeded(
+                    "Active task or stage timeout exhausted during discussion refresh."
+                )
             self.backend.interrupt()
             session = state.setdefault("implementation", {}).setdefault(run_id, {})
             session.update({"phase": "failed", "failure": str(exc)})
@@ -341,6 +375,9 @@ class ImplementationStage:
                 workspace.base_revision,
                 issue_client=issue_client,
                 resolved_base_branch=workspace.resolved_base_branch,
+                timeout_seconds=remaining,
+                checkpoint=self._periodic,
+                inflight_checkpoint=self._local_periodic,
             ),
         )
         plan, context = handoff["plan"], handoff["context"]
@@ -349,9 +386,10 @@ class ImplementationStage:
         if context["digest"] != digest(context["document"]):
             raise BackendOutputError("Context digest changed.")
         context_id = str(UUID(document["context_id"]))
-        origin = self.store.client.request(
-            "GET", f"/api/v1/runner/runs/{run_id}/contexts/{context_id}/"
-        )["context"]
+        origin = self.budget.run(
+            "research",
+            lambda remaining: self._origin_context(run_id, context_id, remaining),
+        )
         validate_context(origin["document"], item)
         validate_plan(
             document, origin["document"], origin["id"], workspace.base_revision

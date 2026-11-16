@@ -35,7 +35,8 @@ class Clock:
 
 
 class Broker:
-    def __init__(self):
+    def __init__(self, run_id):
+        self.run_id = run_id
         self.decision = "pending"
         self.requests = []
         self.consumed = []
@@ -113,7 +114,7 @@ class Store:
         self.refreshes = 0
         self.plan = None
 
-    def request(self, method, path):
+    def request(self, method, path, **kwargs):
         context_id = path.rstrip("/").split("/")[-1]
         return {"context": self.origins[context_id]}
 
@@ -154,7 +155,7 @@ class ImplementationTests(WorkspaceFixture, unittest.TestCase):
             {"research": 50, "implementation": 50, "validation": 50},
             clock=self.clock,
         )
-        self.broker = Broker()
+        self.broker = Broker(self.run_id)
         self.executor = Executor(self.broker, self.clock)
         self.backend = Backend(self.clock)
         self.store = Store(self.item, self.workspace)
@@ -548,6 +549,84 @@ class ImplementationTests(WorkspaceFixture, unittest.TestCase):
         result = self.step()
         self.assertEqual(result.status, "failed")
         self.assertIn("timeout", result.detail["reason"])
+
+    def test_actual_context_handoff_stops_pagination_at_remaining_research_budget(self):
+        from unittest.mock import Mock, patch
+        from ..context import GitHubContextClient
+        from ..plan_store import ContextPlanStore
+        from ..test_context import issue, comment
+
+        self.item.update(
+            source="github",
+            issue_repository="https://github.com/original/issues.git",
+            issue_number=7,
+        )
+        self.budget.run("research", lambda remaining: setattr(self.clock, "now", 49.0))
+        client = Mock()
+        self.stage.store = ContextPlanStore(
+            client, self.run_id, str(uuid4()), self.sources
+        )
+        reader = GitHubContextClient("test-read-token")
+        link = '<https://api.github.com/repos/original/issues/issues/7/comments?per_page=100&page=2>; rel="next"'
+        pages = [(issue(comments=2), ""), ([comment()], link), ([comment(2)], "")]
+
+        def page(*args, **kwargs):
+            self.clock.now += 0.6
+            return pages.pop(0)
+
+        with patch("coding_runner.context.time.monotonic", side_effect=self.clock):
+            with patch.object(reader, "_get", side_effect=page) as fetch:
+                result = self.stage.step(
+                    self.state,
+                    self.run_id,
+                    self.item,
+                    self.workspace,
+                    self.request,
+                    issue_client=reader,
+                )
+        self.assertEqual(result.status, "failed")
+        self.assertIn("timeout", result.detail["reason"])
+        self.assertEqual(fetch.call_count, 2)
+        client.request.assert_not_called()
+        self.assertEqual(self.backend.calls, 0)
+        self.assertAlmostEqual(self.budget.data["total"], 50.2)
+
+    def test_gate_closure_during_context_save_stops_before_handoff(self):
+        from unittest.mock import Mock
+        from ..plan_store import ContextPlanStore
+
+        client = Mock()
+
+        def request(*args, **kwargs):
+            self.allowed = False
+            return {"context": self.store.context}
+
+        client.request.side_effect = request
+        self.stage.store = ContextPlanStore(
+            client, self.run_id, str(uuid4()), self.sources
+        )
+        self.assertEqual(self.step().status, "wait")
+        self.assertEqual(client.request.call_count, 1)
+        self.assertTrue(client.request.call_args.args[1].endswith("/contexts/"))
+        self.assertEqual(self.backend.calls, 0)
+
+    def test_original_saved_context_read_consumes_research_budget(self):
+        from unittest.mock import patch
+
+        original = self.store.request
+
+        def request(*args, **kwargs):
+            self.clock.now += 0.5
+            return original(*args, **kwargs)
+
+        self.budget.run("research", lambda remaining: setattr(self.clock, "now", 49.7))
+        with patch.object(self.store, "request", side_effect=request) as read:
+            result = self.step()
+        self.assertEqual(result.status, "failed")
+        self.assertIn("timeout", result.detail["reason"])
+        self.assertAlmostEqual(read.call_args.kwargs["timeout"], 0.3)
+        self.assertAlmostEqual(self.budget.data["total"], 50.2)
+        self.assertEqual(self.backend.calls, 0)
 
     def test_delivery_verification_can_share_supervisor_workspace_lock(self):
         result = self.ready()

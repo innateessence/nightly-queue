@@ -2,12 +2,13 @@
 
 import hashlib
 import json
+import math
 import re
 import time
 import threading
 from datetime import datetime, timezone
 from http.client import HTTPException
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
@@ -19,6 +20,25 @@ MAX_DOCUMENT_BYTES = 4 * 1024 * 1024
 
 class ContextError(ValueError):
     pass
+
+
+class ContextInterrupted(ContextError):
+    pass
+
+
+def check_deadline(
+    deadline: float | None, checkpoint: Callable[[], bool] | None
+) -> float | None:
+    if checkpoint is not None and checkpoint() is not True:
+        raise ContextInterrupted(
+            "Discussion refresh interrupted by execution controls."
+        )
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if not math.isfinite(remaining) or remaining <= 0:
+        raise ContextError("Discussion refresh exhausted its active budget.")
+    return remaining
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -103,7 +123,22 @@ class GitHubContextClient:
         self.opener = build_opener(ProxyHandler({}), NoRedirects())
         self.request_lock = threading.Lock()
 
-    def _get(self, url: str, *, deadline: float | None = None) -> tuple[Any, str]:
+    def _get(
+        self,
+        url: str,
+        *,
+        deadline: float | None = None,
+        checkpoint: Callable[[], bool] | None = None,
+    ) -> tuple[Any, str]:
+        if deadline is not None:
+            check_deadline(deadline, None)
+        request_deadline = time.monotonic() + self.timeout
+        deadline = (
+            min(request_deadline, deadline)
+            if deadline is not None
+            else request_deadline
+        )
+        check_deadline(deadline, checkpoint)
         request = Request(
             url,
             headers={
@@ -112,14 +147,6 @@ class GitHubContextClient:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
-        request_deadline = time.monotonic() + self.timeout
-        deadline = (
-            min(request_deadline, deadline)
-            if deadline is not None
-            else request_deadline
-        )
-        if deadline <= time.monotonic():
-            raise ContextError("Issue discussion request deadline exceeded.")
         if not self.request_lock.acquire(blocking=False):
             raise ContextError("A previous issue request is still unavailable.")
         finished = threading.Event()
@@ -134,11 +161,15 @@ class GitHubContextClient:
                 self.request_lock.release()
                 finished.set()
 
-        # DNS and dripping headers can outlast a socket timeout.
+        # Only local stop/budget state may be read while transport owns the lock.
         worker = threading.Thread(target=send, daemon=True)
         worker.start()
-        if not finished.wait(max(0, deadline - time.monotonic())):
-            raise ContextError("Issue discussion request deadline exceeded.")
+        while True:
+            check_deadline(deadline, checkpoint)
+            remaining = deadline - time.monotonic()
+            if finished.wait(min(0.1, remaining)):
+                break
+        check_deadline(deadline, checkpoint)
         result = outcome[0]
         if isinstance(result, Exception):
             raise result
@@ -146,7 +177,10 @@ class GitHubContextClient:
 
     def _send(self, request: Request, deadline: float) -> tuple[Any, str]:
         try:
-            with self.opener.open(request, timeout=self.timeout) as response:
+            remaining = min(self.timeout, deadline - time.monotonic())
+            if remaining <= 0:
+                raise ContextError("Issue discussion request deadline exceeded.")
+            with self.opener.open(request, timeout=remaining) as response:
                 if response.status != 200:
                     raise ContextError("Issue discussion unavailable.")
                 raw = bytearray()
@@ -170,7 +204,15 @@ class GitHubContextClient:
         ):
             raise ContextError("Complete issue discussion could not be read.") from None
 
-    def fetch(self, item: dict[str, Any]) -> dict[str, Any]:
+    def fetch(
+        self,
+        item: dict[str, Any],
+        *,
+        deadline: float | None = None,
+        checkpoint: Callable[[], bool] | None = None,
+        inflight_checkpoint: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
+        check_deadline(deadline, checkpoint)
         if item.get("source") == "manual":
             return manual_context(item)
         if (
@@ -182,7 +224,8 @@ class GitHubContextClient:
         path = repository_path(item.get("issue_repository"))
         number = item["issue_number"]
         api = f"https://api.github.com/repos{path}/issues/{number}"
-        issue, _ = self._get(api)
+        issue, _ = self._get(api, deadline=deadline, checkpoint=inflight_checkpoint)
+        check_deadline(deadline, checkpoint)
         original = f"https://github.com{path}/issues/{number}"
         if (
             not isinstance(issue, dict)
@@ -205,10 +248,14 @@ class GitHubContextClient:
         seen = set()
         total_bytes = len(canonical_bytes(current))
         for _ in range(self.max_pages):
+            check_deadline(deadline, checkpoint)
             if url in seen:
                 raise ContextError("Repeated comment page.")
             seen.add(url)
-            page, links = self._get(url)
+            page, links = self._get(
+                url, deadline=deadline, checkpoint=inflight_checkpoint
+            )
+            check_deadline(deadline, checkpoint)
             if not isinstance(page, list):
                 raise ContextError("Invalid comments page.")
             for entry in page:
@@ -243,6 +290,7 @@ class GitHubContextClient:
             raise ContextError(
                 "Discussion changed or comments are incomplete; refresh it."
             )
+        check_deadline(deadline, checkpoint)
         return {
             "schema_version": 1,
             "source": "github",

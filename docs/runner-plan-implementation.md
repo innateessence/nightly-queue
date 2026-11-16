@@ -129,7 +129,12 @@ Limits are finite and copied from the caller so later configuration mutations
 cannot enlarge the frozen allowance.
 
 Research and planning use the `research` allowance. Context refreshes also count
-as research. Implementation calls and setup commands use `implementation`;
+as research. A handoff shares one absolute deadline across the complete discussion
+pagination, saved-context upload and handoff mutation. Each HTTP request is capped
+by the remaining allowance. Fresh full gates run between requests; in-flight
+callbacks use only local shutdown and budget state to avoid recursively requesting
+the same API client. Reading the original saved plan context also consumes the
+research allowance. Implementation calls and setup commands use `implementation`;
 required project checks use `validation`. Time spent waiting for human decisions,
 processing windows or usage is excluded. Persisted totals survive restarts. An
 unresolved active segment blocks execution until explicit recovery accounts for

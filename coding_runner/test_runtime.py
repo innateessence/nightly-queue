@@ -74,6 +74,72 @@ class ServerCase(TestCase):
 
 
 class ClientTests(ServerCase):
+    def test_local_stop_bounds_inflight_http_mutation_and_preserves_lock(self):
+        stopped = threading.Event()
+        self.server.release_mutation = threading.Event()
+        self.client.timeout = 15
+        callback_threads = []
+
+        def stop_after_request():
+            deadline = time.monotonic() + 2
+            while not self.server.calls and time.monotonic() < deadline:
+                time.sleep(0.005)
+            stopped.set()
+
+        def checkpoint():
+            callback_threads.append(threading.get_ident())
+            return not stopped.is_set()
+
+        stopper = threading.Thread(target=stop_after_request, daemon=True)
+        stopper.start()
+        try:
+            started = time.monotonic()
+            with self.assertRaises(AmbiguousRequest):
+                self.client.request(
+                    "POST", "/api/v1/runner/runs/claim/", {}, checkpoint=checkpoint
+                )
+            self.assertLess(time.monotonic() - started, 0.7)
+            with self.assertRaises(UnavailableError):
+                self.client.identity()
+            self.assertEqual(
+                self.server.calls, [("POST", "/api/v1/runner/runs/claim/")]
+            )
+        finally:
+            self.server.release_mutation.set()
+            stopper.join(2)
+        self.assertTrue(self.client.request_lock.acquire(timeout=2))
+        self.client.request_lock.release()
+        self.assertEqual(set(callback_threads), {threading.get_ident()})
+
+    def test_full_handoff_gates_can_use_same_client_between_requests(self):
+        from unittest.mock import Mock
+        from coding_runner.plan_store import ContextPlanStore
+        from coding_runner.test_context import ITEM
+        from coding_runner.test_plans import BASE, saved_context
+
+        run_id = str(uuid4())
+        context = saved_context()
+        result = {"context": context, "plan": {"id": str(uuid4())}}
+        context_path = f"/api/v1/runner/runs/{run_id}/contexts/"
+        handoff_path = f"/api/v1/runner/runs/{run_id}/handoff/"
+        self.server.responses[context_path] = (200, {"context": context})
+        self.server.responses[handoff_path] = (200, result)
+        store = ContextPlanStore(self.client, run_id, str(uuid4()), Mock())
+
+        def full_gate():
+            return self.client.identity() == IDENTITY
+
+        actual = store.handoff(
+            {**ITEM, "source": "manual"},
+            BASE,
+            timeout_seconds=2,
+            checkpoint=full_gate,
+            inflight_checkpoint=lambda: True,
+        )
+        self.assertEqual(actual, result)
+        mutations = [path for method, path in self.server.calls if method == "POST"]
+        self.assertEqual(mutations, [context_path, handoff_path])
+
     def test_per_request_timeout_cannot_extend_the_configured_maximum(self):
         release = threading.Event()
 
@@ -170,6 +236,51 @@ class ClientTests(ServerCase):
                 self.assertEqual(self.client.opener.open.call_count, 1)
         finally:
             release.set()
+
+    def test_local_stop_after_mutation_transport_is_ambiguous(self):
+        stopped = threading.Event()
+        original = self.client.opener.open
+
+        def open_response(*args, **kwargs):
+            response = original(*args, **kwargs)
+            stopped.set()
+            return response
+
+        with patch.object(self.client.opener, "open", side_effect=open_response):
+            with self.assertRaises(AmbiguousRequest):
+                self.client.request(
+                    "POST",
+                    "/api/v1/runner/runs/claim/",
+                    {},
+                    checkpoint=lambda: not stopped.is_set(),
+                )
+        self.assertEqual(len(self.server.calls), 1)
+        with self.assertRaises(UnavailableError):
+            self.client.request(
+                "POST",
+                "/api/v1/runner/runs/claim/",
+                {},
+                checkpoint=lambda: not stopped.is_set(),
+            )
+        self.assertEqual(len(self.server.calls), 1)
+
+    def test_local_stop_after_read_transport_is_unavailable(self):
+        stopped = threading.Event()
+        original = self.client.opener.open
+
+        def open_response(*args, **kwargs):
+            response = original(*args, **kwargs)
+            stopped.set()
+            return response
+
+        with patch.object(self.client.opener, "open", side_effect=open_response):
+            with self.assertRaises(UnavailableError):
+                self.client.request(
+                    "GET",
+                    "/api/v1/runner/identity/",
+                    checkpoint=lambda: not stopped.is_set(),
+                )
+        self.assertEqual(len(self.server.calls), 1)
 
     def test_authentication_error_is_explicit_and_redacted(self):
         self.server.responses["/api/v1/runner/identity/"] = (401, {"error": "secret"})
