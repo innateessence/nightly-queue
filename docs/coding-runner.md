@@ -13,16 +13,12 @@ The dedicated service now implements durable scoped ownership, web-managed
 configuration/credentials, execution gates, approved isolated commands, complete
 context, immutable plan versions, proposal-only backend mediation, implementation,
 validation, verified PR delivery, recovery, and operator retention/history.
-The architecture below describes its intended release behavior. Normal execution
-remains disabled until the persisted controlled live qualification succeeds.
-
-The Codex Responses API structured-proposal transport is a candidate; native CLI
-tools remain unsupported. Actual live authentication/model/repository acceptance
-has not been authorized and completed. The hardened production container's sandbox
-namespace probe currently fails in this environment. Neither deterministic fake
-orchestration tests nor portable CI qualify a live release. See
-[operations and release evidence](runner-operations.md) for exact prerequisites,
-commands, retention rules, screenshots, and remaining external blockers.
+The detailed proposal architecture below is historical. Native task isolation now
+uses the [independent OCI executor](isolated-executor.md), qualified with actual
+Docker boundary probes on its host. It requires no nested sandbox or prior
+production task. Native CLI/session/authentication integration and unattended
+dispatch remain separate features, so normal native queue execution remains
+disabled. Runtime qualification alone cannot make a backend or delivery path ready.
 
 ## Responsibilities
 

@@ -3,15 +3,12 @@
 import argparse
 import json
 import io
-import hashlib
 import contextlib
 import tempfile
 import unittest
 from pathlib import Path
 
 import coding_runner
-
-from .sandbox import SandboxUnavailable, probe_sandbox
 
 BOUNDARY_METHODS = {
     "test_actual_sandbox_stops_command_at_remaining_budget",
@@ -50,66 +47,51 @@ def portable_suite():
     return suite
 
 
-def boundary_suite():
-    loader = unittest.TestLoader()
-    suite = loader.loadTestsFromName("coding_runner.boundary_checks")
-    for path in sorted(
-        (Path(coding_runner.__file__).parent / "acceptance").glob("test_*.py")
-    ):
-        suite.addTests(
-            loader.loadTestsFromName("coding_runner.acceptance." + path.stem)
-        )
-    return suite
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--boundary", action="store_true")
     parser.add_argument("--evidence", type=Path)
+    parser.add_argument("--executor-image")
+    parser.add_argument("--database-image")
+    parser.add_argument("--executor-state", type=Path)
+    parser.add_argument("--profiles", type=Path)
     args = parser.parse_args()
-    with tempfile.TemporaryDirectory() as temporary:
-        try:
-            probe_sandbox(Path(temporary))
-        except SandboxUnavailable:
-            print(
-                json.dumps(
-                    {
-                        "sandbox": "unsupported",
-                        "execution_ready": False,
-                        "boundary_qualification": "blocked",
-                    }
-                )
+    if args.boundary:
+        if not args.executor_image or not args.database_image:
+            parser.error(
+                "OCI boundary verification requires installed --executor-image and --database-image sha256 IDs on the executor host."
             )
-            if args.boundary:
-                return 1
-        else:
-            print(
-                json.dumps(
-                    {
-                        "sandbox": "available",
-                        "boundary_qualification": "requires full suite and live scenarios",
-                    }
-                )
+        from vibearr_executor.contracts import Profile, canonical
+        from vibearr_executor.qualify import qualify, smoke_profiles
+
+        profiles = smoke_profiles(args.executor_image, args.database_image)
+        if args.profiles:
+            profiles.extend(
+                Profile.parse(value) for value in json.loads(args.profiles.read_bytes())
             )
-    suite = boundary_suite() if args.boundary else portable_suite()
+        with tempfile.TemporaryDirectory(prefix="vibearr-oci-") as temporary:
+            report = qualify(args.executor_state or Path(temporary), profiles)
+        if args.evidence:
+            args.evidence.write_bytes(canonical(report) + b"\n")
+        print(
+            json.dumps(
+                {
+                    "runtime": "docker-oci-v1",
+                    "qualified": True,
+                    "checks": report["checks"],
+                    "binding": report["binding"],
+                    "native_agent_ready": False,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    suite = portable_suite()
     output = io.StringIO()
     with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
         result = unittest.TextTestRunner(stream=output, verbosity=2).run(suite)
     text = output.getvalue()
     print(text)
-    if args.evidence and args.boundary and result.wasSuccessful():
-        from .release import deployment_binding, deployment_environment
-        from .run_logs import RunLogs
-
-        report = {
-            **deployment_binding(),
-            "environment": deployment_environment(),
-            "command": ["python", "-m", "vibearr_runner.verify", "--boundary"],
-            "exit_code": 0,
-            "tests_run": result.testsRun,
-            "output_digest": hashlib.sha256(text.encode()).hexdigest(),
-        }
-        RunLogs.write(args.evidence, json.dumps(report, sort_keys=True).encode())
     return 0 if result.wasSuccessful() else 1
 
 
