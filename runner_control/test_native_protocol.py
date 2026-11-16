@@ -1174,3 +1174,19 @@ class NativeHTTPTests(NativeProtocolMixin, TestCase):
         newer.refresh_from_db()
         self.assertIsNone(newer.cancellation_requested_at)
         self.assertEqual(newer.active_slot, 1)
+
+    def test_native_status_presentation_redacts_selected_material(self):
+        from .plan_presentation import present_run
+
+        self.run.native_status = {"detail": "backend-native-secret"}
+        self.run.save(update_fields=["native_status"])
+        self.assertEqual(present_run(self.run).native_status["detail"], "[redacted]")
+
+    def test_unavailable_redaction_hides_native_status_as_empty_mapping(self):
+        from .plan_presentation import present_run
+
+        self.run.native_status = {"detail": "Untrusted historical status"}
+        type(self.backend).objects.filter(pk=self.backend.pk).update(
+            encrypted_payload="invalid-payload"
+        )
+        self.assertEqual(present_run(self.run).native_status, {})
