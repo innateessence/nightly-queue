@@ -320,14 +320,14 @@ class NativeProcessAdapter:
     def reconcile(self, session: NativeSession) -> dict:
         return self.inspect(session)
 
-    def read_events(self, session: NativeSession):
+    def read_events(self, session: NativeSession, *, final=False):
         operation = self.bound(session)
         content = bytearray()
         while len(content) <= MAX_OUTPUT:
             chunk = self.client.logs(operation, len(content), 65536)
             if not chunk:
                 parser = self.events_factory()
-                parser.feed(bytes(content), final=True)
+                parser.feed(bytes(content), final=final)
                 self.validate_events(parser, session)
                 return parser, bytes(content)
             content.extend(chunk)
@@ -353,7 +353,7 @@ class NativeProcessAdapter:
                 "Native outcome is still active or uncertain; reconcile the same operation."
             )
         result = state.get("result", {})
-        parser, logs = self.read_events(session)
+        parser, logs = self.read_events(session, final=True)
         success = (
             type(result.get("exit_code")) is int
             and result["exit_code"] == 0
