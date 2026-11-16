@@ -60,7 +60,7 @@ class Lifecycle:
             allowed = engine.ready(configuration, state)
             self.claim_project_ids = engine.ready_projects
             return allowed
-        except (OSError, ValueError) as exc:
+        except (ImportError, OSError, ValueError) as exc:
             state["native_readiness_error"] = str(exc)[:500]
             self.journal.save(state)
             return False
@@ -150,7 +150,13 @@ class Lifecycle:
             run["run"].get("configuration_snapshot", {}).get("execution_kind")
             == "native"
         ):
-            return self.native_engine().step(state)
+            try:
+                engine = self.native_engine()
+            except (ImportError, OSError, ValueError):
+                raise ReconciliationRequired(
+                    "Native task dispatch requires configured isolated executor and validation profiles."
+                ) from None
+            return engine.step(state)
         if run["run"].get("cancellation_requested_at"):
             return self.cancel(state)
         delivery = state.get("delivery") or {}

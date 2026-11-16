@@ -3,7 +3,7 @@
   <h2>{{ context.document.source.title }}</h2>
   <p>{{ context.reason }} · Captured {{ context.document.fetched_at }}</p>
   <p>{{ context.document.repository.repository }} · <code>{{ context.document.repository.branch }}</code> · Base <code>{{ context.document.repository.base_revision }}</code></p>
-  <pre>{{ context.document.source.instructions }}</pre>
+  <pre>{% if context.document.source.body %}{{ context.document.source.body }}{% else %}{{ context.document.source.instructions }}{% endif %}</pre>
   {% if context.document.source.issue %}<p><a href="{{ context.document.source.issue.url }}" rel="noreferrer">Original issue</a> · {{ context.document.source.issue.author }}</p>{% endif %}
   <details><summary>Frozen discussion ({{ context.document.source.comments|length }} comments)</summary>
     {% for comment in context.document.source.comments %}<h3>{{ comment.author }}</h3><p>{{ comment.created_at }}</p><pre>{{ comment.body }}</pre>{% empty %}<p>No saved comments.</p>{% endfor %}

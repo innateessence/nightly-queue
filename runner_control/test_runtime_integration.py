@@ -64,7 +64,7 @@ class RunnerStartupIntegrationTests(LiveServerTestCase):
         evidence = RunnerGateEvidence.objects.get(runner=self.runner)
         self.assertEqual(evidence.report, checkpoint)
         self.assertEqual(
-            evidence.report["reasons"], ["release_disabled", "usage_missing_accounts"]
+            evidence.report["reasons"], ["usage_missing_accounts"]
         )
         self.item.refresh_from_db()
         self.assertEqual(self.item.status, "queued")

@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import importlib.util
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -107,6 +108,10 @@ class Queue:
         }
 
 
+@unittest.skipUnless(
+    importlib.util.find_spec("vibearr_executor") is not None,
+    "Install the native-runtime extra for native preflight tests",
+)
 class NativePreflightTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()

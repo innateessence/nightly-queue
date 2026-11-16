@@ -3,6 +3,7 @@ from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import tempfile
@@ -12,10 +13,6 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from vibearr_executor import PROTOCOL_VERSION, QUALIFICATION_VERSION
-from vibearr_executor.artifacts import pack, unpack, result_manifest
-from vibearr_executor.contracts import canonical, digest
-from vibearr_executor.validation_profile import ValidationProfile
 from vibearr_runner.context import manual_context
 from vibearr_runner.journal import Journal
 from vibearr_runner.native_codex import codex_profile
@@ -23,6 +20,13 @@ from vibearr_runner.native_lifecycle import NativeLifecycle
 from vibearr_runner.policy import ExecutionPolicy
 from vibearr_runner.recovery import ReconciliationRequired
 from vibearr_runner.workspaces import Workspace, git
+
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor import PROTOCOL_VERSION, QUALIFICATION_VERSION
+    from vibearr_executor.artifacts import pack, unpack, result_manifest
+    from vibearr_executor.contracts import canonical, digest
+    from vibearr_executor.validation_profile import ValidationProfile
 
 
 class Executor:
@@ -215,6 +219,9 @@ class Queue:
         return {}
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native lifecycle tests"
+)
 class NativeLifecycleTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()

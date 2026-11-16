@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from coding_runner.test_native_delivery import GitHub, Transport
-from coding_runner.test_native_lifecycle import NativeLifecycleTests
+from coding_runner import test_native_lifecycle as lifecycle_fixture
 from credentials.test_models import TEST_KEY
 from vibearr_runner.client import APIError, ConflictError, NotFoundError
 from vibearr_runner.native_delivery import NativeDelivery
@@ -42,7 +42,7 @@ class NativeSupervisionTests(NativeProtocolMixin, TestCase):
     def setUp(self):
         super().setUp()
         self.supervision_run_id = str(self.run.pk)
-        NativeLifecycleTests.setUp(self)
+        lifecycle_fixture.NativeLifecycleTests.setUp(self)
         branch = self.item.branch_name
         git(["branch", "-m", branch], self.workspace.checkout)
         self.workspace = replace(

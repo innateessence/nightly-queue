@@ -1,10 +1,10 @@
 from pathlib import Path
+import importlib.util
 import tempfile
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from vibearr_executor.artifacts import pack, result_manifest, snapshot
 from vibearr_runner.journal import Journal
 from vibearr_runner.native_workspace import (
     NoChange,
@@ -14,7 +14,14 @@ from vibearr_runner.native_workspace import (
 )
 from vibearr_runner.workspaces import WorkspaceError, WorkspaceManager, git
 
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor.artifacts import pack, result_manifest, snapshot
 
+
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native workspace tests"
+)
 class NativeWorkspaceTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
