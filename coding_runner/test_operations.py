@@ -188,6 +188,33 @@ class ControlledReleaseTests(unittest.TestCase):
         with self.assertRaises(InvalidResponse):
             harness.authorization()
 
+    def test_candidate_readiness_requires_real_probe_inside_exact_active_scope(self):
+        from .codex_backend import CAPABILITIES
+
+        harness = ControlledRelease(Mock(), Mock(), str(uuid4()), binding=lambda: {})
+        harness.authorization = lambda: {
+            "repository_url": "https://github.com/example/test"
+        }
+        account = {"backend": "codex", "credential_id": 1, "model": "fixture-model"}
+        effective = {"research_" + key: value for key, value in account.items()}
+        state = {
+            "run": {
+                "item": {"repository_url": "https://github.com/example/test"},
+                "run": {
+                    "state": "active",
+                    "configuration_snapshot": {"effective": effective},
+                },
+            }
+        }
+        probe = Mock(return_value="fixture-model")
+        readiness = harness.candidate_readiness(state, account, CAPABILITIES, probe)
+        self.assertTrue(readiness.authenticated)
+        probe.assert_called_once()
+        state["run"]["run"]["state"] = "completed"
+        with self.assertRaises(InvalidResponse):
+            harness.candidate_readiness(state, account, CAPABILITIES, probe)
+        self.assertEqual(probe.call_count, 1)
+
     def test_wrong_repository_cannot_enter_lifecycle(self):
         client = Mock()
         client.request.return_value = {

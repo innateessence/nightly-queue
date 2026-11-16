@@ -184,6 +184,28 @@ class ControlledRelease:
             raise InvalidResponse(
                 "Controlled authentication probe is outside the authorized owned run."
             )
+        if run.get("run", {}).get("state") != "active":
+            raise InvalidResponse(
+                "Controlled authentication requires an active owned test run."
+            )
+        effective = (
+            run.get("run", {}).get("configuration_snapshot", {}).get("effective", {})
+        )
+        matching = any(
+            all(
+                account.get(key) == effective.get(f"{stage}_{key}")
+                for key in ("backend", "credential_id", "model")
+            )
+            for stage in ("research", "implementation")
+        )
+        if (
+            not matching
+            or capabilities.native_tools
+            or capabilities.transport != "structured_proposals"
+        ):
+            raise InvalidResponse(
+                "Controlled authentication is outside the selected stage or mediated transport."
+            )
         model = account.get("model")
         if not isinstance(model, str) or not model or probe() != model:
             raise InvalidResponse(
@@ -271,7 +293,8 @@ class ControlledRelease:
         ).acknowledge(
             state, remote["id"], run["item"]["claim_token"], remote["finish_digest"]
         )
-        GateEvaluator(self.journal).complete_run(state, remote["id"])
+        if state.get("gates", {}).get("owned_run_id") == remote["id"]:
+            GateEvaluator(self.journal).complete_run(state, remote["id"])
         for field in (
             "run",
             "context",
