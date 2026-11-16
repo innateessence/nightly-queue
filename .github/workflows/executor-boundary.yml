@@ -66,4 +66,6 @@ jobs:
           root = Path(os.environ["RUNNER_TEMP"]) / "executor-state"
           for path in root.rglob("server.log"):
               print(path.name, path.read_text()[-12000:])
+          for path in root.rglob("last-failure.json"):
+              print(path.name, path.read_text()[-12000:])
           PY
