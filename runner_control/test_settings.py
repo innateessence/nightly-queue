@@ -182,7 +182,7 @@ class RunnerSettingsTests(TestCase):
         self.assertEqual(APISettings.objects.get(pk=1).auto_sync_interval_hours, 12)
 
 
-class EffectiveConfigurationTests(TestCase):
+class ConfiguredProjectTestCase(TestCase):
     def setUp(self):
         self.project = Project.objects.create(
             name="Configured", repository_url="https://github.com/example/configured"
@@ -213,6 +213,8 @@ class EffectiveConfigurationTests(TestCase):
         saved.validation_commands = ["python -m unittest"]
         saved.save()
 
+
+class EffectiveConfigurationTests(ConfiguredProjectTestCase):
     def test_snapshot_preserves_task_settings_after_edits(self):
         with transaction.atomic():
             revision, snapshot = locked_configuration_snapshot(
