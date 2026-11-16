@@ -352,6 +352,31 @@ class MergeProviderTests(unittest.TestCase):
         with self.assertRaises(DeliveryError):
             self.provider.checks(workspace(), 9, profile())
 
+    def test_old_cancelled_suite_never_replaces_latest_success(self):
+        old = deepcopy(self.provider.check)
+        old.update(id=29, conclusion="cancelled", check_suite={"id": 9})
+        self.provider.checks_extra = [old]
+        result = self.provider.checks(workspace(), 9, profile())
+        self.assertEqual([value["check_id"] for value in result], [30])
+        self.assertEqual(
+            result[0]["suite_id"], self.provider.workflow["check_suite_id"]
+        )
+
+    def test_old_cancelled_suite_does_not_hide_latest_pending_check(self):
+        old = deepcopy(self.provider.check)
+        old.update(id=29, conclusion="cancelled", check_suite={"id": 9})
+        self.provider.checks_extra = [old]
+        self.provider.check["status"] = "in_progress"
+        self.provider.check["conclusion"] = None
+        with self.assertRaises(MergeWait):
+            self.provider.checks(workspace(), 9, profile())
+
+    def test_duplicate_current_suite_is_rejected_with_same_app(self):
+        self.provider.checks_extra = [deepcopy(self.provider.check)]
+        self.provider.checks_extra[0]["id"] = 31
+        with self.assertRaises(DeliveryError):
+            self.provider.checks(workspace(), 9, profile())
+
     def test_pending_check_waits(self):
         self.provider.check["status"] = "in_progress"
         with self.assertRaises(MergeWait):

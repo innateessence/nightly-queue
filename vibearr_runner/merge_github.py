@@ -255,14 +255,10 @@ class MergeGitHub(NativeGitHub):
             ]
             if not matches:
                 raise MergeWait("Required remote check is missing.")
-            if len(matches) != 1:
-                raise DeliveryError(
-                    "Required check name has duplicate or forged producers."
-                )
-            check = matches[0]
-            if (
-                check.get("head_sha") != head
-                or check.get("app", {}).get("id") != configured["app_id"]
+            if any(
+                value.get("head_sha") != head
+                or value.get("app", {}).get("id") != configured["app_id"]
+                for value in matches
             ):
                 raise DeliveryError("Remote check has the wrong head or producer.")
             workflow_runs = self.pages(
@@ -272,10 +268,20 @@ class MergeGitHub(NativeGitHub):
             if not workflow_runs:
                 raise MergeWait("Trusted workflow has no exact-head run.")
             latest = max(workflow_runs, key=lambda value: value.get("id", 0))
-            suite = check.get("check_suite", {}).get("id")
-            if latest.get("check_suite_id") != suite:
-                raise MergeWait("A newer workflow run supersedes this check.")
+            suite = latest.get("check_suite_id")
             self.workflow_binding(latest, configured, workspace, pull_number)
+            current = [
+                value
+                for value in matches
+                if value.get("check_suite", {}).get("id") == suite
+            ]
+            if not current:
+                raise MergeWait("A newer workflow run supersedes this check.")
+            if len(current) != 1:
+                raise DeliveryError(
+                    "Required current-suite check has duplicate or forged producers."
+                )
+            check = current[0]
             jobs = self.pages(
                 f"/repos/{repository}/actions/runs/{latest['id']}/attempts/{latest['run_attempt']}/jobs",
                 "jobs",
