@@ -29,7 +29,7 @@ policy is invalid. The settings form accepts JSON. The default is:
 }
 ```
 
-`coding_runner.policy.ExecutionPolicy.from_data` validates the complete exact
+`vibearr_runner.policy.ExecutionPolicy.from_data` validates the complete exact
 schema. Unknown capabilities, versions, host paths, URLs/wildcard/private DNS
 hosts, and out-of-range limits are rejected. Resource limits require integers;
 booleans are not numeric limits. Runtime and validation profiles are registered
@@ -58,7 +58,7 @@ qualification, and executor checks are also required at dispatch.
 
 ## Native delivery contract
 
-`coding_runner.native_evidence.validate_native_evidence` defines the version 2
+`vibearr_runner.native_evidence.validate_native_evidence` defines the version 2
 receipt shape without requiring a human approval, action proposal, or separate
 research-plan handoff. The configuration API publishes its required root fields.
 The receipt binds run/operation/runner IDs, configuration and policy digests,

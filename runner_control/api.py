@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.views.decorators.debug import sensitive_variables
 
-from nightly_queue.api import read_body, string_field
+from vibearr_app.api import read_body, string_field
 from work_queue.api import item_data
 
 from .auth import runner_api_view
@@ -45,6 +45,7 @@ def run_data(run):
         "wait_reason": run.wait_reason,
         "configuration_revision": run.configuration_revision,
         "configuration_snapshot": run.configuration_snapshot,
+        "source_snapshot": run.source_snapshot,
         "context_reference": run.context_reference,
         "plan_reference": run.plan_reference,
         "created_at": run.created_at.isoformat(),

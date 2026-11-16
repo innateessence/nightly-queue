@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from credentials.models import APISettings, Credential
 from credentials.test_models import TEST_KEY
-from nightly_queue.celery import app
+from vibearr_app.celery import app
 from projects.models import Project
 
 from .github import GitHubAPIError, NoRedirect, repository_issues
@@ -411,6 +411,25 @@ class AutoImportTests(TestCase):
             import_auto_issues()
         self.assertEqual(claim_next().base_branch, "release")
 
+    @patch("work_queue.tasks.repository_issues")
+    def test_oversized_foreign_dependency_does_not_abort_later_projects(self, fetch):
+        other = Project.objects.create(
+            name="Second",
+            repository_url="https://github.com/example/second",
+            autonomous=True,
+        )
+        hostile = issue(body="Depends on: #" + "9" * 5000, author_id=1337)
+        fetch.side_effect = [[hostile], [issue(2)]]
+        result = import_auto_issues()
+        self.assertEqual(result["projects"], 2)
+        self.assertEqual(result["failed"], 0)
+        self.assertIn(
+            "too large", QueueItem.objects.get(project=self.project).selection_error
+        )
+        self.assertTrue(
+            QueueItem.objects.filter(project=other, issue_number=2).exists()
+        )
+
 
 class ConditionalImportTests(TestCase):
     @patch("work_queue.github.github_read")
@@ -437,3 +456,13 @@ class ConditionalImportTests(TestCase):
         now = timezone.now()
         retry = retry_time({"Retry-After": "300"})
         self.assertGreaterEqual(retry, now + timedelta(seconds=300))
+
+    def test_extreme_rate_limit_headers_do_not_overflow(self):
+        from .github import retry_time
+
+        now = timezone.now()
+        deadline = retry_time(
+            {"Retry-After": "9" * 19, "X-RateLimit-Reset": "-" + "9" * 19}
+        )
+        self.assertGreaterEqual(deadline, now + timedelta(seconds=60))
+        self.assertLessEqual(deadline, timezone.now() + timedelta(days=1))

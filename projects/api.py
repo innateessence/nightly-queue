@@ -1,6 +1,6 @@
 from django.http import JsonResponse
 
-from nightly_queue.api import api_view
+from vibearr_app.api import api_view
 
 from .models import Project
 

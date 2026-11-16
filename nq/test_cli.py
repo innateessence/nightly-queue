@@ -84,13 +84,13 @@ class CLITests(TestCase):
         with patch.dict("os.environ", {"NQ_API_TOKEN": ""}):
             status, _, errors = self.run_cli(["projects"])
         self.assertEqual(status, 1)
-        self.assertIn("set NQ_API_TOKEN", errors)
+        self.assertIn("set VIBEARR_API_TOKEN", errors)
 
     def test_invalid_server_url_exits_nonzero(self):
         with patch.dict("os.environ", {"NQ_URL": "file:///tmp/db"}):
             status, _, errors = self.run_cli(["projects"])
         self.assertEqual(status, 1)
-        self.assertIn("NQ_URL must be an HTTP(S) server URL", errors)
+        self.assertIn("VIBEARR_URL must be an HTTP(S) server URL", errors)
 
     @patch("nq.cli.request_api")
     def test_server_validation_error_exits_nonzero(self, request):

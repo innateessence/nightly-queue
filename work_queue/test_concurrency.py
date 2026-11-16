@@ -1,5 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from datetime import timedelta
+
+from django.utils import timezone
 
 from django.db import connection, connections
 from django.test import TransactionTestCase
@@ -294,3 +297,142 @@ class SourceClaimConcurrencyTests(TransactionTestCase):
         )
         requeue_items(QueueItem.objects.filter(pk=self.item.pk))
         self.assertIsNone(claim_next())
+
+    def test_each_run_retains_its_source_and_first_comments_after_retry(self):
+        import uuid
+        from unittest.mock import patch
+        from runner_control.api import run_data
+        from runner_control.configuration import configuration_document
+        from runner_control.services import claim_run
+        from .services import refresh_issue_for_launch, requeue_items
+
+        revision = configuration_document()["revision"]
+        first = claim_run(
+            runner=self.runner, run_id=uuid.uuid4(), configuration_revision=revision
+        )
+        original = source_issue(
+            created_at=self.item.issue_created_at.isoformat(),
+            updated_at=self.item.issue_updated_at.isoformat(),
+        )
+        comments = [{"id": 123, "body": "Original discussion"}]
+        with (
+            patch("work_queue.github.issue_comments", return_value=comments),
+            patch("work_queue.github.read_issue", return_value=original),
+        ):
+            refresh_issue_for_launch(
+                item_id=first.item_id, claim_token=first.item.claim_token, token="test"
+            )
+        first.refresh_from_db()
+        saved = first.source_snapshot
+        self.assertEqual(saved["comments"], comments)
+        with (
+            patch(
+                "work_queue.github.issue_comments",
+                return_value=[{"body": "Later discussion"}],
+            ) as changed_comments,
+            patch("work_queue.github.read_issue", return_value=original),
+        ):
+            refresh_issue_for_launch(
+                item_id=first.item_id, claim_token=first.item.claim_token, token="test"
+            )
+        changed_comments.assert_not_called()
+        first.refresh_from_db()
+        self.assertEqual(first.source_snapshot, saved)
+        changed = {
+            **original,
+            "revision": "b" * 64,
+            "body": "Second attempt instructions",
+            "title": "Second attempt",
+            "updated_at": (timezone.now() + timedelta(seconds=1)).isoformat(),
+        }
+        import_issue(project=self.project, **changed)
+        requeue_items(QueueItem.objects.filter(pk=self.item.pk))
+        second = claim_run(
+            runner=self.runner, run_id=uuid.uuid4(), configuration_revision=revision
+        )
+        first.refresh_from_db()
+        self.assertEqual(first.source_snapshot, saved)
+        self.assertEqual(run_data(first)["source_snapshot"], saved)
+        self.assertEqual(second.source_snapshot["revision"], "b" * 64)
+        self.assertEqual(second.source_snapshot["body"], "Second attempt instructions")
+        self.assertNotIn("comments", second.source_snapshot)
+
+    def test_claim_snapshot_survives_retry_without_successful_refresh(self):
+        import uuid
+        from runner_control.configuration import configuration_document
+        from runner_control.services import claim_run
+        from .services import requeue_items
+
+        first = claim_run(
+            runner=self.runner,
+            run_id=uuid.uuid4(),
+            configuration_revision=configuration_document()["revision"],
+        )
+        saved = first.source_snapshot
+        self.assertEqual(saved["body"], "Acceptance: tests pass")
+        import_issue(
+            project=self.project,
+            **source_issue(body="Later instructions", revision="b" * 64),
+        )
+        requeue_items(QueueItem.objects.filter(pk=self.item.pk))
+        first.refresh_from_db()
+        self.assertEqual(first.source_snapshot, saved)
+
+    def test_delayed_old_provider_reply_cannot_override_newer_sync(self):
+        from threading import Event
+        from unittest.mock import patch
+        from django.core.exceptions import ValidationError
+        from .services import refresh_issue_for_launch
+
+        claimed = claim_next()
+        original = source_issue(
+            created_at=self.item.issue_created_at.isoformat(),
+            updated_at=self.item.issue_updated_at.isoformat(),
+        )
+        fetched = Event()
+        newer_saved = Event()
+
+        def provider(project, number, token):
+            fetched.set()
+            self.assertTrue(newer_saved.wait(5))
+            return original
+
+        def refresh():
+            try:
+                self.bounded_connection()
+                with self.assertRaisesMessage(ValidationError, "changed after claim"):
+                    refresh_issue_for_launch(
+                        item_id=claimed.pk,
+                        claim_token=claimed.claim_token,
+                        token="test",
+                    )
+            finally:
+                connections.close_all()
+
+        def synchronize():
+            try:
+                self.bounded_connection()
+                self.assertTrue(fetched.wait(5))
+                changed = {
+                    **original,
+                    "revision": "b" * 64,
+                    "body": "Newer instructions",
+                    "updated_at": (timezone.now() + timedelta(seconds=1)).isoformat(),
+                }
+                import_issue(project=self.project, **changed)
+                newer_saved.set()
+            finally:
+                connections.close_all()
+
+        with (
+            patch("work_queue.github.issue_comments", return_value=[]),
+            patch("work_queue.github.read_issue", side_effect=provider),
+        ):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                refreshing = pool.submit(refresh)
+                syncing = pool.submit(synchronize)
+                refreshing.result(timeout=10)
+                syncing.result(timeout=10)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.issue_revision, "b" * 64)
+        self.assertEqual(self.item.source_snapshot["revision"], original["revision"])

@@ -30,8 +30,10 @@ def retry_time(headers):
     except (TypeError, ValueError):
         return now + timedelta(minutes=1)
     return max(
-        now + timedelta(seconds=max(60, seconds)),
-        datetime.fromtimestamp(min(reset, 2**32), timezone.utc),
+        now + timedelta(seconds=min(86400, max(60, seconds))),
+        datetime.fromtimestamp(
+            max(0, min(reset, int(now.timestamp()) + 86400)), timezone.utc
+        ),
     )
 
 
@@ -86,7 +88,12 @@ def repository_metadata(repository_url, token, repository_id=None):
             or not all(0 < value < 2**63 for value in (owner, identity))
         ):
             raise ValueError
-        if not isinstance(branch, str) or not branch:
+        if (
+            not isinstance(branch, str)
+            or not branch
+            or len(branch) > 200
+            or len(url) > 500
+        ):
             raise ValueError
     except (KeyError, TypeError, ValueError):
         raise GitHubAPIError("GitHub returned invalid repository metadata.") from None
@@ -168,8 +175,10 @@ def issue_data(issue):
             type(value) is int and 0 < value < 2**63 for value in (identity, author)
         ):
             raise ValueError
-        if not isinstance(login, str) or not all(
-            isinstance(label, str) for label in labels
+        if (
+            not isinstance(login, str)
+            or not 0 < len(login) <= 100
+            or not all(isinstance(label, str) for label in labels)
         ):
             raise ValueError
     except (KeyError, TypeError, ValueError):

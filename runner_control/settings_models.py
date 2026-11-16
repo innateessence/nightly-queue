@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 
-from coding_runner.policy import default_execution_policy
+from vibearr_runner.policy import default_execution_policy
 
 from .validators import (
     BACKENDS,

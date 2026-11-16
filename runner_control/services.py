@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import hashlib
 import json
 import re
@@ -124,6 +126,7 @@ def claim_run(*, runner, run_id, configuration_revision=""):
             active_slot=1,
             configuration_revision=revision,
             configuration_snapshot=snapshot,
+            source_snapshot=deepcopy(item.source_snapshot),
             claim_digest=token_digest(str(item.claim_token)),
         )
 

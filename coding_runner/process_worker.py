@@ -1,18 +1,13 @@
-"""Wait for the supervisor's durable launch record before executing trusted argv."""
+"""Compatibility import for vibearr_runner.process_worker."""
 
-import os
+import importlib
 import sys
 
+from vibearr_runner.process_worker import *  # noqa: F403
 
-def main():
-    descriptor = int(sys.argv[1])
-    ready = os.read(descriptor, 1)
-    os.close(descriptor)
-    if ready != b"1":
-        return 1
-    os.execvpe(sys.argv[2], sys.argv[2:], os.environ)
-    return 1
-
+_module = importlib.import_module("vibearr_runner.process_worker")
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_module.main())
+
+sys.modules[__name__] = _module

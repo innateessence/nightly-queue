@@ -1,25 +1,31 @@
+name: "${COMPOSE_PROJECT_NAME:-nightly-queue}"
+
 x-database-environment: &database-environment
-  POSTGRES_DB: "${POSTGRES_DB:-nightly_queue}"
-  POSTGRES_USER: "${POSTGRES_USER:-nightly_queue}"
-  POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-nightly_queue}"
+  VIBEARR_POSTGRES_DB: "${VIBEARR_POSTGRES_DB-${POSTGRES_DB-nightly_queue}}"
+  POSTGRES_DB: "${POSTGRES_DB-${VIBEARR_POSTGRES_DB-nightly_queue}}"
+  VIBEARR_POSTGRES_USER: "${VIBEARR_POSTGRES_USER-${POSTGRES_USER-nightly_queue}}"
+  POSTGRES_USER: "${POSTGRES_USER-${VIBEARR_POSTGRES_USER-nightly_queue}}"
+  VIBEARR_POSTGRES_PASSWORD: "${VIBEARR_POSTGRES_PASSWORD-${POSTGRES_PASSWORD-nightly_queue}}"
+  POSTGRES_PASSWORD: "${POSTGRES_PASSWORD-${VIBEARR_POSTGRES_PASSWORD-nightly_queue}}"
   POSTGRES_HOST: postgres
   POSTGRES_PORT: "5432"
 
 services:
 
-  nightly-queue:
+  vibearr:
     build:
       context: .
       dockerfile: Dockerfile
-    image: nightly-queue-django
-    container_name: nightly-queue-django
+    image: vibearr-app
     ports:
       - "${PORT:-7777}:8000"
     environment:
       <<: *database-environment
       DJANGO_ALLOWED_HOSTS: "*"
-      NQ_API_TOKEN: "${NQ_API_TOKEN:-}"
-      NQ_CREDENTIAL_KEY: "${NQ_CREDENTIAL_KEY:-}"
+      VIBEARR_API_TOKEN: "${VIBEARR_API_TOKEN-${NQ_API_TOKEN-}}"
+      NQ_API_TOKEN: "${NQ_API_TOKEN-${VIBEARR_API_TOKEN-}}"
+      VIBEARR_CREDENTIAL_KEY: "${VIBEARR_CREDENTIAL_KEY-${NQ_CREDENTIAL_KEY-}}"
+      NQ_CREDENTIAL_KEY: "${NQ_CREDENTIAL_KEY-${VIBEARR_CREDENTIAL_KEY-}}"
       CELERY_BROKER_URL: "redis://valkey:6379/0"
       CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
     depends_on:
@@ -30,16 +36,16 @@ services:
     volumes:
       - ./:/app
     networks:
-      - default
-      - runner-api
+      default:
+      runner-api:
+        aliases: [nightly-queue]
 
   postgres:
     image: postgres:17
-    container_name: nightly-queue-postgres
     environment:
-      POSTGRES_DB: "${POSTGRES_DB:-nightly_queue}"
-      POSTGRES_USER: "${POSTGRES_USER:-nightly_queue}"
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-nightly_queue}"
+      POSTGRES_DB: "${VIBEARR_POSTGRES_DB-${POSTGRES_DB-nightly_queue}}"
+      POSTGRES_USER: "${VIBEARR_POSTGRES_USER-${POSTGRES_USER-nightly_queue}}"
+      POSTGRES_PASSWORD: "${VIBEARR_POSTGRES_PASSWORD-${POSTGRES_PASSWORD-nightly_queue}}"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -50,7 +56,6 @@ services:
 
   valkey:
     image: valkey/valkey:8-alpine
-    container_name: nightly-queue-valkey
     command: ["valkey-server", "--appendonly", "yes"]
     volumes:
       - valkey-data:/data
@@ -64,13 +69,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: nightly-queue-django
-    container_name: nightly-queue-celery
-    command: ["celery", "-A", "nightly_queue", "worker", "--loglevel=INFO", "-n", "worker@%h"]
+    image: vibearr-app
+    command: ["celery", "-A", "vibearr_app", "worker", "--loglevel=INFO", "-n", "worker@%h"]
     environment:
       <<: *database-environment
-      DJANGO_SETTINGS_MODULE: "nightly_queue.settings"
-      NQ_CREDENTIAL_KEY: "${NQ_CREDENTIAL_KEY:-}"
+      DJANGO_SETTINGS_MODULE: "vibearr_app.settings"
+      VIBEARR_CREDENTIAL_KEY: "${VIBEARR_CREDENTIAL_KEY-${NQ_CREDENTIAL_KEY-}}"
+      NQ_CREDENTIAL_KEY: "${NQ_CREDENTIAL_KEY-${VIBEARR_CREDENTIAL_KEY-}}"
       CELERY_BROKER_URL: "redis://valkey:6379/0"
       CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
     depends_on:
@@ -85,12 +90,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: nightly-queue-django
-    container_name: nightly-queue-beat
-    command: ["celery", "-A", "nightly_queue", "beat", "--loglevel=INFO", "--schedule", "/tmp/celerybeat-schedule"]
+    image: vibearr-app
+    command: ["celery", "-A", "vibearr_app", "beat", "--loglevel=INFO", "--schedule", "/tmp/celerybeat-schedule"]
     environment:
       <<: *database-environment
-      DJANGO_SETTINGS_MODULE: "nightly_queue.settings"
+      DJANGO_SETTINGS_MODULE: "vibearr_app.settings"
       DJANGO_DEBUG: "False"
       CELERY_BROKER_URL: "redis://valkey:6379/0"
       CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
@@ -102,17 +106,19 @@ services:
     volumes:
       - ./:/app
 
-  coding-runner:
+  vibearr-runner:
     profiles: ["runner"]
     build:
       context: .
-      dockerfile: coding_runner/Dockerfile
-    image: nightly-queue-coding-runner
+      dockerfile: vibearr_runner/Dockerfile
+    image: vibearr-runner
     environment:
-      NQ_URL: "http://nightly-queue:8000"
-      NQ_RUNNER_API_TOKEN: "${NQ_RUNNER_API_TOKEN:-}"
+      VIBEARR_URL: "${VIBEARR_URL-${NQ_URL-http://vibearr:8000}}"
+      VIBEARR_RUNNER_STATE_DIR: "${VIBEARR_RUNNER_STATE_DIR-${NQ_RUNNER_STATE_DIR-/var/lib/coding-runner}}"
+      VIBEARR_RUNNER_API_TOKEN: "${VIBEARR_RUNNER_API_TOKEN-${NQ_RUNNER_API_TOKEN-}}"
+      NQ_RUNNER_API_TOKEN: "${NQ_RUNNER_API_TOKEN-${VIBEARR_RUNNER_API_TOKEN-}}"
     volumes:
-      - runner-data:/var/lib/coding-runner
+      - runner-data:${VIBEARR_RUNNER_STATE_DIR-${NQ_RUNNER_STATE_DIR-/var/lib/coding-runner}}
     networks:
       - runner-api
       - runner-egress
@@ -130,8 +136,8 @@ services:
     profiles: ["ollama"]
     build:
       context: .
-      dockerfile: coding_runner/Dockerfile.ollama
-    image: nightly-queue-runner-ollama:0.40.16
+      dockerfile: vibearr_runner/Dockerfile.ollama
+    image: vibearr-ollama:0.40.16
     environment:
       OLLAMA_HOST: "0.0.0.0:11434"
       OLLAMA_MODELS: "/models"
@@ -160,6 +166,10 @@ networks:
 
 volumes:
   postgres-data:
+    name: "${VIBEARR_DATA_PROJECT:-${COMPOSE_PROJECT_NAME:-nightly-queue}}_postgres-data"
   valkey-data:
+    name: "${VIBEARR_DATA_PROJECT:-${COMPOSE_PROJECT_NAME:-nightly-queue}}_valkey-data"
   runner-data:
+    name: "${VIBEARR_DATA_PROJECT:-${COMPOSE_PROJECT_NAME:-nightly-queue}}_runner-data"
   runner-ollama-models:
+    name: "${VIBEARR_DATA_PROJECT:-${COMPOSE_PROJECT_NAME:-nightly-queue}}_runner-ollama-models"

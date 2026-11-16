@@ -2,7 +2,7 @@ from django.db import transaction
 from django.http import JsonResponse
 from django.views.decorators.debug import sensitive_variables
 
-from nightly_queue.api import read_body
+from vibearr_app.api import read_body
 from work_queue.github import GitHubAPIError
 from work_queue.services import refresh_issue_for_launch
 

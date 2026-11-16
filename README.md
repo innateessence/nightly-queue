@@ -78,6 +78,9 @@ two dependent issues implemented, tested, and merged automatically, with the sec
 starting from the first change. That is the starting point for building vibearr
 through its own queue.
 
+For existing installations, follow the [vibearr upgrade guide](docs/vibearr-upgrade.md)
+to preserve database, volume, and runner identities while adopting the new names.
+
 ## Run with Docker Compose
 
 You'll need Docker with Compose. The web app uses port **7777** by default.
@@ -92,16 +95,16 @@ docker compose build
 Generate a credential encryption key:
 
 ```sh
-docker compose run --rm --no-deps nightly-queue python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+docker compose run --rm --no-deps vibearr python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 ```
 
 Set these values in `.env` before starting:
 
 | Variable | Purpose |
 | --- | --- |
-| `NQ_API_TOKEN` | A random token for the queue API and `nq` CLI |
-| `POSTGRES_PASSWORD` | The application database password |
-| `NQ_CREDENTIAL_KEY` | The generated key for encrypting saved credentials |
+| `VIBEARR_API_TOKEN` | A random token for the queue API and `vibearr` CLI |
+| `VIBEARR_POSTGRES_PASSWORD` | The application database password |
+| `VIBEARR_CREDENTIAL_KEY` | The generated key for encrypting saved credentials |
 
 Start the app:
 
@@ -115,14 +118,14 @@ token in Settings and enable **Autonomous** on the project to discover its issue
 You can also add tasks directly from the queue.
 
 The web app and issue importer start with the default Compose services. Execution
-runs in a separate `coding-runner` service. Follow the [runner setup and operations
+runs in a separate `vibearr-runner` service. Follow the [runner setup and operations
 guide](docs/runner-operations.md) for its identity, credentials, and deployment
 requirements. Starting the web app alone does not start a coding agent.
 
 For Django admin access, create an account:
 
 ```sh
-docker compose exec nightly-queue python manage.py createsuperuser
+docker compose exec vibearr python manage.py createsuperuser
 ```
 
 This is a single-user app for a private network. The browser UI has no login
@@ -132,21 +135,21 @@ credentials over a network.
 
 ## Submit work from the terminal
 
-`nq` is a small HTTP client with no Django dependency. It needs Python 3.10 or newer.
+`vibearr` is a small HTTP client with no Django dependency. It needs Python 3.10 or newer.
 
 ```sh
 python -m pip install .
-export NQ_URL='http://127.0.0.1:7777'
-export NQ_API_TOKEN='your-queue-api-token'
+export VIBEARR_URL='http://127.0.0.1:7777'
+export VIBEARR_API_TOKEN='your-queue-api-token'
 
-nq projects
-nq add --project 12 "Add CSV export" \
+vibearr projects
+vibearr add --project 12 "Add CSV export" \
   --instructions "Include the active filters and column headings." \
   --priority normal
 ```
 
-Use a project ID from `nq projects`. Successful submissions print the new item ID;
-errors exit nonzero. You can also run it with `python -m nq` from the repository.
+Use a project ID from `vibearr projects`. Successful submissions print the new item ID;
+errors exit nonzero. You can also run it with `python -m vibearr` from the repository.
 
 ## How it fits together
 
@@ -167,9 +170,9 @@ cannot grant new permissions.
 | `projects/` | Repository configuration |
 | `credentials/` | Encrypted secrets and settings views |
 | `runner_control/` | Runner APIs, configuration, run records, and operator views |
-| `coding_runner/` | Independent supervisor, backends, workspaces, recovery, and delivery |
-| `nq/` | Standalone command-line client |
-| `nightly_queue/` | Django and Celery configuration |
+| `vibearr_runner/` | Independent supervisor, backends, workspaces, recovery, and delivery |
+| `vibearr/` | Standalone command-line client |
+| `vibearr_app/` | Django and Celery configuration |
 
 ## Development
 
@@ -184,8 +187,8 @@ Install dependencies for native development:
 python -m pip install -r requirements.txt
 ```
 
-Configure a reachable PostgreSQL server with `POSTGRES_DB`, `POSTGRES_USER`,
-`POSTGRES_PASSWORD`, `POSTGRES_HOST`, and `POSTGRES_PORT`, then run:
+Configure a reachable PostgreSQL server with `VIBEARR_POSTGRES_DB`, `VIBEARR_POSTGRES_USER`,
+`VIBEARR_POSTGRES_PASSWORD`, `VIBEARR_POSTGRES_HOST`, and `VIBEARR_POSTGRES_PORT`, then run:
 
 ```sh
 python manage.py migrate
@@ -193,7 +196,7 @@ python manage.py runserver
 ```
 
 Run checks locally, or prefix application commands with
-`docker compose exec nightly-queue` to use the app container:
+`docker compose exec vibearr` to use the app container:
 
 ```sh
 python manage.py test
@@ -209,8 +212,8 @@ mypy . --config-file mypy.ini
 The independent runner has its own verification entry point:
 
 ```sh
-python -m coding_runner.verify
-python -m coding_runner.verify --boundary
+python -m vibearr_runner.verify
+python -m vibearr_runner.verify --boundary
 ```
 
 Boundary checks must pass on the intended execution host. Portable tests alone
@@ -228,7 +231,7 @@ Back up the database:
 docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > backup.sql
 ```
 
-Keep `.env` and tokens out of Git. Back up `NQ_CREDENTIAL_KEY` separately from the
+Keep `.env` and tokens out of Git. Back up `VIBEARR_CREDENTIAL_KEY` separately from the
 database: losing the key makes saved credentials unreadable. Stop the runner
 before backing up its state, and keep database and runner backups consistent.
 See the [operations guide](docs/runner-operations.md) for recovery and retention,

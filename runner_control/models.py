@@ -55,6 +55,7 @@ class Run(models.Model):
     wait_reason = models.TextField(blank=True)
     configuration_revision = models.CharField(max_length=64, blank=True)
     configuration_snapshot = models.JSONField(default=dict, blank=True)
+    source_snapshot = models.JSONField(default=dict, blank=True, editable=False)
     context_reference = models.CharField(max_length=200, blank=True)
     plan_reference = models.CharField(max_length=200, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

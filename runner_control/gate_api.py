@@ -8,7 +8,7 @@ from django.http import JsonResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from nightly_queue.api import read_body
+from vibearr_app.api import read_body
 
 from .auth import runner_api_view
 from .gate_models import RunnerGateEvidence

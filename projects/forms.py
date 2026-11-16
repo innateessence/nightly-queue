@@ -33,7 +33,7 @@ class ProjectForm(forms.ModelForm):
         }
         widgets = {
             "permitted_author_ids": forms.TextInput(),
-            "name": forms.TextInput(attrs={"placeholder": "e.g. Nightly queue"}),
+            "name": forms.TextInput(attrs={"placeholder": "e.g. vibearr"}),
             "repository_url": forms.URLInput(
                 attrs={"placeholder": "https://github.com/owner/repo"}
             ),

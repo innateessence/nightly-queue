@@ -9,11 +9,11 @@ def credential_cipher():
     key = settings.NQ_CREDENTIAL_KEY
     if not key:
         raise ImproperlyConfigured(
-            "Configure NQ_CREDENTIAL_KEY to store or use credentials."
+            "Configure VIBEARR_CREDENTIAL_KEY to store or use credentials."
         )
     try:
         return Fernet(key.encode("ascii"))
     except (ValueError, UnicodeEncodeError):
         raise ImproperlyConfigured(
-            "NQ_CREDENTIAL_KEY must be a valid Fernet key."
+            "VIBEARR_CREDENTIAL_KEY must be a valid Fernet key."
         ) from None

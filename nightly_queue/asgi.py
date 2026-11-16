@@ -1,16 +1,10 @@
-"""
-ASGI config for the nightly-queue project.
+"""Compatibility import for vibearr_app.asgi."""
 
-It exposes the ASGI callable as a module-level variable named ``application``.
+import importlib
+import sys
 
-For more information on this file, see
-https://docs.djangoproject.com/en/4.1/howto/deployment/asgi/
-"""
+from vibearr_app.asgi import *  # noqa: F403
 
-import os
+_module = importlib.import_module("vibearr_app.asgi")
 
-from django.core.asgi import get_asgi_application
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "nightly_queue.settings")
-
-application = get_asgi_application()
+sys.modules[__name__] = _module

@@ -5,9 +5,9 @@ from uuid import UUID
 
 from django.core.exceptions import ValidationError
 
-from coding_runner.approvals import ActionSpec
-from coding_runner.context import repository_path, digest
-from coding_runner.delivery import DeliveryError, pull_identity
+from vibearr_runner.approvals import ActionSpec
+from vibearr_runner.context import repository_path, digest
+from vibearr_runner.delivery import DeliveryError, pull_identity
 
 from .plan_services import valid_handoff
 from .models import ActionApproval

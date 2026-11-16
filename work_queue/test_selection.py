@@ -278,6 +278,36 @@ class WorkSelectionTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.title, "Issue 1")
 
+    def test_imported_branch_cannot_reserve_manual_fallback_or_block_queue(self):
+        manual = enqueue_item(project=self.project, title="Manual first")
+        self.issue(
+            body=f"Branch: vibearr/manual-{manual.pk}", labels=["vibearr:priority-high"]
+        )
+        later = enqueue_item(project=self.project, title="Manual second")
+        self.assertEqual(claim_next().pk, manual.pk)
+        self.assertEqual(claim_next().pk, later.pk)
+        self.assertIsNone(claim_next())
+
+    def test_stale_provider_reply_cannot_authorize_saved_newer_revision(self):
+        original = source_issue()
+        import_issue(project=self.project, **original)
+        claimed = claim_next()
+        updated = {
+            **original,
+            "revision": "b" * 64,
+            "body": "New instructions",
+            "updated_at": (timezone.now() + timedelta(seconds=1)).isoformat(),
+        }
+        import_issue(project=self.project, **updated)
+        with patch("work_queue.github.read_issue", return_value=original):
+            with self.assertRaisesMessage(ValidationError, "changed after claim"):
+                refresh_issue_for_launch(
+                    item_id=claimed.pk, claim_token=claimed.claim_token, token="test"
+                )
+        claimed.refresh_from_db()
+        self.assertEqual(claimed.issue_revision, "b" * 64)
+        self.assertEqual(claimed.source_snapshot["revision"], original["revision"])
+
 
 class SourceMetadataTests(TestCase):
     def test_incomplete_provider_metadata_is_rejected(self):

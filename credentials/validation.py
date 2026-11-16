@@ -53,7 +53,7 @@ def validate_structured_secret(provider, kind, secret):
         return
     if provider != "opencode" or kind != "connection":
         invalid_material()
-    from coding_runner.opencode_connection import validate_connection
+    from vibearr_runner.opencode_connection import validate_connection
 
     try:
         validate_connection(value)

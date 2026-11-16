@@ -126,3 +126,17 @@ and provider refresh with requeue under bounded statement timeouts.
 
 Additional rendered screens: [project policy](screenshots/github-project-policy.png)
 and [sync settings](screenshots/github-sync-settings.png).
+
+Each `Run.source_snapshot` retains its own claim-time source immediately, even if
+context collection never succeeds. The first successful, claim-fenced comments
+refresh finalizes that run's snapshot once; retries update the queue item's next
+attempt without rewriting previous run history. Run API readback and history titles
+use this durable snapshot. A provider response must match both the frozen source
+and the accepted current database revision; delayed older responses cannot undo
+newer synchronization or authorize stale work.
+
+The generated `vibearr/manual-` branch namespace is reserved for manual tasks.
+Collision checks include both explicit and inferred branches for every source;
+a conflicting imported directive cannot take a manual fallback or starve the
+remaining queue. Oversized dependency numerals become visible selection errors,
+and malformed foreign issue data cannot abort later project imports.

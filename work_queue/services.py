@@ -52,7 +52,10 @@ def issue_directives(body):
                     branch,
                     "Malformed or cross-repository dependencies; use Depends on: #123, #124.",
                 )
-            dependencies = [int(part.strip()[1:]) for part in value.split(",")]
+            numerals = [part.strip()[1:] for part in value.split(",")]
+            if any(len(number) > 19 for number in numerals):
+                return [], branch, "Dependency issue number is too large."
+            dependencies = [int(number) for number in numerals]
             if any(number >= 2**63 for number in dependencies):
                 return [], branch, "Dependency issue number is too large."
         if line.lower().startswith("branch:"):
@@ -69,7 +72,15 @@ def issue_directives(body):
 
 @transaction.atomic
 def import_issue(
-    *, project, number, title, body, state, sync_lock_token=None, **metadata
+    *,
+    project,
+    number,
+    title,
+    body,
+    state,
+    sync_lock_token=None,
+    expected_revision=None,
+    **metadata,
 ):
     project = Project.objects.select_for_update().get(pk=project.pk)
     if sync_lock_token is not None and (
@@ -101,6 +112,10 @@ def import_issue(
             "issue_repository": repository,
         },
     )
+    if expected_revision is not None and item.issue_revision != expected_revision:
+        raise ValidationError(
+            "Issue instructions changed after claim; retry explicitly with refreshed context."
+        )
     upstream_updated = metadata.get("updated_at")
     upstream_updated = (
         parse_datetime(upstream_updated)
@@ -187,9 +202,46 @@ def dependency_wait_reason(item):
     return f"Waiting for verified merge of #{unmet[0]}." if unmet else ""
 
 
+def work_branch(item):
+    if item.branch_name or item.requested_branch:
+        return item.branch_name or item.requested_branch
+    return (
+        f"vibearr/issue-{item.issue_number}"
+        if item.source == QueueItem.Source.GITHUB
+        else f"vibearr/manual-{item.pk}"
+    )
+
+
+def branch_wait_reason(item):
+    branch = work_branch(item)
+    try:
+        validate_branch(branch)
+    except ValidationError:
+        return "Invalid work branch."
+    project = item.project
+    if (
+        branch == (project.base_branch or project.github_default_branch)
+        or branch == "HEAD"
+    ):
+        return "Requested branch is the repository base branch."
+    if item.source == QueueItem.Source.GITHUB and branch.startswith("vibearr/manual-"):
+        return "Requested branch collides with the reserved manual work namespace."
+    others = QueueItem.objects.filter(project=project).exclude(pk=item.pk)
+    for other in others:
+        other_branch = work_branch(other)
+        invalid_manual_branch = (
+            other.source == QueueItem.Source.GITHUB
+            and not other.branch_name
+            and other_branch.startswith("vibearr/manual-")
+        )
+        if not invalid_manual_branch and branch == other_branch:
+            return "Requested branch collides with another work item."
+    return ""
+
+
 def source_wait_reason(item):
     if item.source == QueueItem.Source.MANUAL:
-        return ""
+        return branch_wait_reason(item)
     project = item.project
     if not project.autonomous:
         return "Project autonomous execution is disabled."
@@ -233,19 +285,9 @@ def source_wait_reason(item):
             return "Prior delivery requires reconciliation before another execution."
     if item.selection_error:
         return item.selection_error
-    branch = (
-        item.branch_name
-        or item.requested_branch
-        or f"vibearr/issue-{item.issue_number}"
-    )
-    if (
-        branch == (project.base_branch or project.github_default_branch)
-        or branch == "HEAD"
-    ):
-        return "Requested branch is the repository base branch."
-    collisions = QueueItem.objects.filter(project=project).exclude(pk=item.pk)
-    if collisions.filter(Q(branch_name=branch) | Q(requested_branch=branch)).exists():
-        return "Requested branch collides with another work item."
+    reason = branch_wait_reason(item)
+    if reason:
+        return reason
     return dependency_wait_reason(item)
 
 
@@ -463,7 +505,12 @@ def refresh_issue_for_launch(*, item_id, claim_token, token):
         or fresh["issue_id"] != item.github_issue_id
     ):
         raise GitHubAPIError("Issue identity changed; launch is blocked.")
-    import_issue(project=item.project, repository_id=item.github_repository_id, **fresh)
+    import_issue(
+        project=item.project,
+        repository_id=item.github_repository_id,
+        expected_revision=item.source_snapshot.get("revision"),
+        **fresh,
+    )
     with transaction.atomic():
         Project.objects.select_for_update().get(pk=item.project_id)
         item = (
@@ -478,11 +525,23 @@ def refresh_issue_for_launch(*, item_id, claim_token, token):
         reason = source_wait_reason(item)
         if reason:
             raise ValidationError(reason)
-        if fresh["revision"] != item.source_snapshot.get("revision"):
+        if fresh["revision"] != item.source_snapshot.get(
+            "revision"
+        ) or item.issue_revision != item.source_snapshot.get("revision"):
             raise ValidationError(
                 "Issue instructions changed after claim; retry explicitly with refreshed context."
             )
         if comments is not None and "comments" not in item.source_snapshot:
             item.source_snapshot["comments"] = comments
             item.save(update_fields=["source_snapshot"])
+        from runner_control.auth import token_digest
+        from runner_control.models import Run
+
+        Run.objects.filter(
+            item=item,
+            state=Run.State.ACTIVE,
+            claim_digest=token_digest(str(claim_token)),
+        ).exclude(source_snapshot__has_key="comments").update(
+            source_snapshot=item.source_snapshot
+        )
         return item.source_snapshot

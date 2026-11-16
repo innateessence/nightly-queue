@@ -70,7 +70,11 @@ def present_run(run):
     safe = copy(run)
     fields = ("wait_reason", "error_summary", "result_url", "cancellation_reason")
     payload = [
-        run.item.title if run.item_id else "Empty queue",
+        (
+            (run.source_snapshot.get("title") or run.item.title)
+            if run.item_id
+            else "Empty queue"
+        ),
         *[getattr(run, field) for field in fields],
     ]
     data, error = present_payload(run, payload)

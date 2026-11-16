@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and run the nightly-queue Django app via docker-compose.
+# Build and run the vibearr app via docker-compose.
 # Source code is bind-mounted into the container, so code changes do NOT
 # require an image rebuild - just re-run ./run.sh (or restart the services).
 # Usage:
@@ -44,11 +44,11 @@ if [[ "${ACTION}" == "stop" ]]; then
     exit 0
 fi
 
-if [[ "${REBUILD}" -eq 1 ]] || ! docker image inspect "nightly-queue-django" >/dev/null 2>&1; then
+if [[ "${REBUILD}" -eq 1 ]] || ! docker image inspect "vibearr-app" >/dev/null 2>&1; then
     info "Building image..."
     docker compose -f "$COMPOSE_FILE" build
 else
-    info "Reusing existing image nightly-queue-django (use --build to force rebuild)"
+    info "Reusing existing image vibearr-app (use --build to force rebuild)"
 fi
 
 info "Starting container..."
@@ -58,5 +58,5 @@ echo "    app:      http://127.0.0.1:${PORT:-7777}/"
 echo "    admin:    http://127.0.0.1:${PORT:-7777}/admin/"
 echo
 echo "    logs:     docker compose -f ${COMPOSE_FILE} logs -f"
-echo "    shell:    docker compose -f ${COMPOSE_FILE} exec nightly-queue sh"
+echo "    shell:    docker compose -f ${COMPOSE_FILE} exec vibearr sh"
 echo "    stop:     ./run.sh --stop"
