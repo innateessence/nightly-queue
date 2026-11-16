@@ -210,3 +210,65 @@ class PlanContractTests(unittest.TestCase):
                 register_context_sources(first, store),
                 register_context_sources(second, store),
             )
+
+    def test_handoff_retry_recovers_original_operation_without_another_refresh(self):
+        operation = str(uuid4())
+        response = {
+            "plan": self.plan,
+            "context": self.context,
+            "actions_require_approval": True,
+        }
+        client = Mock()
+        client.request.return_value = response
+        issue_client = Mock()
+        store = ContextPlanStore(client, str(uuid4()), str(uuid4()), Mock())
+        self.assertEqual(
+            store.handoff(
+                {**ITEM, "source": "manual"},
+                BASE,
+                issue_client=issue_client,
+                operation_id=operation,
+            ),
+            response,
+        )
+        issue_client.fetch.assert_not_called()
+        self.assertEqual(
+            client.request.call_args.args,
+            ("GET", f"/api/v1/runner/runs/{store.run_id}/handoff/{operation}/"),
+        )
+
+    def test_new_handoff_operation_refreshes_before_posting(self):
+        from .client import NotFoundError
+
+        operation = str(uuid4())
+        response = {"plan": self.plan, "context": self.context}
+        client = Mock()
+        client.request.side_effect = [
+            NotFoundError(),
+            {"context": self.context},
+            response,
+        ]
+        store = ContextPlanStore(client, str(uuid4()), str(uuid4()), Mock())
+        self.assertEqual(
+            store.handoff({**ITEM, "source": "manual"}, BASE, operation_id=operation),
+            response,
+        )
+        self.assertEqual(
+            [call.args[0] for call in client.request.call_args_list],
+            ["GET", "POST", "POST"],
+        )
+
+    def test_issue_title_change_invalidates_original_issue_provenance(self):
+        from .context import GitHubContextClient
+        from .test_context import issue
+        from unittest.mock import patch
+
+        reader = GitHubContextClient("selected-token")
+        with patch.object(reader, "_get", side_effect=[(issue(), ""), ([], "")]):
+            original = reader.fetch(ITEM)
+        changed = {**original, "title": "Run a different command"}
+        with tempfile.TemporaryDirectory() as directory:
+            store = SourceStore(Path(directory) / "sources")
+            first = register_context_sources(original, store)[0]
+            second = register_context_sources(changed, SourceStore(store.directory))[0]
+            self.assertNotEqual(first["digest"], second["digest"])

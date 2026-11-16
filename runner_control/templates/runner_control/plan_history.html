@@ -5,4 +5,5 @@
 <section class="queue-items">
 {% for run in runs %}<article class="panel queue-item"><p class="eyebrow">{{ run.get_state_display }} · {{ run.get_stage_display }}</p><h2><a href="{% url 'runner_plan_detail' run.pk %}">{{ run.item.title|default:"Empty queue" }}</a></h2><p>{{ run.created_at }} · {{ run.pk }}</p>{% if run.wait_reason %}<p>{{ run.wait_reason }}</p>{% endif %}</article>{% empty %}<article class="panel queue-item"><h2>No saved runs yet.</h2><p>Context snapshots and plans appear here after an authorized runner saves them.</p></article>{% endfor %}
 </section>
+<nav aria-label="Run pages">{% if runs.has_previous %}<a href="?page={{ runs.previous_page_number }}">Newer runs</a>{% endif %} <span>Page {{ runs.number }} of {{ runs.paginator.num_pages }}</span> {% if runs.has_next %}<a href="?page={{ runs.next_page_number }}">Older runs</a>{% endif %}</nav>
 {% endblock %}

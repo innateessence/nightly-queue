@@ -43,6 +43,7 @@ returns its original record without changing the current references.
 | `POST plans/` | `claim_token`, `operation_id`, `document`, `reason`; returns `plan` |
 | `GET contexts/`, `GET plans/` | Ten metadata records per page, `has_more`, `next_after`; next request uses `?after=<sequence or version>` |
 | `GET contexts/<document UUID>/`, `GET plans/<document UUID>/` | An owned immutable document and metadata |
+| `GET handoff/<operation UUID>/` | Recover an owned committed handoff after a lost response; unknown operations return 404 |
 | `POST handoff/` | `claim_token`, `operation_id`, `context_id`, `base_commit`; returns saved `plan`, fresh `context`, and `actions_require_approval: true` |
 
 Each saved context has a UUID, sequence, operation ID, document digest,
@@ -77,8 +78,10 @@ writes are bounded to 4 MiB; plans to 256 KiB. Configure the runtime HTTP
 `Client(..., max_bytes=8388608)` for full bounded context documents and wrappers.
 List APIs exclude document bodies so ordinary metadata reads stay small.
 
-Claim tokens, the current bearer credential, and sensitive JSON keys are redacted
-before display persistence. Backend credentials are never fetched by these APIs.
+Documents containing claim tokens, the current bearer credential, or sensitive
+JSON keys are rejected before persistence, preserving actual context and source
+digests. Other request metadata is redacted. Backend credentials are never fetched
+by these APIs.
 Operator pages escape issue/comment/research text and do not render it as HTML.
 The existing private-LAN UI access model is unchanged.
 
@@ -99,16 +102,23 @@ original supervisor-fetched canonical bytes. Research consumes these references;
 it must not overwrite them by registering redacted server readbacks. Repository
 and external research sources must similarly be read and registered by the
 supervisor. The private source registry retains membership across restarts and
-invalidates removed discussion sources. Unchanged manual fetch timestamps do not
+invalidates removed discussion sources. The issue source includes its current
+title as well as its body and identity. Unchanged manual fetch timestamps do not
 change provenance. Actual execution rechecks source, workspace, and base through
 `ApprovedExecutor`, and consumes a separate single-use human permit.
 
 A handoff requires the latest saved plan and complete context, no unresolved
 blockers, unchanged discussion and base/resolved branch, and a complete refresh
-saved after the plan and within five minutes. Any material discussion or base
+fetched and saved after the plan and within five minutes. Fetch timestamps more
+than 30 seconds in the future are rejected at handoff. Any material discussion or base
 change requires an explicitly saved new plan version with an assessment reason.
 The runtime does not infer semantic equivalence from text changes. Unchanged
 refreshes retain the existing plan. Failed refreshes block handoff.
+
+Pass a stable `operation_id` to `handoff` and retain it across uncertain responses.
+The store first reconciles that operation without writing another context. A
+committed operation returns its original immutable response; it does not renew
+freshness or supersede newer evidence. Start a new operation for a new handoff.
 
 Runner-owned progress into implementation, validation, and delivery requires a
 verified saved-plan handoff; generic queue clients retain their existing API.
@@ -123,6 +133,10 @@ versions, stale/foreign claims, idempotent writes after refresh, discussion/base
 changes, blockers, source digests/removal, and pre-implementation enforcement.
 Tests use fake issue responses and local supervisor source stores; no model or
 live issue/queue mutation is required.
+
+Operator history pages retain access to older runs with pagination. Detail pages
+show one plan and one complete context per page, with independent version cursors,
+so document history does not accumulate into an unbounded response.
 
 The [context and plan screenshot](screenshots/runner-context-plan.png) and
 [mobile screenshot](screenshots/runner-context-plan-mobile.png) show the actual

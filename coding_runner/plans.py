@@ -239,7 +239,13 @@ def register_context_sources(
             )
         ]
     else:
-        entries = [("issue", context["issue"]["url"], context["issue"])]
+        entries = [
+            (
+                "issue",
+                context["issue"]["url"],
+                {**context["issue"], "title": context["title"]},
+            )
+        ]
         entries.extend(
             ("comment", comment["url"], comment) for comment in context["comments"]
         )

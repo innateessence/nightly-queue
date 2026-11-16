@@ -15,6 +15,11 @@ urlpatterns = [
     ),
     path("runs/<uuid:run_id>/contexts/", plan_api.contexts, name="runner_contexts"),
     path("runs/<uuid:run_id>/plans/", plan_api.plans, name="runner_plans"),
+    path(
+        "runs/<uuid:run_id>/handoff/<uuid:operation_id>/",
+        plan_api.handoff_detail,
+        name="runner_handoff_detail",
+    ),
     path("runs/<uuid:run_id>/handoff/", plan_api.handoff, name="runner_handoff"),
     path("secrets/", secrets.selected_secret, name="runner_selected_secret"),
     path("gates/", gate_api.gates, name="runner_gates"),

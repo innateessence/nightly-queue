@@ -229,9 +229,11 @@ def progress(request, run_id):
 def artifact(request, run_id):
     data = bounded_data(request, ["operation_id", "claim_token", "kind", "data"])
     kind = string_field(data, "kind", max_length=80)
-    if not kind or kind == "progress":
+    if not kind or kind in {"progress", "plan_handoff"}:
         raise ValidationError(
-            {"kind": "Choose a nonempty artifact kind other than progress."}
+            {
+                "kind": "Choose a nonempty artifact kind other than progress or plan_handoff."
+            }
         )
     return write_evidence(request, run_id, data, kind, data.get("data", {}))
 

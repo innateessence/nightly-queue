@@ -1,3 +1,5 @@
+import json
+
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
@@ -45,9 +47,19 @@ def document_body(request, fields, limit):
         raise ValidationError({"body": "Document exceeds size limit."})
     try:
         data = read_body(request, fields)
+        try:
+            json.dumps(data, allow_nan=False)
+        except ValueError:
+            raise ValidationError({"body": "Send finite JSON values."}) from None
         token = uuid_field(data, "claim_token")
         bearer = request.headers.get("Authorization", "").split()[-1]
         safe = redact_payload(data, [str(token), token.hex, bearer])
+        if "document" in data and safe["document"] != data["document"]:
+            raise ValidationError(
+                {
+                    "document": "Saved documents must not contain credentials or secret fields."
+                }
+            )
     except RecursionError:
         raise ValidationError({"body": "Reduce JSON nesting."}) from None
     safe["claim_token"] = token
@@ -164,6 +176,24 @@ def plans(request, run_id):
     )
 
 
+def handoff_data(plan, context):
+    return {
+        "plan": document_data(plan),
+        "context": document_data(context),
+        "actions_require_approval": True,
+    }
+
+
+@runner_api_view("GET")
+def handoff_detail(request, run_id, operation_id):
+    def operation():
+        run = owned_run(request.runner_identity, run_id)
+        plan, context = plan_services.saved_handoff(run, operation_id)
+        return JsonResponse(handoff_data(plan, context))
+
+    return run_response(operation)
+
+
 @runner_api_view("POST")
 def handoff(request, run_id):
     data = document_body(
@@ -182,12 +212,6 @@ def handoff(request, run_id):
 
     def operation():
         plan, context = plan_services.handoff(**kwargs)
-        return JsonResponse(
-            {
-                "plan": document_data(plan),
-                "context": document_data(context),
-                "actions_require_approval": True,
-            }
-        )
+        return JsonResponse(handoff_data(plan, context))
 
     return run_response(operation)

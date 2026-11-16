@@ -184,3 +184,14 @@ class GitHubContextTests(unittest.TestCase):
         result["comments"][0]["updated_at"] = "yesterday"
         with self.assertRaises(ContextError):
             validate_context(result, ITEM)
+
+    def test_deeply_nested_response_fails_as_unreadable_context(self):
+        response = Response({})
+        response.seek(0)
+        response.write(b"[" * 10000 + b"0" + b"]" * 10000)
+        response.seek(0)
+        opener = unittest.mock.Mock()
+        opener.open.return_value = response
+        self.client.opener = opener
+        with self.assertRaises(ContextError):
+            self.client._get("https://api.github.com/repos/original/issues/issues/7")

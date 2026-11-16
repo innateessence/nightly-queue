@@ -126,7 +126,14 @@ class GitHubContextClient:
                     if not chunk:
                         break
                 return json.loads(raw), response.headers.get("Link", "")
-        except (HTTPError, URLError, OSError, HTTPException, ValueError):
+        except (
+            HTTPError,
+            URLError,
+            OSError,
+            HTTPException,
+            ValueError,
+            RecursionError,
+        ):
             raise ContextError("Complete issue discussion could not be read.") from None
 
     def fetch(self, item: dict[str, Any]) -> dict[str, Any]:

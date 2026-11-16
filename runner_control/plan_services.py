@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -11,6 +11,7 @@ from work_queue.api import item_data
 from .models import ContextSnapshot, PlanVersion
 from .services import (
     RunConflict,
+    RunNotFound,
     append_evidence,
     lock_controller,
     owned_run,
@@ -182,9 +183,17 @@ def valid_handoff(run, *, require_refresh=True):
         raise RunConflict(
             "Discussion or base changed; save a revised plan with an assessment reason."
         )
-    cutoff = timezone.now() - timedelta(minutes=5)
+    now = timezone.now()
+    cutoff = now - timedelta(minutes=5)
+    fetched_at = datetime.fromisoformat(
+        current.document["fetched_at"].replace("Z", "+00:00")
+    )
     if require_refresh and (
-        current.created_at < plan.created_at or current.created_at < cutoff
+        current.created_at < plan.created_at
+        or current.created_at < cutoff
+        or fetched_at < plan.created_at
+        or fetched_at < cutoff
+        or fetched_at > now + timedelta(seconds=30)
     ):
         raise RunConflict(
             "Refresh complete discussion and inspect the base before handoff."
@@ -192,9 +201,41 @@ def valid_handoff(run, *, require_refresh=True):
     return plan, current
 
 
+def saved_handoff(run, operation_id):
+    evidence = run.evidence.filter(operation_id=operation_id).first()
+    if evidence is None:
+        raise RunNotFound
+    if evidence.kind != "plan_handoff":
+        raise RunConflict("This operation ID already has different evidence.")
+    try:
+        plan = run.plans.get(pk=evidence.payload["plan_id"])
+        context = run.contexts.get(pk=evidence.payload["context_id"])
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        PlanVersion.DoesNotExist,
+        ContextSnapshot.DoesNotExist,
+    ):
+        raise RunConflict(
+            "Handoff evidence does not reference saved documents."
+        ) from None
+    return plan, context
+
+
 @transaction.atomic
 def handoff(*, runner, run_id, claim_token, operation_id, context_id, base_commit):
     run = locked_run(runner, run_id, claim_token)
+    if run.evidence.filter(operation_id=operation_id).exists():
+        plan, current = saved_handoff(run, operation_id)
+        if (
+            str(current.pk) != str(context_id)
+            or current.inspected_base_commit != base_commit
+        ):
+            raise RunConflict(
+                "This handoff operation ID already has different content."
+            )
+        return plan, current
     plan, current = valid_handoff(run)
     if (
         str(current.pk) != str(context_id)

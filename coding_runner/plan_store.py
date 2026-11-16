@@ -1,6 +1,7 @@
 from typing import Any
 from uuid import UUID, uuid4
 
+from .client import NotFoundError
 from .context import GitHubContextClient, digest, manual_context
 from .plans import register_context_sources, validate_context, validate_plan
 
@@ -89,6 +90,27 @@ class ContextPlanStore:
         resolved_base_branch: str | None = None,
         operation_id: str | None = None,
     ) -> dict[str, Any]:
+        if operation_id:
+            operation_id = str(UUID(operation_id))
+            path = f"/api/v1/runner/runs/{self.run_id}/handoff/{operation_id}/"
+            try:
+                previous = self.client.request("GET", path)
+                saved = previous["context"]
+                validate_context(saved["document"], item)
+                if saved["inspected_base_commit"] != base_commit:
+                    raise ValueError(
+                        "Handoff operation already inspected a different base."
+                    )
+                if (
+                    resolved_base_branch
+                    and saved["resolved_base_branch"] != resolved_base_branch
+                ):
+                    raise ValueError(
+                        "Handoff operation already resolved a different base branch."
+                    )
+                return previous
+            except NotFoundError:
+                pass
         # Refresh failure propagates; an older empty or complete snapshot is never substituted.
         current = self.refresh(
             item,

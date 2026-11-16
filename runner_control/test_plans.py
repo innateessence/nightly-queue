@@ -237,7 +237,7 @@ class ContextPlanAPITests(TestCase):
                 self.client.get(reverse(name, args=[self.run_id])).status_code, 404
             )
 
-    def test_claim_and_bearer_values_are_redacted_before_saving(self):
+    def test_claim_and_bearer_values_are_rejected_without_mutating_provenance(self):
         self.claimed["instructions"] = (
             ""  # Use plan text so claimed manual instructions stay fixed.
         )
@@ -249,11 +249,10 @@ class ContextPlanAPITests(TestCase):
         plan = proposed_plan(context)
         plan["findings"] = [self.claim_token, self.token]
         response = self.save_plan(context, document=plan)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json()["plan"]["document"]["findings"],
-            ["[redacted]", "[redacted]"],
-        )
+        self.assertEqual(response.status_code, 400)
+        self.assertNotContains(response, self.token, status_code=400)
+        self.assertNotContains(response, self.claim_token, status_code=400)
+        self.assertFalse(PlanVersion.objects.exists())
 
     def test_saved_plan_view_displays_history_and_escapes_untrusted_text(self):
         context = self.save_context().json()["context"]
@@ -349,6 +348,7 @@ class ContextPlanAPITests(TestCase):
             refreshed, reason="Assessed new comment and added regression case"
         )
         self.assertEqual(revised.status_code, 200)
+        changed["fetched_at"] = timezone.now().isoformat()
         fresh = self.save_context(document=changed).json()["context"]
         self.assertEqual(self.handoff(fresh).status_code, 200)
 
@@ -370,3 +370,113 @@ class ContextPlanAPITests(TestCase):
         document["issue"]["state"] = "closed"
         self.assertEqual(self.save_context(document=document).status_code, 400)
         self.assertFalse(ContextSnapshot.objects.exists())
+
+    def test_stale_actual_fetch_cannot_be_reuploaded_as_a_fresh_handoff(self):
+        context = self.save_context().json()["context"]
+        self.save_plan(context)
+        stale = manual_context(self.claimed)
+        stale["fetched_at"] = (timezone.now() - timedelta(days=1)).isoformat()
+        refreshed = self.save_context(document=stale).json()["context"]
+        self.assertEqual(self.handoff(refreshed).status_code, 409)
+
+    def test_future_fetch_timestamp_cannot_authorize_handoff(self):
+        context = self.save_context().json()["context"]
+        self.save_plan(context)
+        future = manual_context(self.claimed)
+        future["fetched_at"] = (timezone.now() + timedelta(days=1)).isoformat()
+        refreshed = self.save_context(document=future).json()["context"]
+        self.assertEqual(self.handoff(refreshed).status_code, 409)
+
+    def test_handoff_operation_reconciles_after_a_new_context_and_expiry(self):
+        context = self.save_context().json()["context"]
+        self.save_plan(context)
+        fresh = self.save_context().json()["context"]
+        operation = str(uuid.uuid4())
+        payload = {
+            "operation_id": operation,
+            "context_id": fresh["id"],
+            "base_commit": BASE,
+        }
+        first = self.post("runner_handoff", payload)
+        self.assertEqual(first.status_code, 200)
+        self.save_context()
+        future = timezone.now() + timedelta(minutes=6)
+        with patch("runner_control.plan_services.timezone.now", return_value=future):
+            replay = self.post("runner_handoff", payload)
+            self.assertEqual(replay.json(), first.json())
+            self.assertEqual(
+                self.post("runner_progress", {"stage": "implementation"}).status_code,
+                409,
+            )
+        reconciled = self.client.get(
+            reverse("runner_handoff_detail", args=[self.run_id, operation])
+        )
+        self.assertEqual(reconciled.json(), first.json())
+        self.assertEqual(
+            Run.objects.get(pk=self.run_id)
+            .evidence.filter(kind="plan_handoff")
+            .count(),
+            1,
+        )
+
+    def test_handoff_reconciliation_is_owned_and_unknown_operations_are_missing(self):
+        self.assertEqual(
+            self.client.get(
+                reverse("runner_handoff_detail", args=[self.run_id, uuid.uuid4()])
+            ).status_code,
+            404,
+        )
+        self.valid_handoff()
+        operation = (
+            Run.objects.get(pk=self.run_id)
+            .evidence.get(kind="plan_handoff")
+            .operation_id
+        )
+        RunnerIdentity.objects.create(
+            name="other-reader", token_digest=token_digest("other-reader-token")
+        )
+        self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer other-reader-token"
+        self.assertEqual(
+            self.client.get(
+                reverse("runner_handoff_detail", args=[self.run_id, operation])
+            ).status_code,
+            404,
+        )
+
+    def test_generic_artifacts_cannot_forge_a_handoff(self):
+        response = self.post("runner_artifact", {"kind": "plan_handoff", "data": {}})
+        self.assertEqual(response.status_code, 400)
+
+    def test_nonfinite_replayed_document_is_a_validation_error(self):
+        operation = str(uuid.uuid4())
+        self.save_context(operation_id=operation)
+        response = self.save_context(
+            operation_id=operation, document={"invalid": float("nan")}
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_detail_paginates_saved_documents_with_separate_cursors(self):
+        for index in range(3):
+            context = self.save_context().json()["context"]
+            self.save_plan(context, reason=f"Assessment {index}")
+        response = self.client.get(reverse("runner_plan_detail", args=[self.run_id]))
+        self.assertEqual(len(response.context["contexts"]), 1)
+        self.assertEqual(len(response.context["plans"]), 1)
+        self.assertContains(response, "PLAN VERSION 3")
+        self.assertNotContains(response, "PLAN VERSION 2")
+        older = self.client.get(
+            reverse("runner_plan_detail", args=[self.run_id]),
+            {"context_page": 2, "plan_page": 2},
+        )
+        self.assertContains(older, "PLAN VERSION 2")
+        self.assertContains(older, "CONTEXT SNAPSHOT 2")
+        self.assertContains(older, "Older context")
+
+    def test_history_pages_keep_older_runs_accessible(self):
+        for _ in range(100):
+            Run.objects.create(runner=self.runner, state=Run.State.EMPTY)
+        response = self.client.get(reverse("runner_plan_history"))
+        self.assertEqual(len(response.context["runs"]), 25)
+        self.assertContains(response, "Older runs")
+        last = self.client.get(reverse("runner_plan_history"), {"page": 5})
+        self.assertContains(last, str(self.run_id))
