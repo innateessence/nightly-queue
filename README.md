@@ -26,8 +26,8 @@ docker compose exec nightly-queue python manage.py createsuperuser
 2. Open [the queue](http://127.0.0.1:7777/) and add work with a title, optional
    instructions, and priority.
 3. Items are ready for a runner to claim through the API, oldest first. Priority
-   does not change their order. Built-in task execution is planned; the current
-   stack stores work and imports issues but does not execute coding tasks.
+   does not change their order. The built-in execution workflow stays disabled
+   until controlled live qualification passes and execution is explicitly enabled.
 
 The **Autonomous** toggle on project creation and editing records whether a
 project should automatically find open issues and create a pull request for each.
@@ -72,7 +72,7 @@ are logged by project ID and retried on the next scheduled run; other projects
 continue importing. Clearing the GitHub selection pauses imports. The GitLab API
 credential selector accepts existing GitLab tokens for future integrations;
 repository URLs and issue imports currently support GitHub only. Creating pull
-requests is part of the planned `coding-runner` service.
+requests is implemented in the release-gated `coding-runner` service.
 
 The queue, project, credential, and settings pages have no login requirement.
 This is a single-user app for a private LAN.
