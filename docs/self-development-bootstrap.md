@@ -223,6 +223,15 @@ and publishes the separate `--version` improvement. Repeat the same command with
 `--second-issue <version-id>` to resume; completed tasks are reconciled, not run
 again. This publication sequencing does not add a confirmation inside a task.
 
+The driver saves a provider-verified delivery observation immediately when each
+case completes. Later collection rechecks the immutable server receipt against
+that snapshot. If a review report changes A's head before its merge, the report
+keeps the original nine-check tested/pushed SHA and separately records the current
+provider head and actual merge metadata, requiring the original commit's ancestry.
+It never calls later changes reviewed or native-validated merely because a PR
+merged. Root's independent review/CI ledger can supply that separate provenance.
+The second task's inspected base must contain A's provider-confirmed merge.
+
 Each ordinary controller cycle runs in a separate OS process with the same private
 journal. The report requires the same agent/container and validation operation
 across restarts, all delivery/reporting checkpoints, actual nonzero failure/no PR,

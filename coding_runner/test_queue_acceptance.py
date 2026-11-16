@@ -9,6 +9,22 @@ from vibearr_runner import queue_acceptance
 
 
 class QueueAcceptanceTests(unittest.TestCase):
+    def test_progress_file_cannot_replace_the_controller_journal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            journal = directory / "journal.json"
+            journal.write_text("original controller state")
+            with self.assertRaisesRegex(ValueError, "reserved"):
+                queue_acceptance.run_acceptance(
+                    directory,
+                    1,
+                    3,
+                    directory / "receipt.json",
+                    60,
+                    progress_name="journal.json",
+                )
+            self.assertEqual(journal.read_text(), "original controller state")
+
     def test_interrupted_cycle_keeps_bounded_private_redacted_diagnostics(self):
         import json
 

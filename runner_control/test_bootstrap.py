@@ -2,10 +2,13 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from io import StringIO
 import json
+from pathlib import Path
+import tempfile
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import connection
 from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
@@ -389,6 +392,24 @@ class BootstrapTests(TestCase):
         self.assertEqual(len(json.loads(output.getvalue())["features"]), 16)
         github.assert_not_called()
         self.assertEqual(len(queries), 0)
+
+    def test_missing_encryption_key_is_actionable_without_replacing_credentials(self):
+        from vibearr_runner.bootstrap_profiles import save_new
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "bootstrap.json"
+            save_new(path, self.request)
+            with override_settings(NQ_CREDENTIAL_KEY=""):
+                with self.assertRaisesMessage(
+                    CommandError, "Configure VIBEARR_CREDENTIAL_KEY"
+                ):
+                    call_command(
+                        "bootstrap_self_development",
+                        configuration=path,
+                        stdout=StringIO(),
+                    )
+        self.assertEqual(Credential.objects.count(), 4)
+        self.assertFalse(Project.objects.exists())
 
 
 class PrerequisiteTests(TestCase):

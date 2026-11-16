@@ -1,16 +1,18 @@
 """Finite self-development acceptance using the ordinary native controller."""
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from uuid import UUID
+from urllib.parse import urlencode
 
 from .bootstrap_files import private_json
 from .client import APIError
 from .delivery import DeliveryError
 from .journal import Journal, JournalError
 from .native_evidence import validate_native_evidence
+from .native_evidence import digest as validate_digest
 from .native_github import NativeGitHub, native_pull
 from .native_workspace import atomic_bytes
 from .queue_acceptance import client, run_acceptance
@@ -104,6 +106,131 @@ def timestamp(value):
     return parsed
 
 
+def observe_pull(github, delivery, snapshot=None):
+    if snapshot is not None and not isinstance(snapshot, dict):
+        raise ValueError("Saved provider observation is not an acceptance record.")
+    workspace = delivery["workspace"]
+    pull = delivery["delivery"]["pull_request"]
+    name = workspace["repository"]
+    tested = workspace["commit_sha"]
+    raw = github.pull(name, pull["number"])
+    current = raw["head"]["sha"]
+    validate_digest(current, git=True)
+    merged = raw.get("state") == "closed" and raw.get("merged") is True
+    if raw.get("draft") is not False:
+        raise ValueError("Acceptance requires an observed non-draft pull request.")
+    native_pull(
+        {**raw, "state": "open"} if merged else raw,
+        workspace["repository_id"],
+        name,
+        workspace["branch"],
+        workspace["base_branch"],
+        current,
+    )
+    if snapshot is not None and snapshot.get("delivery") != delivery:
+        raise ValueError(
+            "Immutable server delivery differs from the saved provider-verified snapshot."
+        )
+    original = snapshot.get("provider_delivery_snapshot") if snapshot else None
+    if original is not None:
+        fields = {"observed_at", "head_sha", "base", "number", "repository_id"}
+        matches = (
+            isinstance(original, dict)
+            and set(original) == fields
+            and original["head_sha"] == tested
+        )
+        matches = (
+            matches
+            and original["base"] == workspace["base_branch"]
+            and original["number"] == pull["number"]
+            and original["repository_id"] == workspace["repository_id"]
+        )
+        if not matches or not timestamp(raw["created_at"]) <= timestamp(
+            original["observed_at"]
+        ) <= datetime.now(timezone.utc):
+            raise ValueError(
+                "Saved provider observation does not identify the original tested head and observation time."
+            )
+    changed = current != tested
+    if changed:
+        if original is None:
+            raise ValueError(
+                "The provider head changed before an exact-head delivery observation was saved."
+            )
+        comparison = github.request(
+            "GET", f"/repos/{name}/compare/{tested}...{current}"
+        )
+        if (
+            comparison.get("status") != "ahead"
+            or comparison.get("merge_base_commit", {}).get("sha") != tested
+        ):
+            raise ValueError(
+                "Post-delivery head does not retain the original tested commit as an ancestor."
+            )
+    now = datetime.now(timezone.utc).isoformat()
+    original = original or {
+        "observed_at": now,
+        "head_sha": tested,
+        "base": workspace["base_branch"],
+        "number": pull["number"],
+        "repository_id": workspace["repository_id"],
+    }
+    observed_merge = None
+    if merged:
+        validate_digest(raw.get("merge_commit_sha"), git=True)
+        timestamp(raw.get("merged_at"))
+        observed_merge = {
+            "commit_sha": raw["merge_commit_sha"],
+            "merged_at": raw["merged_at"],
+            "base": raw["base"]["ref"],
+            "repository_id": raw["base"]["repo"]["id"],
+        }
+    current_observation = {
+        "observed_at": now,
+        "head_sha": current,
+        "head_changed_after_delivery": changed,
+        "original_head_is_ancestor": changed or current == tested,
+        "native_validation_applies_to_sha": tested,
+        "current_head_native_validated": not changed,
+        "provider_merge": observed_merge,
+        "review_status": "not-verified-by-this-driver",
+    }
+    return raw, original, current_observation
+
+
+def pulls_for_branch(github, repository, branch, base=None):
+    query = {
+        "state": "all",
+        "head": repository.split("/")[0] + ":" + branch,
+        "per_page": 100,
+    }
+    if base is not None:
+        query["base"] = base
+    return github.request("GET", f"/repos/{repository}/pulls?{urlencode(query)}")
+
+
+def changed_files(github, workspace):
+    name = workspace["repository"]
+    base, head = workspace["base_revision"], workspace["commit_sha"]
+    comparison = github.request("GET", f"/repos/{name}/compare/{base}...{head}")
+    if (
+        comparison.get("status") != "ahead"
+        or comparison.get("merge_base_commit", {}).get("sha") != base
+    ):
+        raise ValueError(
+            "Delivered source does not extend the recorded inspected base."
+        )
+    files = comparison.get("files")
+    if not isinstance(files, list) or not 1 <= len(files) < 300:
+        raise ValueError(
+            "Finite acceptance source diff is empty, truncated or unavailable."
+        )
+    names = [value.get("filename") for value in files]
+    if any(not isinstance(value, str) or not value for value in names):
+        raise ValueError("Provider source diff filenames are invalid.")
+    return sorted(names)
+
+
 def collect_run(
     queue,
     github,
@@ -113,12 +240,24 @@ def collect_run(
     *,
     failed=False,
     review_observer=None,
+    snapshot=None,
 ):
     from .native_contract import validate_native_artifact
     from vibearr_executor.validation_profile import CHECK_IDS
 
     response = queue.reconcile(run_id)
     run, item = response["run"], response["item"]
+    if snapshot is not None and any(
+        snapshot.get(key) != value
+        for key, value in {
+            "run_id": run_id,
+            "project_id": project_id,
+            "issue_number": issue_number,
+        }.items()
+    ):
+        raise ValueError(
+            "Saved provider observation belongs to another selected run/project/issue."
+        )
     if (
         item["project"]["id"] != project_id
         or item["issue_number"] != issue_number
@@ -136,6 +275,21 @@ def collect_run(
         )
     if run["configuration_snapshot"]["execution_kind"] != "native":
         raise ValueError("Acceptance requires the actual native lifecycle.")
+    if (
+        item.get("source") != "github"
+        or run["configuration_snapshot"].get("autonomous") is not True
+    ):
+        raise ValueError(
+            "Acceptance requires an automatically imported issue in an autonomous project."
+        )
+    source = run.get("source_snapshot", {})
+    if (
+        source.get("issue_number") != issue_number
+        or source.get("repository_id") != item["github_repository_id"]
+    ):
+        raise ValueError(
+            "Frozen source does not identify the actual selected provider issue/repository."
+        )
     approvals = queue.request("GET", f"/api/v1/runner/runs/{run_id}/approvals/")[
         "approvals"
     ]
@@ -191,6 +345,20 @@ def collect_run(
         "approvals": 0,
         "repair_attempt": max(attempts),
     }
+    times = [
+        timestamp(value)
+        for value in (
+            base["created_at"],
+            base["discovered_at"],
+            base["claimed_at"],
+            agents[0]["receipt"]["started_at"],
+            base["finished_at"],
+        )
+    ]
+    if times != sorted(times):
+        raise ValueError(
+            "Provider discovery/claim/session/completion timing is inconsistent."
+        )
     if failed:
         nonzero = [
             {"id": check["id"], "receipt": check["receipt"]}
@@ -217,10 +385,7 @@ def collect_run(
                 "The deliberate failure must use the operator's frozen zero-repair policy."
             )
         branch = item["branch_name"]
-        pulls = github.request(
-            "GET",
-            f"/repos/{name}/pulls?state=all&head={name.split('/')[0]}:{branch}&per_page=100",
-        )
+        pulls = pulls_for_branch(github, name, branch)
         if not isinstance(pulls, list) or pulls:
             raise ValueError(
                 "The failed validation branch unexpectedly has a provider PR."
@@ -264,19 +429,9 @@ def collect_run(
         )
     pull = delivery["delivery"]["pull_request"]
     workspace = delivery["workspace"]
-    observed = github.pull(name, pull["number"])
-    historical = observed.get("state") == "closed" and observed.get("merged") is True
-    native_pull(
-        {**observed, "state": "open"} if historical else observed,
-        repository_id,
-        name,
-        workspace["branch"],
-        workspace["base_branch"],
-        workspace["commit_sha"],
-    )
-    matches = github.request(
-        "GET",
-        f"/repos/{name}/pulls?state=all&head={name.split('/')[0]}:{workspace['branch']}&base={workspace['base_branch']}&per_page=100",
+    observed, provider_snapshot, current = observe_pull(github, delivery, snapshot)
+    matches = pulls_for_branch(
+        github, name, workspace["branch"], workspace["base_branch"]
     )
     if (
         not isinstance(matches, list)
@@ -296,7 +451,10 @@ def collect_run(
         "agent_intent": intents[agent["intent_id"]],
         "delivery": delivery,
         "pull_created_at": observed["created_at"],
-        "provider_merged_after_delivery": historical,
+        "provider_delivery_snapshot": provider_snapshot,
+        "provider_current_observation": current,
+        "changed_files": changed_files(github, workspace),
+        "provider_merged_after_delivery": current["provider_merge"] is not None,
         "issue_to_start_seconds": (timestamp(started) - created).total_seconds(),
         "issue_to_pr_seconds": (
             timestamp(observed["created_at"]) - created
@@ -304,13 +462,21 @@ def collect_run(
         "review": (
             review_observer(github, delivery)
             if review_observer
-            else {"status": "pending-exact-head-independent-review-before-merge"}
+            else {"status": "not-verified-by-this-driver"}
         ),
     }
 
 
 def collect_scenario(
-    queue, github, *, project_id, failure, first, second, review_observer=None
+    queue,
+    github,
+    *,
+    project_id,
+    failure,
+    first,
+    second,
+    review_observer=None,
+    snapshots=None,
 ):
     records = [
         collect_run(
@@ -321,6 +487,7 @@ def collect_scenario(
             issue,
             failed=index == 0,
             review_observer=review_observer,
+            snapshot=(snapshots or {}).get(run_id),
         )
         for index, (run_id, issue) in enumerate((failure, first, second))
     ]
@@ -330,6 +497,10 @@ def collect_scenario(
     ):
         raise ValueError("Each acceptance case requires a distinct issue and run.")
     deliveries = records[1:]
+    if any("vibearr/cli.py" not in value["changed_files"] for value in deliveries):
+        raise ValueError(
+            "Both approved delivery cases must include a real production CLI source change."
+        )
     if (
         len({value["delivery"]["workspace"]["branch"] for value in deliveries}) != 2
         or len(
@@ -347,11 +518,35 @@ def collect_scenario(
         raise ValueError(
             "An independent task must demonstrably start after the validation failure."
         )
+    first_merge = deliveries[0]["provider_current_observation"]["provider_merge"]
+    if first_merge is None:
+        raise ValueError(
+            "Publish improvementB only after improvementA's actual provider main merge."
+        )
+    merge_sha = first_merge["commit_sha"]
+    next_base = deliveries[1]["delivery"]["workspace"]["base_revision"]
+    if next_base != merge_sha:
+        repository = deliveries[1]["delivery"]["workspace"]["repository"]
+        ancestry = github.request(
+            "GET", f"/repos/{repository}/compare/{merge_sha}...{next_base}"
+        )
+        if (
+            ancestry.get("status") != "ahead"
+            or ancestry.get("merge_base_commit", {}).get("sha") != merge_sha
+        ):
+            raise ValueError(
+                "ImprovementB did not start from an accepted base containing improvementA's actual merge."
+            )
     return {
         "schema_version": 1,
         "scenario": "delivery",
         "passed": True,
         "records": records,
+        "first_merge_in_second_base": {
+            "merge_sha": merge_sha,
+            "base_sha": next_base,
+            "ancestor": True,
+        },
         "merge_acceptance": "not-run-feature07",
         "api_key_live_acceptance": (
             "passed"
@@ -431,6 +626,7 @@ def execute(directory, project_id, issues, evidence, max_seconds):
         )
     runs = []
     receipts = []
+    snapshots = {}
     for index, issue in enumerate(issues):
         receipt = directory / f"acceptance-issue-{issue}.json"
         expected = "failed" if index == 0 else "delivered"
@@ -458,28 +654,24 @@ def execute(directory, project_id, issues, evidence, max_seconds):
         )
         runs.append((result["run_id"], issue))
         receipts.append(private_json(receipt))
-    with Journal(directory) as journal:
-        state = journal.load()
-    queue = client()
-    queue.controller_secret = state["controller_secret"]
-    configuration = queue.configuration()
-    project = next(
-        value
-        for value in configuration["projects"]
-        if value["project_id"] == project_id
-    )
-    reference = project["effective"]["repository_credential_id"]
-    grant = queue.request(
-        "POST",
-        "/api/v1/runner/secrets/",
-        {
-            "scope": "preflight",
-            "backend": "github",
-            "credential_id": reference,
-            "project_id": project_id,
-        },
-    )
-    github = NativeGitHub(grant["material"]["secret"], read_only=True)
+        queue, github = observers(directory, project_id)
+        snapshot_path = directory / f"acceptance-observation-{issue}.json"
+        saved_snapshot = private_json(snapshot_path) if snapshot_path.exists() else None
+        record = collect_run(
+            queue,
+            github,
+            result["run_id"],
+            project_id,
+            issue,
+            failed=index == 0,
+            snapshot=saved_snapshot,
+        )
+        if saved_snapshot is None:
+            atomic_bytes(
+                snapshot_path, json.dumps(record, sort_keys=True, indent=2).encode()
+            )
+            saved_snapshot = record
+        snapshots[result["run_id"]] = saved_snapshot
     report = (
         collect_scenario(
             queue,
@@ -488,6 +680,7 @@ def execute(directory, project_id, issues, evidence, max_seconds):
             failure=runs[0],
             first=runs[1],
             second=runs[2],
+            snapshots=snapshots,
         )
         if len(runs) == 3
         else {
@@ -496,7 +689,15 @@ def execute(directory, project_id, issues, evidence, max_seconds):
             "passed": False,
             "pending": "Publish improvementB only after independent review/CI and root's merge of improvementA.",
             "records": [
-                collect_run(queue, github, run_id, project_id, issue, failed=index == 0)
+                collect_run(
+                    queue,
+                    github,
+                    run_id,
+                    project_id,
+                    issue,
+                    failed=index == 0,
+                    snapshot=snapshots[run_id],
+                )
                 for index, (run_id, issue) in enumerate(runs)
             ],
         }
@@ -512,6 +713,29 @@ def execute(directory, project_id, issues, evidence, max_seconds):
         "evidence": str(evidence),
         "runs": [value[0] for value in runs],
     }
+
+
+def observers(directory, project_id):
+    with Journal(directory) as journal:
+        state = journal.load()
+    queue = client()
+    queue.controller_secret = state["controller_secret"]
+    project = next(
+        value
+        for value in queue.configuration()["projects"]
+        if value["project_id"] == project_id
+    )
+    grant = queue.request(
+        "POST",
+        "/api/v1/runner/secrets/",
+        {
+            "scope": "preflight",
+            "backend": "github",
+            "credential_id": project["effective"]["repository_credential_id"],
+            "project_id": project_id,
+        },
+    )
+    return queue, NativeGitHub(grant["material"]["secret"], read_only=True)
 
 
 def main():
@@ -561,6 +785,10 @@ def main():
         OSError,
         ValueError,
         RuntimeError,
+        KeyError,
+        TypeError,
+        AttributeError,
+        StopIteration,
     ) as exc:
         print(
             json.dumps(

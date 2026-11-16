@@ -1,4 +1,5 @@
 import importlib.util
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
@@ -81,6 +82,14 @@ class BacklogTests(unittest.TestCase):
     def test_duplicate_owner_markers_are_rejected(self):
         with self.assertRaises(DeliveryError):
             discover(seed()["features"], [self.issue("00", 60), self.issue("00", 99)])
+
+    def test_one_issue_cannot_stand_for_multiple_plan_features(self):
+        issue = self.issue("00", 60)
+        issue["body"] += "\n<!-- vibearr-plan-feature: 01 -->"
+        with self.assertRaisesRegex(
+            DeliveryError, "each plan feature needs its own issue"
+        ):
+            discover(seed()["features"], [issue])
 
     def test_existing_all_feature_issues_are_adopted_without_mutations(self):
         github = self.github(
@@ -262,6 +271,134 @@ class AcceptanceTests(unittest.TestCase):
                 private_json(link)
 
 
+class ProviderObservationTests(unittest.TestCase):
+    def setUp(self):
+        self.workspace = {
+            "repository_id": 99,
+            "repository": "owner/repo",
+            "branch": "acceptance/task",
+            "base_branch": "main",
+            "base_revision": "b" * 40,
+            "commit_sha": "a" * 40,
+        }
+        self.delivery = {
+            "workspace": self.workspace,
+            "delivery": {"pull_request": {"number": 7}},
+        }
+        created = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+        repository = {"id": 99, "full_name": "owner/repo"}
+        self.pull = {
+            "number": 7,
+            "state": "open",
+            "draft": False,
+            "merged": False,
+            "html_url": "https://github.com/owner/repo/pull/7",
+            "created_at": created,
+            "head": {"sha": "a" * 40, "ref": "acceptance/task", "repo": repository},
+            "base": {"ref": "main", "repo": repository},
+        }
+        self.github = Mock()
+        self.github.pull.return_value = self.pull
+
+    def snapshot(self):
+        return {
+            "delivery": self.delivery,
+            "provider_delivery_snapshot": {
+                "observed_at": (
+                    datetime.now(timezone.utc) - timedelta(minutes=1)
+                ).isoformat(),
+                "head_sha": "a" * 40,
+                "base": "main",
+                "number": 7,
+                "repository_id": 99,
+            },
+        }
+
+    def test_first_collection_requires_the_actual_tested_head(self):
+        self.pull["head"]["sha"] = "c" * 40
+        with self.assertRaisesRegex(ValueError, "before an exact-head"):
+            self_acceptance.observe_pull(self.github, self.delivery)
+
+    def test_post_delivery_descendant_keeps_original_validation_and_marks_current_head_unverified(
+        self,
+    ):
+        self.pull["head"]["sha"] = "c" * 40
+        self.pull.update(
+            state="closed",
+            merged=True,
+            merge_commit_sha="d" * 40,
+            merged_at=datetime.now(timezone.utc).isoformat(),
+        )
+        self.github.request.return_value = {
+            "status": "ahead",
+            "merge_base_commit": {"sha": "a" * 40},
+        }
+        _, original, current = self_acceptance.observe_pull(
+            self.github, self.delivery, self.snapshot()
+        )
+        self.assertEqual(original["head_sha"], "a" * 40)
+        self.assertEqual(current["head_sha"], "c" * 40)
+        self.assertEqual(current["native_validation_applies_to_sha"], "a" * 40)
+        self.assertFalse(current["current_head_native_validated"])
+        self.assertEqual(current["review_status"], "not-verified-by-this-driver")
+        self.assertEqual(current["provider_merge"]["commit_sha"], "d" * 40)
+        self.assertEqual(self.delivery["workspace"]["commit_sha"], "a" * 40)
+
+    def test_post_delivery_head_without_original_ancestry_is_rejected(self):
+        self.pull["head"]["sha"] = "c" * 40
+        self.github.request.return_value = {
+            "status": "ahead",
+            "merge_base_commit": {"sha": "e" * 40},
+        }
+        with self.assertRaisesRegex(ValueError, "ancestor"):
+            self_acceptance.observe_pull(self.github, self.delivery, self.snapshot())
+
+    def test_saved_observation_cannot_replace_immutable_server_delivery(self):
+        snapshot = self.snapshot()
+        snapshot["delivery"] = {"different": "receipt"}
+        with self.assertRaisesRegex(ValueError, "Immutable server delivery"):
+            self_acceptance.observe_pull(self.github, self.delivery, snapshot)
+
+    def test_incomplete_saved_provider_observation_is_not_proof(self):
+        snapshot = self.snapshot()
+        snapshot["provider_delivery_snapshot"].pop("observed_at")
+        with self.assertRaisesRegex(ValueError, "observation time"):
+            self_acceptance.observe_pull(self.github, self.delivery, snapshot)
+
+    def test_branch_query_does_not_interpret_task_text_as_query_parameters(self):
+        from urllib.parse import parse_qs, urlsplit
+
+        self_acceptance.pulls_for_branch(
+            self.github, "owner/repo", "acceptance/task&state=closed"
+        )
+        query = parse_qs(urlsplit(self.github.request.call_args.args[1]).query)
+        self.assertEqual(query["state"], ["all"])
+        self.assertEqual(query["head"], ["owner:acceptance/task&state=closed"])
+
+    def test_documentation_only_delivery_cannot_substitute_for_the_approved_cli_improvements(
+        self,
+    ):
+        records = [
+            {"run_id": "failed", "issue_number": 1},
+            {"run_id": "first", "issue_number": 2, "changed_files": ["docs/note.md"]},
+            {
+                "run_id": "second",
+                "issue_number": 3,
+                "changed_files": ["vibearr/cli.py"],
+            },
+        ]
+        with patch.object(self_acceptance, "collect_run", side_effect=records):
+            with self.assertRaisesRegex(ValueError, "real production CLI source"):
+                self_acceptance.collect_scenario(
+                    Mock(),
+                    Mock(),
+                    project_id=1,
+                    failure=("failed", 1),
+                    first=("first", 2),
+                    second=("second", 3),
+                )
+
+
 @unittest.skipUnless(
     importlib.util.find_spec("vibearr_executor"),
     "Install the native-runtime extra for real native receipt parsing",
@@ -370,9 +507,18 @@ class NativeAcceptanceEvidenceTests(unittest.TestCase):
                 "state": "completed",
                 "native_outcome": "delivered",
                 "result_status": "succeeded",
-                "configuration_snapshot": {"execution_kind": "native"},
+                "configuration_snapshot": {
+                    "execution_kind": "native",
+                    "autonomous": True,
+                },
+                "source_snapshot": {"issue_number": 10, "repository_id": 99},
             },
-            "item": {"project": {"id": 1}, "issue_number": 10},
+            "item": {
+                "project": {"id": 1},
+                "issue_number": 10,
+                "source": "github",
+                "github_repository_id": 99,
+            },
         }
         queue.request.return_value = {
             "approvals": [{"consumed_at": "2026-11-16T00:00:00+00:00"}]
@@ -387,13 +533,39 @@ class NativeAcceptanceEvidenceTests(unittest.TestCase):
                 "state": "completed",
                 "native_outcome": "delivered",
                 "result_status": "succeeded",
-                "configuration_snapshot": {"execution_kind": "native"},
+                "configuration_snapshot": {
+                    "execution_kind": "native",
+                    "autonomous": True,
+                },
+                "source_snapshot": {"issue_number": 10, "repository_id": 99},
             },
-            "item": {"project": {"id": 1}, "issue_number": 10},
+            "item": {
+                "project": {"id": 1},
+                "issue_number": 10,
+                "source": "github",
+                "github_repository_id": 99,
+            },
         }
         queue.request.side_effect = [
             {"approvals": []},
             {"evidence": [], "has_more": False},
         ]
         with self.assertRaisesRegex(ValueError, "genuine successful native"):
+            self_acceptance.collect_run(queue, Mock(), str(uuid4()), 1, 10)
+
+    def test_manual_work_cannot_substitute_for_an_imported_owner_issue(self):
+        queue = Mock()
+        queue.reconcile.return_value = {
+            "run": {
+                "state": "completed",
+                "native_outcome": "delivered",
+                "result_status": "succeeded",
+                "configuration_snapshot": {
+                    "execution_kind": "native",
+                    "autonomous": True,
+                },
+            },
+            "item": {"project": {"id": 1}, "issue_number": 10, "source": "manual"},
+        }
+        with self.assertRaisesRegex(ValueError, "automatically imported issue"):
             self_acceptance.collect_run(queue, Mock(), str(uuid4()), 1, 10)

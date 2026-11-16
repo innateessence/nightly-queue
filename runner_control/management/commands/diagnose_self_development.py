@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import os
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.management.base import BaseCommand, CommandError
 
 from runner_control.bootstrap import (
@@ -57,13 +57,24 @@ class Command(BaseCommand):
                         credentials["import"].get_secret()["secret"],
                         REPOSITORY_ID,
                     )
-                except (OSError, ValueError, ValidationError, GitHubAPIError) as exc:
+                except (
+                    OSError,
+                    ValueError,
+                    ImproperlyConfigured,
+                    ValidationError,
+                    GitHubAPIError,
+                ) as exc:
                     failures["import_provider"] = str(exc)
                 try:
                     github = NativeGitHub(
                         credentials["repository"].get_secret()["secret"], read_only=True
                     )
-                except (ValueError, ValidationError, DeliveryError) as exc:
+                except (
+                    ValueError,
+                    ImproperlyConfigured,
+                    ValidationError,
+                    DeliveryError,
+                ) as exc:
                     failures["provider_permissions"] = str(exc)
                 try:
                     queue = Client(
@@ -93,6 +104,7 @@ class Command(BaseCommand):
         except (
             OSError,
             ValueError,
+            ImproperlyConfigured,
             ValidationError,
             GitHubAPIError,
             DeliveryError,

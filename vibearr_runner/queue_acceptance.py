@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -161,9 +162,12 @@ def run_acceptance(
     progress_name="queue-acceptance.json",
     expected_outcome="delivered",
 ):
-    if Path(progress_name).name != progress_name or not progress_name.endswith(".json"):
+    if not isinstance(progress_name, str) or not re.fullmatch(
+        r"(?:queue-acceptance|acceptance-progress)(?:-[1-9][0-9]{0,18})?\.json",
+        progress_name,
+    ):
         raise ValueError(
-            "Acceptance progress must be a JSON filename beneath its private state directory."
+            "Use an acceptance progress filename; controller journals and other private records are reserved."
         )
     if expected_outcome not in {"delivered", "failed"}:
         raise ValueError("Choose delivered or failed acceptance outcome.")

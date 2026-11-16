@@ -103,6 +103,10 @@ def discover(features, issues):
             if type(number) is not int or number < 1:
                 raise DeliveryError("Provider returned an invalid issue number.")
             numbers[key] = number
+    if len(set(numbers.values())) != len(numbers):
+        raise DeliveryError(
+            "An owner issue carries multiple feature markers; each plan feature needs its own issue."
+        )
     return numbers
 
 

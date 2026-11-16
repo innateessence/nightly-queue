@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.management.base import BaseCommand, CommandError
 
 from runner_control.bootstrap import bootstrap
@@ -28,7 +28,13 @@ class Command(BaseCommand):
             result = bootstrap(
                 request, apply=options["apply"], mvp_defaults=options["mvp_defaults"]
             )
-        except (OSError, ValueError, ValidationError, GitHubAPIError) as exc:
+        except (
+            OSError,
+            ValueError,
+            ImproperlyConfigured,
+            ValidationError,
+            GitHubAPIError,
+        ) as exc:
             message = (
                 "; ".join(exc.messages)
                 if isinstance(exc, ValidationError)
