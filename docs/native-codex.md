@@ -73,7 +73,8 @@ removal of arbitrary encodings or a provider-side spending limit.
 ## Fixed CLI configuration
 
 The image wrapper reads a bounded, supervisor-produced context containing only
-the model, prompt, adapter version, and authentication kind. It rejects alternate
+the model, prompt, adapter version, authentication kind, and an account-reference
+digest. It rejects alternate
 arguments or configuration fields. Prompts go through a private stdin file,
 never shell interpolation.
 

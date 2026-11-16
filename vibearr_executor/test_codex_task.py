@@ -40,6 +40,7 @@ class CodexTaskTests(unittest.TestCase):
             "model": "gpt-6.1-sol",
             "prompt": "Edit the fixture and test it.",
             "auth_kind": "token",
+            "account_digest": "a" * 64,
         }
 
     def binary(self, root, *, version="0.169.0"):

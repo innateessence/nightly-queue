@@ -296,6 +296,18 @@ class NativeCodexTests(unittest.TestCase):
         with self.assertRaises(NativeSessionError):
             self.adapter.authentication_result(session)
 
+    def test_authentication_probe_cannot_be_relabeled_as_another_credential(self):
+        request = {
+            key: value
+            for key, value in self.request.items()
+            if key not in {"source", "prompt"}
+        }
+        session = self.adapter.prepare_auth_probe(**request)
+        changed = session.to_data()
+        changed["account"]["credential_id"] += 1
+        with self.assertRaises(NativeSessionError):
+            self.adapter.authentication_result(NativeSession.from_data(changed))
+
     def test_credential_rotation_invalidates_authentication_proof(self):
         request = {
             key: value

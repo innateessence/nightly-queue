@@ -107,6 +107,7 @@ def context_data(value):
         "model",
         "prompt",
         "auth_kind",
+        "account_digest",
     }:
         raise ValueError("Invalid Codex task context.")
     if (
@@ -121,6 +122,11 @@ def context_data(value):
         or value["auth_kind"] not in HOSTS
     ):
         raise ValueError("Select an explicit Codex model and supported authentication.")
+    if (
+        not isinstance(value["account_digest"], str)
+        or re.fullmatch(r"[a-f0-9]{64}", value["account_digest"]) is None
+    ):
+        raise ValueError("Native Codex account binding is invalid.")
     if (
         not isinstance(value["prompt"], str)
         or not value["prompt"].strip()

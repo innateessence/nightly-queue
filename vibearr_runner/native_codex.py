@@ -252,6 +252,12 @@ class NativeCodexAdapter:
             raise NativeSessionError(
                 "Selected native Codex credential is unavailable or invalid."
             ) from None
+        account = {
+            "backend": "codex",
+            "credential_id": reference["id"],
+            "credential_version": reference["version"],
+            "model": model,
+        }
         context = context_data(
             {
                 "schema_version": 1,
@@ -259,6 +265,7 @@ class NativeCodexAdapter:
                 "model": model,
                 "prompt": prompt,
                 "auth_kind": kind,
+                "account_digest": digest(canonical(account)),
             }
         )
         encoded = canonical(context)
@@ -301,12 +308,7 @@ class NativeCodexAdapter:
             {
                 "adapter": "codex",
                 "agent_version": CODEX_VERSION,
-                "account": {
-                    "backend": "codex",
-                    "credential_id": reference["id"],
-                    "credential_version": reference["version"],
-                    "model": model,
-                },
+                "account": account,
                 "auth_kind": kind,
                 "image_digest": profile.image,
                 "runtime_binding_digest": capabilities.get("binding_digest"),
@@ -356,6 +358,7 @@ class NativeCodexAdapter:
             "model": session.account["model"],
             "prompt": AUTH_PROMPT,
             "auth_kind": session.auth_kind,
+            "account_digest": digest(canonical(session.account)),
         }
         source = auth_source()
         if session.manifest["source_digest"] != digest(source) or session.manifest[
