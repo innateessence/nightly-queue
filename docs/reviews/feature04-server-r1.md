@@ -111,8 +111,12 @@ snapshots. These results do not remove the standalone packaging blocker above.
 
 ## CI and remaining limits
 
-At inspection the exact reviewed head had a failed `Tests / Run test.sh` check,
-successful executor boundary and native image checks, and an in-progress
-`Vibearr validation / Validate candidate` check. This report does not assert
-exact-head CI success or authorize merging. Root owns serial merges after the
-required independent review and exact-head checks.
+The exact reviewed head failed both `Tests / Run test.sh` and
+`Vibearr validation / Validate candidate`; executor boundary and native image
+checks succeeded. The downloaded read-only evidence from
+[candidate run 43879225727](https://github.com/innateessence/nightly-queue/actions/runs/43879225727)
+also shows the same optional-executor import failure in both runner sdist cases.
+Its OCI Django run executed 1,628 tests with two failures and six skips. No
+distinct second failure was identified in that evidence. This report does not
+assert exact-head CI success or authorize merging. Root owns serial merges after
+the required independent review and exact-head checks.
