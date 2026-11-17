@@ -43,6 +43,7 @@ x-slot: &slot
     - "/tmp:rw,nosuid,nodev,exec,size=64m,mode=1777"
     - "/input:rw,nosuid,nodev,noexec,size=40m,mode=0711"
     - "/secrets:rw,nosuid,nodev,noexec,size=64k,mode=0711"
+    - "/opt/candidate:rw,nosuid,nodev,exec,size=512m,mode=0755"
   healthcheck:
     test: [CMD, python, -I, -m, vibearr_executor.slot_health]
     interval: 10s
@@ -275,6 +276,42 @@ services:
       VIBEARR_SLOT_IMAGE_ID: "${VIBEARR_WORKER_IMAGE_ID:-}"
     network_mode: none
     volumes: [foundation-control:/control]
+
+  qualification:
+    <<: *security
+    profiles: [checks]
+    restart: "no"
+    build: {context: ., target: tools}
+    image: "${VIBEARR_TOOLS_IMAGE:-vibearr-tools:local}"
+    entrypoint: [python, -m, deploy.docker.qualify]
+    command: [finish]
+    environment:
+      VIBEARR_RUNTIME_PROTOCOL: compose-slot-v2
+    networks: [worker-control]
+    volumes:
+      - runner-secrets:/run/vibearr/runner
+      - agent-secrets:/run/slots/agent:ro
+      - setup-secrets:/run/slots/setup:ro
+      - validation-secrets:/run/slots/validation:ro
+
+  resource-check:
+    <<: *slot
+    profiles: [checks]
+    restart: "no"
+    mem_limit: 384m
+    memswap_limit: 384m
+    entrypoint: [python, -I, -m, vibearr_executor.slot_resources]
+    environment:
+      VIBEARR_SLOT_IMAGE_ID: "${VIBEARR_WORKER_IMAGE_ID:-}"
+    network_mode: none
+    tmpfs:
+      - "/work:rw,nosuid,nodev,exec,size=32m,uid=1000,gid=1000,mode=0700"
+      - "/home/task:rw,nosuid,nodev,exec,size=4m,uid=1000,gid=1000,mode=0700"
+      - "/tmp:rw,nosuid,nodev,exec,size=16m,mode=1777"
+      - "/input:rw,nosuid,nodev,noexec,size=4m,mode=0711"
+      - "/secrets:rw,nosuid,nodev,noexec,size=64k,mode=0711"
+      - "/control:rw,nosuid,nodev,noexec,size=16m,mode=0700"
+      - "/opt/candidate:rw,nosuid,nodev,exec,size=4m,mode=0755"
 
   celery-beat:
     <<: *application

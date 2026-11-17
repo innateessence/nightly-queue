@@ -42,6 +42,23 @@ def configure(destinations):
         ).splitlines():
             if line.startswith("-A ") and "-j REJECT" not in line:
                 run(*["-D", *line.split()[1:]])
+        loopback = "127.0.0.1/32" if executable == "iptables" else "::1/128"
+        run(
+            "-I",
+            CHAIN,
+            "1",
+            "-p",
+            "tcp",
+            "-d",
+            loopback,
+            "-m",
+            "multiport",
+            "!",
+            "--dports",
+            "8791,9001",
+            "-j",
+            "ACCEPT",
+        )
         if executable == "iptables":
             for host, port in destinations:
                 run(

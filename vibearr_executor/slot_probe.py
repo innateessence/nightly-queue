@@ -1,12 +1,15 @@
 """Fixed, credential-free task used only by boundary qualification."""
 
 import ctypes
+import errno
 import json
 import os
 from pathlib import Path
 import socket
 import subprocess
 import time
+import urllib.error
+import urllib.request
 
 
 def main():
@@ -54,6 +57,25 @@ def main():
             pass
         else:
             raise AssertionError("Task reached a forbidden network destination.")
+    try:
+        socket.create_connection(("127.0.0.1", 8791), timeout=0.5).close()
+    except OSError:
+        pass
+    else:
+        raise AssertionError("Task reached its trusted worker API.")
+    with socket.socket() as local:
+        local.bind(("127.0.0.1", 0))
+        local.listen()
+        with socket.create_connection(local.getsockname(), timeout=1):
+            pass
+    if os.environ.get("DATABASE_URL"):
+        import psycopg2
+
+        with psycopg2.connect(os.environ["DATABASE_URL"]) as database:
+            with database.cursor() as cursor:
+                cursor.execute("SELECT to_regclass('qualification_previous_job')")
+                assert cursor.fetchone()[0] is None, "Previous job database leaked."
+                cursor.execute("CREATE TABLE qualification_previous_job (value text)")
     libc = ctypes.CDLL(None, use_errno=True)
     for path in Path("/proc/sysvipc").iterdir():
         lines = path.read_text().splitlines()
@@ -79,13 +101,59 @@ def main():
     )
     case = context.get("case", "smoke")
     if case == "wait":
-        time.sleep(60)
+        time.sleep(3600)
+    elif case == "memory":
+        Path("/proc/self/oom_score_adj").write_text("1000")
+        allocated = []
+        limit = int(Path("/sys/fs/cgroup/memory.max").read_text())
+        print(json.dumps({"memory_exhaustion_started": True}), flush=True)
+        while len(allocated) * 8 * 1024**2 <= limit * 2:
+            allocated.append(bytearray(8 * 1024**2))
+        raise AssertionError("Task exceeded the actual memory ceiling without OOM.")
     elif case == "flood":
         print("x" * (2 * 1024 * 1024), flush=True)
     elif case == "credential":
         secret = Path(os.environ["VIBEARR_BACKEND_SECRET_FILE"]).read_text()
         print(secret, flush=True)
         Path("/work/leaked-key.txt").write_text(secret)
+    elif case == "pids":
+        children = []
+        try:
+            while True:
+                children.append(
+                    subprocess.Popen(
+                        ["/usr/local/bin/python", "-c", "import time; time.sleep(60)"],
+                        start_new_session=True,
+                    )
+                )
+        except OSError as error:
+            assert error.errno == errno.EAGAIN
+        print(json.dumps({"pid_exhausted": True}), flush=True)
+        time.sleep(60)
+    elif case == "network":
+        proxy = os.environ.get("HTTPS_PROXY")
+        if os.environ["VIBEARR_PHASE"] == "validation":
+            assert not proxy
+        else:
+            target = (
+                "https://api.openai.com/v1/models"
+                if os.environ["VIBEARR_PHASE"] == "agent"
+                else "https://pypi.org/simple/"
+            )
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({"https": proxy})
+            )
+            try:
+                with opener.open(target, timeout=15) as response:
+                    response.read(32)
+            except urllib.error.HTTPError:
+                pass
+            try:
+                opener.open("https://example.com/", timeout=5)
+            except urllib.error.URLError:
+                pass
+            else:
+                raise AssertionError("Worker proxy accepted an unregistered host.")
 
 
 if __name__ == "__main__":

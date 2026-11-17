@@ -6,18 +6,22 @@ WORKDIR /app
 RUN useradd --uid 10001 --create-home appuser
 COPY requirements.txt /opt/vibearr/requirements.txt
 RUN python -m pip install --no-cache-dir -r /opt/vibearr/requirements.txt
-COPY . /app
-RUN python -m pip install --no-cache-dir --no-deps .
+RUN python -m pip install --no-cache-dir setuptools==80.9.0 wheel==0.48.0
 ENTRYPOINT ["python", "-m", "deploy.docker.entrypoint"]
 
-FROM base AS tools
-USER root
+FROM base AS tools-base
 RUN apt-get update && apt-get install -y --no-install-recommends git postgresql-client ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+FROM tools-base AS tools
+COPY . /app
+RUN python -m pip install --no-cache-dir --no-build-isolation --no-deps .
 USER 10001:10001
 CMD ["python", "manage.py", "check"]
 
 FROM base AS application
+COPY . /app
+RUN python -m pip install --no-cache-dir --no-build-isolation --no-deps .
 RUN python manage.py collectstatic --noinput --clear
 USER 10001:10001
 EXPOSE 8000

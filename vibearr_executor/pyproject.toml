@@ -18,4 +18,4 @@ packages = ["vibearr_executor"]
 package-dir = {vibearr_executor = "."}
 
 [tool.setuptools.package-data]
-vibearr_executor = ["Dockerfile", "Codex.Dockerfile", "CodexProject.Dockerfile", "validation.Dockerfile", "validation-requirements.txt", "validation_*.toml", "validation_mypy.ini"]
+vibearr_executor = ["Dockerfile", "Slot.Dockerfile", "Codex.Dockerfile", "CodexProject.Dockerfile", "validation.Dockerfile", "validation-requirements.txt", "validation_*.toml", "validation_mypy.ini"]

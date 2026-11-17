@@ -76,22 +76,32 @@ class SlotRuntime:
         self.active = ""
         self.fenced = ""
         self.qualifying = False
+        from .slot_artifacts import DependencyArtifacts
+
+        self.dependency_artifacts = DependencyArtifacts(self)
+        self.probe_operation = ""
+        self.probe_profile = None
+        self.qualification_lock = threading.Lock()
         terminate_children()
         self.reset()
         for path in self.operations.iterdir():
             record = self.record(path.name)
-            if record.get("state") in {"launching", "running", "stopping"}:
+            if record.get("state") in {"launching", "running", "stopping", "unknown"}:
                 record.update(
                     state="exited",
                     descendants_terminated=True,
                     paused=False,
                     result={
+                        "run_id": record["manifest"]["run_id"],
+                        "operation_id": record["operation_id"],
                         "exit_code": None,
                         "terminated": True,
                         "timed_out": False,
+                        "worker_restart": True,
                         "export_error": "Worker restarted; no verified candidate export survived.",
                     },
                 )
+                (path / "backend-secret").unlink(missing_ok=True)
                 self.seal(record)
 
     def reset(self):
@@ -104,6 +114,7 @@ class SlotRuntime:
             Path("/tmp"),
             Path("/dev/shm"),
             Path("/dev/mqueue"),
+            Path("/opt/candidate"),
         ):
             for child in path.iterdir():
                 if child.is_symlink() or not child.is_dir():
@@ -175,11 +186,11 @@ class SlotRuntime:
         if kind == "source":
             unpack(content)
         with self.lock:
-            used = sum(path.stat().st_size for path in self.artifacts.iterdir())
-            if used + len(content) > 512 * 1024 * 1024:
-                raise Rejected("Worker artifact capacity is exhausted.")
             path = self.artifacts / expected_digest
             if not path.exists():
+                used = sum(path.stat().st_size for path in self.artifacts.iterdir())
+                if used + len(content) > 512 * 1024 * 1024:
+                    raise Rejected("Worker artifact capacity is exhausted.")
                 durable(path, content)
         return {
             "handle": expected_digest,
@@ -195,7 +206,7 @@ class SlotRuntime:
                 if canonical(record["manifest"]) != canonical(data):
                     raise Conflict("Operation already binds a different manifest.")
                 return self.public(record)
-            profile = self.profiles.get(data.get("profile_id"))
+            profile = self.profile_for(data)
             if profile is None:
                 raise Rejected("Profile is not registered on this worker.")
             manifest = Manifest.parse(data, profile)
@@ -229,7 +240,7 @@ class SlotRuntime:
     def supply_secret(self, operation_id, secret):
         with self.lock:
             record = self.record(operation_id)
-            profile = self.profiles.get(record.get("manifest", {}).get("profile_id"))
+            profile = self.profile_for(record.get("manifest", {}))
             if (
                 profile is None
                 or profile.phase != "agent"
@@ -259,12 +270,18 @@ class SlotRuntime:
                 return self.public(record)
             if self.active or self.fenced:
                 raise Conflict("Worker slot is busy or fenced for reconciliation.")
+            if (
+                self.qualifying
+                and self.probe_operation
+                and operation_id != self.probe_operation
+            ):
+                raise Conflict("Boundary qualification owns the slot.")
             if not self.qualifying and not self.capabilities()["qualified"]:
                 raise Rejected("Qualify this Docker worker boot before task execution.")
-            manifest = Manifest.parse(
-                record["manifest"], self.profiles[record["manifest"]["profile_id"]]
-            )
-            profile = self.profiles[manifest.profile_id]
+            profile = self.profile_for(record["manifest"])
+            if profile is None:
+                raise Rejected("The prepared recipe is no longer installed.")
+            manifest = Manifest.parse(record["manifest"], profile)
             secret_path = self.path(operation_id) / "backend-secret"
             if profile.backend_secret_env and not secret_path.exists():
                 raise Conflict("Supply the selected model credential before start.")
@@ -278,10 +295,28 @@ class SlotRuntime:
             if profile.database_image and not database_url:
                 raise Rejected("This profile requires an isolated test database slot.")
             extract((self.artifacts / manifest.source_digest).read_bytes(), self.work)
+            dependency = None
+            if profile.phase == "validation":
+                requirements = self.work / "requirements.txt"
+                baseline = Path("/opt/validation/project-requirements.txt")
+                if (
+                    requirements.exists()
+                    and baseline.exists()
+                    and digest(requirements.read_bytes())
+                    != digest(baseline.read_bytes())
+                ):
+                    dependency = self.dependency_artifacts.install(
+                        manifest.run_id, digest(requirements.read_bytes())
+                    )
             for parent, directories, names in os.walk(self.work):
                 for name in directories + names:
                     os.chown(Path(parent) / name, 1000, 1000)
             context = self.inputs / "context"
+            durable(
+                self.inputs / "source.tar",
+                (self.artifacts / manifest.source_digest).read_bytes(),
+                0o444,
+            )
             context.write_bytes((self.artifacts / manifest.context_digest).read_bytes())
             context.chmod(0o444)
             secret = secret_path.read_bytes() if secret_path.exists() else b""
@@ -314,6 +349,7 @@ class SlotRuntime:
                 target.chmod(0o400)
                 os.chown(target, 1000, 1000)
                 environment["VIBEARR_BACKEND_SECRET_FILE"] = str(target)
+            record["dependency_artifact"] = dependency
             record.update(
                 state="launching",
                 worker_boot=self.boot,
@@ -394,6 +430,28 @@ class SlotRuntime:
             result["exit_code"] = self.process.wait(timeout=10)
             terminate_children()
             result["terminated"] = True
+            from .validation_profile import BUILD_ARGV
+
+            if (
+                profile.phase == "setup"
+                and profile.argv == BUILD_ARGV
+                and result["exit_code"] == 0
+                and not self.cancel.is_set()
+                and not result["timed_out"]
+            ):
+                from .dependency_artifacts import capture, manifest
+
+                original = (
+                    self.artifacts / record["manifest"]["source_digest"]
+                ).read_bytes()
+                requirements = unpack(original)["requirements.txt"][1]
+                content = capture(self.work / ".vibearr-dependencies", requirements)
+                durable(self.path(operation_id) / "dependencies.tar", content)
+                result["dependency_artifact"] = manifest(content)
+                for name in (".vibearr-dependencies", ".vibearr-build-tmp"):
+                    shutil.rmtree(self.work / name)
+            if record.get("dependency_artifact"):
+                result["dependency_artifact"] = record["dependency_artifact"]
             if not self.cancel.is_set() and not result["timed_out"]:
                 source = snapshot(self.work)
                 if contains_secret(source, protected):
@@ -572,6 +630,7 @@ class SlotRuntime:
             self.save(record)
             if "source" in selected:
                 (self.path(operation_id) / "source.tar").unlink(missing_ok=True)
+                (self.path(operation_id) / "dependencies.tar").unlink(missing_ok=True)
                 compact_result(record)
             if "logs" in selected:
                 (self.path(operation_id) / "logs.bin").unlink(missing_ok=True)
@@ -599,3 +658,56 @@ class SlotRuntime:
         from .slot_safety import capabilities
 
         return capabilities(self)
+
+    def profile_for(self, data):
+        if (
+            self.qualifying
+            and self.probe_profile
+            and data.get("operation_id") == self.probe_operation
+        ):
+            if data.get("profile_id") == self.probe_profile.profile_id:
+                return self.probe_profile
+        return self.profiles.get(data.get("profile_id"))
+
+    def qualification(self, action):
+        from .slot_qualification import qualify, prepare_restart, progress
+
+        if action == "status":
+            return progress(self)
+        if action == "run" and progress(self)["state"] in {"completed", "failed"}:
+            return progress(self)
+        if not self.qualification_lock.acquire(blocking=False):
+            return progress(self)
+        try:
+            if self.active:
+                from .slot_qualification import restart_witness
+
+                if action == "restart":
+                    return restart_witness(self)
+                raise Conflict("Stop active work before qualifying this slot.")
+            return prepare_restart(self) if action == "restart" else qualify(self)
+        finally:
+            self.qualification_lock.release()
+
+    def dependency_chunk(self, operation_id, offset, limit):
+        from .retention import require_available
+
+        require_available(self.record(operation_id), "source")
+        if (
+            type(offset) is not int
+            or type(limit) is not int
+            or offset < 0
+            or not 1 <= limit <= 65536
+        ):
+            raise Rejected("Invalid dependency artifact byte range.")
+        record = self.record(operation_id)
+        if (
+            record["state"] != "exited"
+            or not record.get("descendants_terminated")
+            or record.get("result", {}).get("exit_code") != 0
+            or not record.get("result", {}).get("dependency_artifact")
+        ):
+            raise Conflict("No terminated dependency artifact is available.")
+        with (self.path(operation_id) / "dependencies.tar").open("rb") as stream:
+            stream.seek(offset)
+            return stream.read(limit)

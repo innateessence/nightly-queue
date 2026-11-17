@@ -23,8 +23,9 @@ class SlotManifestTests(unittest.TestCase):
             ("/trusted/check",),
             Limits(2, 4096, 128, 2048),
         )
-        with patch("vibearr_executor.slots.terminate_children"), patch.object(
-            SlotRuntime, "reset"
+        with (
+            patch("vibearr_executor.slots.terminate_children"),
+            patch.object(SlotRuntime, "reset"),
         ):
             self.runtime = SlotRuntime(Path(self.temporary.name), [self.profile])
         self.addCleanup(self.runtime.close)
@@ -60,6 +61,12 @@ class SlotManifestTests(unittest.TestCase):
     def test_repeated_prepare_returns_the_same_saved_operation(self):
         first = self.runtime.prepare(self.manifest)
         self.assertEqual(self.runtime.prepare(self.manifest), first)
+
+    def test_repeated_upload_is_available_when_artifact_storage_is_full(self):
+        with (self.runtime.artifacts / "capacity-fixture").open("wb") as stream:
+            stream.truncate(512 * 1024**2)
+        repeated = self.runtime.upload("context", b"context", digest(b"context"))
+        self.assertEqual(repeated["sha256"], self.manifest["context_digest"])
 
     def test_validation_rejects_backend_credentials(self):
         self.runtime.prepare(self.manifest)

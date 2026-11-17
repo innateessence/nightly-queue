@@ -25,6 +25,11 @@ class Gateway:
             durable(identity, str(uuid4()).encode())
         self.instance = identifier(identity.read_text())
         self.lock = threading.RLock()
+        self.artifacts = directory / "artifacts"
+        self.artifacts.mkdir(mode=0o700, exist_ok=True)
+        from .slot_builds import DependencyBuilds
+
+        self.dependency_builds = DependencyBuilds(self)
 
     def close(self):
         self.lockfile.close()
@@ -64,6 +69,16 @@ class Gateway:
         result = None
         for client in self.clients.values():
             result = client.upload(kind, content)
+        if kind == "source":
+            with self.lock:
+                path = self.artifacts / expected_digest
+                if not path.exists():
+                    usage = sum(
+                        path.stat().st_size for path in self.artifacts.iterdir()
+                    )
+                    if usage + len(content) > 512 * 1024**2:
+                        raise Rejected("Gateway source artifact capacity is exhausted.")
+                    durable(path, content)
         return result
 
     def prepare(self, data):
@@ -89,6 +104,8 @@ class Gateway:
                     "phase": phase,
                     "manifest_digest": digest(canonical(data)),
                     "instance_id": observed["instance_id"],
+                    "source_digest": data.get("source_digest"),
+                    "run_id": data.get("run_id"),
                 }
                 durable(path, canonical(record))
             client = self.client(operation_id)
@@ -143,9 +160,30 @@ class Gateway:
         return value
 
     def purge(self, operation_id, run_id, resources):
-        return self.client(operation_id).purge(
+        result = self.client(operation_id).purge(
             operation_id, run_id=run_id, resources=resources
         )
+        with self.lock:
+            path = self.directory / identifier(operation_id)
+            record = json.loads(path.read_bytes())
+            record["resources_removed"] = sorted(
+                set(resources) | set(record.get("resources_removed", []))
+            )
+            durable(path, canonical(record))
+            if "source" in resources and record.get("source_digest"):
+                self.release_source(record["source_digest"])
+        return result
+
+    def release_source(self, source_digest):
+        for other in self.directory.iterdir():
+            if not other.is_file() or len(other.name) != 36:
+                continue
+            value = json.loads(other.read_bytes())
+            if value.get(
+                "source_digest"
+            ) == source_digest and "source" not in value.get("resources_removed", []):
+                return
+        (self.artifacts / source_digest).unlink(missing_ok=True)
 
 
 def main():

@@ -48,12 +48,18 @@ def binding(runtime):
 
 
 def capabilities(runtime):
+    from .slot_qualification import REQUIRED_CHECKS
+
     current = binding(runtime)
     proof = runtime.directory / "qualification.json"
     report = json.loads(proof.read_bytes()) if proof.exists() else {}
     qualified = (
         report.get("binding_digest") == digest(canonical(current))
-        and report.get("complete") is True
+        and report.get("schema_version") == 1
+        and report.get("checks") == sorted(REQUIRED_CHECKS)
+        and bool(report.get("restart_receipt"))
+        and len(report.get("probe_receipts", [])) == 2
+        and not runtime.qualifying
     )
     return {
         "schema_version": 1,

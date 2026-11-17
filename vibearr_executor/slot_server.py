@@ -48,6 +48,7 @@ def main():
     runtime = SlotRuntime(
         Path("/control"), selected, configure_network=network, database=database
     )
+    runtime.control_token = token
     if database:
         database.reset("")
     runtime.capabilities()
