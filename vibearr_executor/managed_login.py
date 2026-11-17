@@ -9,6 +9,7 @@ import shutil
 import subprocess
 
 from .runtime import durable
+from .worker import terminate_children
 
 
 ROOT = Path("/logins")
@@ -153,18 +154,18 @@ def main():
                 command = ["codex", "login", "--device-auth"]
             else:
                 command = ["claude", "auth", "login", "--claudeai"]
-            subprocess.run(
-                command,
-                env=environment,
-                cwd=home,
-                user=1000,
-                group=1000,
-                extra_groups=[],
-                check=True,
-            )
-            from .worker import terminate_children
-
-            terminate_children()
+            try:
+                subprocess.run(
+                    command,
+                    env=environment,
+                    cwd=home,
+                    user=1000,
+                    group=1000,
+                    extra_groups=[],
+                    check=True,
+                )
+            finally:
+                terminate_children()
             save_login(args.provider, args.credential_id, collect(args.provider, home))
             print("Subscription login saved in the runner volume.")
         finally:
