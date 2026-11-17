@@ -21,14 +21,15 @@ def profiles(phase, image, database_image, dependency_digest):
         raise ValueError("Unsupported worker phase.")
     return [
         Profile(
-            profile_id="native-default",
+            profile_id=profile_id,
             version=1,
             image=image,
             phase=phase,
             argv=ARGV,
             limits=LIMITS,
-            network_hosts=HOSTS["token"],
+            network_hosts=HOSTS["session"],
             backend_secret_env=SECRET_ENV,
             database_image=database_image,
         )
+        for profile_id in ("native-default", "codex-session-v1")
     ]

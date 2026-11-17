@@ -518,7 +518,7 @@ class NativeAcceptanceEvidenceTests(unittest.TestCase):
             "sha256:" + "a" * 64, "sha256:" + "b" * 64, "c" * 64
         )
         profiles = [
-            codex_profile("sha256:" + "d" * 64, "token"),
+            codex_profile("sha256:" + "d" * 64, "session"),
             *validation.executor_profiles(),
         ]
         executor = Mock()
@@ -536,7 +536,7 @@ class NativeAcceptanceEvidenceTests(unittest.TestCase):
         }
         policy = default_execution_policy()
         policy.update(
-            runtime_profile="codex-token-v1", validation_profile=validation.profile_id
+            runtime_profile="codex-session-v1", validation_profile=validation.profile_id
         )
         with patch.dict("os.environ", {"VIBEARR_VALIDATION_PROFILE_FILE": ""}):
             result = runtime_diagnostics(

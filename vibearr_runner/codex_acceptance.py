@@ -446,7 +446,7 @@ def main():
     parser.add_argument("--inspect-session", type=Path)
     parser.add_argument("--state", type=Path)
     parser.add_argument("--credential-file", type=Path)
-    parser.add_argument("--kind", choices=("token", "session"), default="token")
+    parser.add_argument("--kind", choices=("token", "session"), default="session")
     parser.add_argument("--model")
     parser.add_argument("--evidence", type=Path)
     parser.add_argument(

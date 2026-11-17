@@ -292,6 +292,11 @@ class NativeLifecycleTests(unittest.TestCase):
             ExecutionPolicy(),
             runtime_profile=self.executor.agent.profile_id,
             validation_profile=self.profile.profile_id,
+            network_hosts=(
+                *self.executor.agent.network_hosts,
+                "pypi.org",
+                "files.pythonhosted.org",
+            ),
         )
         item = {
             "title": "Update the answer",

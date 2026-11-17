@@ -136,7 +136,7 @@ def main():
             assert not proxy
         else:
             target = (
-                "https://api.openai.com/v1/models"
+                "https://chatgpt.com/"
                 if os.environ["VIBEARR_PHASE"] == "agent"
                 else "https://pypi.org/simple/"
             )

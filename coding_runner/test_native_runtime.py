@@ -21,8 +21,8 @@ class ExecutorFixture:
             "profile_digest": "a" * 64,
             "phase": "agent",
             "limits": limits,
-            "network_hosts": ["api.openai.com"],
-            "backend_secret_env": "OPENAI_API_KEY",
+            "network_hosts": ["chatgpt.com"],
+            "backend_secret_env": "VIBEARR_CODEX_AUTH",
         }
         validation = {
             "profile_id": "project-default",

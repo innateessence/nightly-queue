@@ -3,13 +3,15 @@ import os
 from .proxy import Handler, Proxy
 
 
+HOSTS = {
+    "agent": {"chatgpt.com"},
+    "setup": {"pypi.org", "files.pythonhosted.org"},
+}
+
+
 def main():
-    hosts = {
-        "agent": {"api.openai.com"},
-        "setup": {"pypi.org", "files.pythonhosted.org"},
-    }
     with Proxy(("0.0.0.0", 3128), Handler) as server:
-        server.hosts = hosts[os.environ["VIBEARR_PROXY_PHASE"]]
+        server.hosts = HOSTS[os.environ["VIBEARR_PROXY_PHASE"]]
         server.denied = set(
             filter(None, os.environ.get("VIBEARR_DENIED_PUBLIC_IPS", "").split(","))
         )
