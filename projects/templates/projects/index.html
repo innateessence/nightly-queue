@@ -1,59 +1,35 @@
 {% extends "base.html" %}
-
 {% block title %}Projects · vibearr{% endblock %}
 {% block projects_current %} aria-current="page"{% endblock %}
-
 {% block heading %}
-  <section class="page-heading" aria-labelledby="page-title">
-    <div>
-      <p class="eyebrow">YOUR GITHUB REPOSITORIES</p>
-      <h1 id="page-title">Projects</h1>
-      <p class="subtitle">Choose where your queued work belongs.</p>
-    </div>
-    <div class="queue-total">{{ projects|length }} project{{ projects|length|pluralize }}</div>
-  </section>
+<section class="page-heading" aria-labelledby="page-title">
+  <div><h1 id="page-title">Projects</h1><p class="subtitle">Repositories, discovery and execution policy.</p></div>
+  <div class="heading-actions"><span class="queue-total">{{ projects|length }} project{{ projects|length|pluralize }}</span><a class="button-primary" href="#add-project" data-open-panel="add-project">{% include "_icon.html" with name="plus" %}Add project</a></div>
+</section>
 {% endblock %}
-
 {% block content %}
-  <div class="workspace">
-    <section class="panel composer" aria-labelledby="add-title">
-      <div class="section-heading">
-        <span class="section-icon" aria-hidden="true">＋</span>
-        <div><h2 id="add-title">Add a project</h2><p>Start with a GitHub repository.</p></div>
-      </div>
-      <form method="post" action="{% url 'project_list' %}">
-        {% include "projects/_form.html" with submit_label="Create project" %}
-      </form>
-    </section>
-
-    <section aria-labelledby="projects-title">
-      <div class="queue-heading"><h2 id="projects-title">Your projects</h2></div>
-      <div class="queue-items">
-        {% for project in projects %}
-          <article class="panel queue-item">
-            <div class="item-meta">
-              <span class="order-label">Project #{{ project.pk }}</span>
-              <a class="empty-link" href="{% url 'edit_project' project.pk %}" aria-label="Edit {{ project.name }}">Edit</a>
-            </div>
-            <h3>{{ project.name }}</h3>
-            {% if project.presentation_error %}<p role="status">{{ project.presentation_error }}</p>{% endif %}
-            <p class="item-project"><a href="{{ project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ project.repository_url }}</a></p>
-            <p class="item-project">Base branch: {{ project.base_branch|default:"Repository default" }}</p>
-            <p class="item-project">Mode: {{ project.autonomous|yesno:"Autonomous,Manual" }}</p>
-            {% if project.autonomous %}
-              <p class="item-project">Discovery attempted: {{ project.sync_attempt_at|date:"M j, H:i T"|default:"Never" }} · Last successful: {{ project.sync_success_at|date:"M j, H:i T"|default:"Never" }}</p>
-              {% if project.sync_error %}<p class="item-instructions" role="status">{{ project.sync_error }}</p>{% endif %}
-            {% endif %}
-            <div class="item-footer"><a class="empty-link" href="{% url 'index' %}?project={{ project.pk }}">View queue <span aria-hidden="true">↗</span></a></div>
-          </article>
-        {% empty %}
-          <div class="panel empty-state">
-            <h3>No projects yet.</h3>
-            <p>Add your first GitHub repository to start queuing work.</p>
-            <a class="empty-link" href="#{{ form.name.id_for_label }}">Add your first project <span aria-hidden="true">↗</span></a>
-          </div>
-        {% endfor %}
-      </div>
-    </section>
+<details class="panel add-panel" id="add-project"{% if form.errors or runner_form.errors or form_unavailable %} open{% endif %}>
+  <summary>Add a project</summary>
+  <section class="composer" aria-labelledby="add-title">
+    <div class="section-heading"><div><h2 id="add-title">Add a project</h2><p>Connect a GitHub repository to queue work.</p></div><button class="icon-button close-panel" type="button" data-close-panel aria-label="Close add project">{% include "_icon.html" with name="close" %}</button></div>
+    <form method="post" action="{% url 'project_list' %}">{% include "projects/_form.html" with submit_label="Create project" %}</form>
+  </section>
+</details>
+<section class="panel list-panel" aria-label="Projects">
+  {% if projects %}
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Projects table">
+    <table class="data-table projects-table">
+      <thead><tr><th scope="col" class="name-column">Project</th><th scope="col">Base branch</th><th scope="col">Mode</th><th scope="col">Issue discovery</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody>{% for project in projects %}<tr>
+        <td><a class="cell-title" href="{% url 'edit_project' project.pk %}">{{ project.name }}</a><span class="cell-note">Project #{{ project.pk }}</span><span class="cell-note"><a href="{{ project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ project.repository_url }}</a></span>{% if project.presentation_error %}<p class="field-error" role="status">{{ project.presentation_error }}</p>{% endif %}</td>
+        <td><code>{{ project.base_branch|default:"Repository default" }}</code></td>
+        <td><span class="status-pill{% if project.autonomous %} status-active{% endif %}">{{ project.autonomous|yesno:"Autonomous,Manual" }}</span></td>
+        <td>{% if project.autonomous %}<span class="cell-note">Last successful: {{ project.sync_success_at|date:"M j, H:i T"|default:"Never" }}</span><span class="cell-note">Discovery attempted: {{ project.sync_attempt_at|date:"M j, H:i T"|default:"Never" }}</span>{% if project.sync_error %}<p class="field-error" role="status">{{ project.sync_error }}</p>{% endif %}{% else %}<span class="cell-note">Manual tasks only</span>{% endif %}</td>
+        <td class="row-actions"><a href="{% url 'index' %}?project={{ project.pk }}">View queue</a><a class="button-filter" href="{% url 'edit_project' project.pk %}" aria-label="Edit {{ project.name }}">Edit</a></td>
+      </tr>{% endfor %}</tbody>
+    </table>
   </div>
+  <div class="table-footer">{{ projects|length }} project{{ projects|length|pluralize }}<span>Project settings apply to future work</span></div>
+  {% else %}<div class="empty-state">{% include "_icon.html" with name="projects" %}<h2>No projects yet.</h2><p>Add your first GitHub repository to start queuing work.</p><a class="button-primary" href="#add-project" data-open-panel="add-project">{% include "_icon.html" with name="plus" %}Add your first project</a></div>{% endif %}
+</section>
 {% endblock %}

@@ -10,14 +10,14 @@
       <h1 id="page-title">Edit project</h1>
       <p class="subtitle">Changes apply to work that has not been claimed yet.</p>
     </div>
-    <a class="empty-link" href="{% url 'project_list' %}">Back to projects</a>
+    <a class="button-filter" href="{% url 'project_list' %}">Back to projects</a>
   </section>
 {% endblock %}
 
 {% block content %}
   <section class="panel composer project-editor" aria-labelledby="edit-title">
     <div class="section-heading"><h2 id="edit-title">Project details</h2></div>
-    <form method="post" action="{% url 'edit_project' project.pk %}">
+    <form class="settings-fields" method="post" action="{% url 'edit_project' project.pk %}">
       {% include "projects/_form.html" with submit_label="Save changes" %}
       <p class="form-footnote"><a href="{% url 'project_list' %}">Cancel</a></p>
     </form>

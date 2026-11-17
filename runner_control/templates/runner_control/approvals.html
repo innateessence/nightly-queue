@@ -3,7 +3,7 @@
 {% block heading %}<div class="page-heading"><h1>Action approvals</h1><p>Review each exact command and its source before execution. A saved plan grants no permission.</p></div>{% endblock %}
 {% block content %}
 {% for approval in approvals %}
-<section class="card" style="padding:1.5rem; margin-bottom:1.5rem; overflow-wrap:anywhere">
+<section class="panel plan-section">
   <h2><a href="{% url 'runner_plan_detail' approval.run_id %}">{{ approval.item_title }}</a></h2>
   <p><strong>{{ approval.decision_display }}</strong>{% if approval.consumed_at %} · Execution permit consumed {{ approval.consumed_at }}{% endif %}</p>
   <p>Run {{ approval.run_id }} · Requested {{ approval.created_at }}</p>
@@ -12,7 +12,7 @@
   <p>Source: <strong>{{ approval.action.source_kind }}</strong> · {{ approval.action.source_reference }}</p>
   <p>Interpretation: <strong>{{ approval.action.mode }}</strong> · Working directory: <code>/workspace</code> · Network: disabled</p>
   <p>Arguments (each line is one literal argument):</p>
-  <ol>{% for arg in approval.action.argv %}<li><pre style="white-space:pre-wrap">{{ arg }}</pre></li>{% endfor %}</ol>
+  <ol>{% for arg in approval.action.argv %}<li><pre>{{ arg }}</pre></li>{% endfor %}</ol>
   <details><summary>Source and workspace binding</summary>
     <p>Workspace: <code>{{ approval.action.workspace_id }}</code></p>
     <p>Base revision: <code>{{ approval.action.base_revision }}</code></p>

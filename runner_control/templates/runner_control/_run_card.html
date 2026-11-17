@@ -1,5 +1,5 @@
 <article class="panel queue-item run-card">
-  <div class="item-meta"><span class="status-pill">{{ run.get_state_display }}</span><span>{{ run.get_stage_display }}</span></div>
+  <div class="item-meta"><span class="status-pill status-{{ run.state }}">{{ run.get_state_display }}</span><span>{{ run.get_stage_display }}</span></div>
   <h2><a href="{% url 'runner_plan_detail' run.pk %}">{{ run.item.title|default:"Empty queue" }}</a></h2>
   <p class="item-project">{{ run.runner.name }} · Started {{ run.created_at|date:"M j, H:i T" }} · {{ run.created_at|timesince }} ago<br><code>{{ run.pk }}</code></p>
   <dl class="run-facts">

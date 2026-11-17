@@ -1,14 +1,1 @@
-{% for field in fields %}
-  <div class="field{% if field.widget_type == 'checkbox' %} checkbox-field{% endif %}">
-    {% if field.widget_type == "checkbox" %}
-      <label class="checkbox-label" for="{{ field.id_for_label }}">
-        {{ field }}
-        <span class="checkbox-copy"><span>{{ field.label }}</span>{% if field.help_text %}<span class="field-hint">{{ field.help_text }}</span>{% endif %}</span>
-      </label>
-    {% else %}
-      <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
-      {% if field.help_text %}<p class="field-hint">{{ field.help_text }}</p>{% endif %}
-    {% endif %}
-    {% for error in field.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
-  </div>
-{% endfor %}
+{% for field in fields %}{% include "runner_control/_field.html" %}{% endfor %}
