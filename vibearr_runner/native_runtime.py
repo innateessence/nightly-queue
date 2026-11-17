@@ -7,20 +7,20 @@ def runtime_diagnostics(policy: dict, client=None, *, validation_profile=None) -
     try:
         from vibearr_executor.client import Client, ExecutorUnavailable
         from vibearr_executor.contracts import Limits, Rejected, sha256
-        from vibearr_executor import QUALIFICATION_VERSION
+        from vibearr_executor import SLOT_PROTOCOL_VERSION, SLOT_QUALIFICATION_VERSION
 
         selected = ExecutionPolicy.from_data(policy)
         executor = client or Client.from_environment()
         capabilities = executor.capabilities()
         if (
             capabilities.get("schema_version") != 1
-            or capabilities.get("protocol_version") != 1
-            or capabilities.get("qualification_version") != QUALIFICATION_VERSION
+            or capabilities.get("protocol_version") != SLOT_PROTOCOL_VERSION
+            or capabilities.get("qualification_version") != SLOT_QUALIFICATION_VERSION
         ):
             raise ValueError("Executor protocol version is unsupported.")
         sha256(capabilities.get("binding_digest"))
         if (
-            capabilities.get("runtime") != "docker-oci-v1"
+            capabilities.get("runtime") != "compose-slot-v2"
             or capabilities.get("qualified") is not True
         ):
             raise ValueError(
@@ -66,7 +66,7 @@ def runtime_diagnostics(policy: dict, client=None, *, validation_profile=None) -
             }
             Limits.parse(desired)
             if any(
-                type(limits.get(key)) is not int or limits[key] < value
+                type(limits.get(key)) is not int or limits[key] != value
                 for key, value in desired.items()
             ):
                 raise ValueError(

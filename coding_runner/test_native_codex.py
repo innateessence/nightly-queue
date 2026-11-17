@@ -12,7 +12,7 @@ from vibearr_runner.policy import default_execution_policy
 
 EXECUTOR_INSTALLED = importlib.util.find_spec("vibearr_executor") is not None
 if EXECUTOR_INSTALLED:
-    from vibearr_executor import QUALIFICATION_VERSION
+    from vibearr_executor import SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION
     from vibearr_executor.artifacts import pack, result_manifest
     from vibearr_executor.contracts import Conflict
 
@@ -43,9 +43,9 @@ class ExecutorFixture:
 
     def capabilities(self):
         return {
-            "runtime": "docker-oci-v1",
+            "runtime": "compose-slot-v2",
             "schema_version": 1,
-            "protocol_version": 1,
+            "protocol_version": 2,
             "qualification_version": self.qualification_version,
             "binding_digest": self.binding_digest,
             "qualified": self.qualified,
@@ -158,13 +158,11 @@ class NativeCodexTests(unittest.TestCase):
         )
         self.assertNotIn(TOKEN, json.dumps(session.to_data()))
 
-    def test_manifest_uses_policy_limits_below_operator_ceiling(self):
+    def test_smaller_policy_limits_require_a_matching_fixed_worker_slot(self):
         self.policy.update(cpu_limit=1, memory_mb=1024, pids_limit=32, workspace_mb=256)
-        session = self.prepare()
-        self.assertEqual(
-            session.manifest["limits"],
-            {"cpu": 1, "memory_mb": 1024, "pids": 32, "workspace_mb": 256},
-        )
+        with self.assertRaises(NativeSessionError):
+            self.prepare()
+        self.assertFalse(self.client.prepared)
 
     def test_unqualified_runtime_cannot_prepare_native_work(self):
         self.client.qualified = False

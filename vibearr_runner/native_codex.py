@@ -177,16 +177,16 @@ class NativeCodexAdapter:
         self.client = client
 
     def selected_profile(self, policy: ExecutionPolicy, kind: str):
-        from vibearr_executor import QUALIFICATION_VERSION
+        from vibearr_executor import SLOT_QUALIFICATION_VERSION
         from vibearr_executor.contracts import Limits
 
         capabilities = self.client.capabilities()
         versions = {
             "schema_version": 1,
-            "protocol_version": 1,
-            "qualification_version": QUALIFICATION_VERSION,
+            "protocol_version": 2,
+            "qualification_version": SLOT_QUALIFICATION_VERSION,
         }
-        if capabilities.get("runtime") != "docker-oci-v1" or any(
+        if capabilities.get("runtime") != "compose-slot-v2" or any(
             type(capabilities.get(key)) is not int or capabilities[key] != expected
             for key, expected in versions.items()
         ):
@@ -224,7 +224,7 @@ class NativeCodexAdapter:
             )
             Limits.parse(asdict(desired))
             if any(
-                amount > asdict(profile.limits)[key]
+                amount != asdict(profile.limits)[key]
                 for key, amount in asdict(desired).items()
             ):
                 raise NativeSessionError(

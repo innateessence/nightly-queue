@@ -9,6 +9,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 from .contracts import (
     MAX_ARCHIVE,
@@ -21,11 +22,12 @@ from .contracts import (
 )
 from .engine import EngineError
 from .runtime import Runtime
+from .client import ExecutorUnavailable, ExecutorRejected
 
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
-    runtime: Runtime
+    runtime: Any
     token: str
 
 
@@ -86,6 +88,21 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(409, {"error": str(exc)})
         except Rejected as exc:
             self.reply(400, {"error": str(exc)})
+        except ExecutorRejected as exc:
+            code = exc.http_status if exc.http_status in {400, 404, 409, 410} else 409
+            self.reply(
+                code,
+                {
+                    "error": "Worker rejected the bound operation; inspect its current status."
+                },
+            )
+        except ExecutorUnavailable:
+            self.reply(
+                503,
+                {
+                    "error": "Worker control is unavailable; reconcile the existing operation."
+                },
+            )
         except (ValueError, TypeError, KeyError, UnicodeError):
             self.reply(
                 400, {"error": "Request violates the versioned executor contract."}
@@ -104,6 +121,8 @@ class Handler(BaseHTTPRequestHandler):
     def route(self, data: dict) -> dict:
         runtime = self.server.runtime
         if self.command == "GET" and self.path == "/v1/capabilities" and not data:
+            if hasattr(runtime, "capabilities"):
+                return runtime.capabilities()
             from .qualification import capabilities
 
             return capabilities(runtime)
@@ -117,6 +136,12 @@ class Handler(BaseHTTPRequestHandler):
             )
         if self.path == "/v1/prepare":
             return runtime.prepare(data)
+        if not hasattr(runtime, "dependency_builds") and self.path.startswith(
+            "/v1/dependency-builds/"
+        ):
+            raise Rejected(
+                "This runtime does not implement legacy image-building operations."
+            )
         if self.path == "/v1/dependency-builds/prepare":
             return runtime.dependency_builds.prepare(data)
         parts = self.path.split("/")

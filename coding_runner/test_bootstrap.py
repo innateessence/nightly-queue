@@ -478,7 +478,7 @@ class ProviderObservationTests(unittest.TestCase):
 )
 class NativeAcceptanceEvidenceTests(unittest.TestCase):
     def test_explicit_validation_profile_does_not_require_an_environment_fallback(self):
-        from vibearr_executor import QUALIFICATION_VERSION
+        from vibearr_executor import SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION
         from vibearr_executor.validation_profile import ValidationProfile
         from vibearr_runner.native_codex import codex_profile
         from vibearr_runner.native_runtime import runtime_diagnostics
@@ -494,9 +494,9 @@ class NativeAcceptanceEvidenceTests(unittest.TestCase):
         executor = Mock()
         executor.capabilities.return_value = {
             "schema_version": 1,
-            "protocol_version": 1,
+            "protocol_version": 2,
             "qualification_version": QUALIFICATION_VERSION,
-            "runtime": "docker-oci-v1",
+            "runtime": "compose-slot-v2",
             "qualified": True,
             "accepting_work": True,
             "binding_digest": "e" * 64,
