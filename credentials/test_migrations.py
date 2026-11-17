@@ -53,9 +53,9 @@ class CredentialMigrationTests(TransactionTestCase):
         executor.migrate(executor.loader.graph.leaf_nodes())
 
     def test_existing_token_becomes_github_token_without_reencryption(self):
-        credential = Credential.objects.defer("secret_version", "revoked_at").get(
-            pk=self.token.pk
-        )
+        credential = Credential.all_objects.defer(
+            "secret_version", "revoked_at", "deleted_at"
+        ).get(pk=self.token.pk)
         self.assertEqual(credential.provider, "github")
         self.assertEqual(credential.kind, "token")
         self.assertEqual(credential.encrypted_payload, self.ciphertext)
@@ -63,15 +63,17 @@ class CredentialMigrationTests(TransactionTestCase):
             self.assertEqual(credential.get_secret()["secret"], "legacy-token")
 
     def test_existing_ssh_key_becomes_github_ssh_without_reencryption(self):
-        credential = Credential.objects.defer("secret_version", "revoked_at").get(
-            pk=self.ssh.pk
-        )
+        credential = Credential.all_objects.defer(
+            "secret_version", "revoked_at", "deleted_at"
+        ).get(pk=self.ssh.pk)
         self.assertEqual(credential.provider, "github")
         self.assertEqual(credential.kind, "ssh")
         self.assertEqual(credential.encrypted_payload, "unchanged-ssh-ciphertext")
 
     def test_project_association_is_preserved(self):
-        project = Project.objects.only("id", "credential_id").get(pk=self.project.pk)
+        project = Project.all_objects.only("id", "credential_id").get(
+            pk=self.project.pk
+        )
         self.assertEqual(project.credential_id, self.token.pk)
 
     def test_existing_credentials_can_be_rolled_back(self):

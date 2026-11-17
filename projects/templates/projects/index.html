@@ -25,7 +25,7 @@
         <td><code>{{ project.base_branch|default:"Repository default" }}</code></td>
         <td><span class="status-pill{% if project.autonomous %} status-active{% endif %}">{{ project.autonomous|yesno:"Autonomous,Manual" }}</span></td>
         <td>{% if project.autonomous %}<span class="cell-note">Last successful: {{ project.sync_success_at|date:"M j, H:i T"|default:"Never" }}</span><span class="cell-note">Discovery attempted: {{ project.sync_attempt_at|date:"M j, H:i T"|default:"Never" }}</span>{% if project.sync_error %}<p class="field-error" role="status">{{ project.sync_error }}</p>{% endif %}{% else %}<span class="cell-note">Manual tasks only</span>{% endif %}</td>
-        <td class="row-actions"><a href="{% url 'index' %}?project={{ project.pk }}">View queue</a><a class="button-filter" href="{% url 'edit_project' project.pk %}" aria-label="Edit {{ project.name }}">Edit</a></td>
+        <td class="row-actions"><a href="{% url 'index' %}?project={{ project.pk }}">View queue</a><a class="button-filter" href="{% url 'edit_project' project.pk %}" aria-label="Edit {{ project.name }}">Edit</a><a class="button-remove" href="{% url 'delete_project' project.pk %}">Delete</a></td>
       </tr>{% endfor %}</tbody>
     </table>
   </div>

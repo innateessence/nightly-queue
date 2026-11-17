@@ -59,7 +59,7 @@
           <td><a href="{{ item.project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ item.project.name }}</a></td>
           <td><span class="priority priority-{{ item.priority }}" aria-label="{{ item.get_priority_display }} priority">{{ item.get_priority_display }}<span class="sr-only"> priority</span></span></td>
           <td class="date-cell"><time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at|date:"M j, Y" }}<span class="cell-note">{{ item.created_at|date:"H:i T" }}</span></time></td>
-          <td class="row-actions">{% if item.source == 'manual' and item.status != 'running' %}<form method="post" action="{% url 'remove_item' item.pk %}">{% csrf_token %}<button class="button-remove" type="submit" aria-label="Remove {{ item.title }} from queue">Remove</button></form>{% endif %}</td>
+          <td class="row-actions"><a class="button-remove" href="{% url 'delete_item' item.pk %}" aria-label="Delete work item #{{ item.pk }}">Delete</a></td>
         </tr>
       {% endfor %}</tbody>
     </table>

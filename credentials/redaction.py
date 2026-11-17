@@ -34,7 +34,9 @@ def selected_credential_values(references):
         return []
     RunnerSettings.objects.get_or_create(pk=1)
     RunnerSettings.objects.select_for_update().get(pk=1)
-    credentials = list(Credential.objects.select_for_update().filter(pk__in=references))
+    credentials = list(
+        Credential.all_objects.select_for_update().filter(pk__in=references)
+    )
     if len(credentials) != len(references):
         raise ValidationError(
             {

@@ -263,11 +263,10 @@ class RunnerAPITests(TestCase):
         response = self.client.post(
             reverse("remove_item", args=[self.item.pk]), follow=True
         )
-        self.assertContains(
-            response, "Work with runner history must be retained for recovery."
-        )
-        self.assertTrue(QueueItem.objects.filter(pk=self.item.pk).exists())
-        self.assertTrue(Run.objects.filter(pk=self.run_id).exists())
+        self.assertContains(response, "Work item removed from your queue.")
+        self.assertFalse(QueueItem.objects.filter(pk=self.item.pk).exists())
+        self.assertIsNotNone(QueueItem.all_objects.get(pk=self.item.pk).deleted_at)
+        self.assertEqual(Run.objects.get(pk=self.run_id).item_id, self.item.pk)
 
     def test_generic_finish_cannot_complete_runner_owned_claim(self):
         token = self.claim_token()

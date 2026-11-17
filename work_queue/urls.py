@@ -2,8 +2,10 @@ from django.urls import path
 from django.views.generic import RedirectView
 
 from . import api, views
+from runner_control import deletion_views
 
 urlpatterns = [
+    path("items/<int:pk>/delete/", deletion_views.item, name="delete_item"),
     path("", views.Index.as_view(), name="index"),
     path(
         "auto/",

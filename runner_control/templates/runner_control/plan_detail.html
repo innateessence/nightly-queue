@@ -23,7 +23,7 @@
 {% if run.cancellation_requested_at %}<p>Cancellation requested {{ run.cancellation_requested_at }}. {% if run.cancellation_confirmed_at %}Process termination confirmed.{% else %}Awaiting confirmed backend and process termination. The claim remains owned.{% endif %}</p>{% else %}
 <form method="post" class="operator-action" action="{% url 'runner_operator_cancel' run.pk %}">{% csrf_token %}<label for="cancel-reason">Cancellation reason</label><input id="cancel-reason" name="reason" maxlength="2000" required value="Operator requested cancellation"><button class="button-filter" type="submit">Request cancellation</button></form>{% endif %}
 <p>Recovery: stop the owning runner before inspecting its private journal and volume. Resume with that same volume and controller identity. A missing volume or uncertain external outcome requires reconciliation; elapsed time grants no ownership.</p>{% endif %}
-{% if native_run and run.state != "empty" and run.state != "obsolete" %}
+{% if run.item.deleted_at %}<p class="field-hint">This work item was deleted. Its history is retained; it cannot be retried.</p>{% elif native_run and run.state != "empty" and run.state != "obsolete" %}
 <form method="post" class="operator-action" action="{% url 'runner_operator_retry' run.pk %}">{% csrf_token %}<button class="button-filter" type="submit">{% if run.state == "active" %}Stop and retry{% else %}Retry task{% endif %}</button></form>
 {% endif %}
 <details><summary>Effective configuration at claim · {{ run.configuration_revision }}</summary><pre>{{ configuration_json }}</pre></details>
