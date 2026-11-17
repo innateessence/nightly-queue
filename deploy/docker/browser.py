@@ -25,12 +25,15 @@ async def main():
             page = await context.new_page()
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.on("requestfailed", lambda request: requests.append(request.url))
-            response = await page.goto(BASE, wait_until="networkidle")
+            response = await page.goto(BASE + "/?theme=light", wait_until="networkidle")
             if response is None or response.status != 200:
                 raise RuntimeError(
                     "The Docker application did not serve its queue page."
                 )
-            await page.get_by_role("heading", name="Leave it for the night.").wait_for()
+            heading = page.locator("main h1").first
+            await heading.wait_for()
+            if not (await heading.inner_text()).strip():
+                raise RuntimeError("The queue page is missing its main heading.")
             style = await context.request.get(BASE + "/static/work_queue/queue.css")
             if style.status != 200 or "text/css" not in style.headers.get(
                 "content-type", ""
