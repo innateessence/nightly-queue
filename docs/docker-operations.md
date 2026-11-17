@@ -78,6 +78,52 @@ docker compose --profile checks run --rm --no-deps browser
 Browser PNGs and its JSON report stay in `browser-artifacts`. Export only selected
 artifacts using an explicit operator Docker copy; no browser runs on the host.
 
+### Source-bound browser acceptance
+
+The exact-candidate `operations` check builds the selected Git tree with the
+protected Dockerfiles, inspects the running application image, and supplies that
+binding to the browser job. The job records four PNGs in a fresh `capture-*`
+directory. Schema-2 receipts include the commit, tree, source digest, application
+and browser image IDs, viewport, theme and PNG hash. Unbound smoke output and old
+host Chrome receipts cannot qualify native merge acceptance.
+
+Preserve the complete capture directory from the trusted CI artifact. To import
+it into an initialized deployment's browser volume, select its actual volume
+name, capture directory and reviewed browser image. The temporary import
+container has no network or credential volumes:
+
+```sh
+browser_volume='your-project_browser-artifacts'
+capture='capture-<32-hex-identifier-from-report>'
+browser_image='sha256:<reviewed-installed-browser-image-id>'
+artifact_helper=$(docker create --network none --read-only --cap-drop ALL \
+  --cap-add CHOWN --cap-add FOWNER --cap-add DAC_OVERRIDE \
+  --security-opt no-new-privileges:true --user 0:0 \
+  --memory 256m --memory-swap 256m --cpus 1 --pids-limit 32 \
+  --volume "$browser_volume:/artifacts" --entrypoint python "$browser_image" \
+  -I -m vibearr_runner.browser_receipts --adopt-capture "$capture")
+docker cp "./$capture" "$artifact_helper:/artifacts/"
+docker start --attach "$artifact_helper"
+docker rm "$artifact_helper"
+```
+
+Import rejects links, extra files and incomplete captures, and normalizes only
+that capture's ownership and permissions. Bind each imported report to its actual
+queue run UUID using the runner container:
+
+```sh
+docker compose --profile runner run --rm --no-deps --entrypoint python vibearr-runner \
+  -m vibearr_runner.browser_receipts --report "/screenshots/$capture/browser.json" \
+  --run-id <actual-queue-run-uuid> --state /var/lib/vibearr
+```
+
+The collector verifies every PNG, both viewports and themes, and the source/image
+binding before appending private `browser-acceptance.json`. It refuses to replace
+an existing run's receipts. Supply that file to the native merge acceptance
+command's `--screenshots` option; provider and run verification still happen in
+that command. Browser artifacts have their own volume: retain or export the PNGs
+along with release evidence separately from the private-state backup.
+
 ## Development and CI
 
 `bash test.sh` builds a disposable `vibearr-check-*` Compose project and runs the

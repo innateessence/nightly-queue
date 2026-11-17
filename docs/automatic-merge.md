@@ -170,7 +170,10 @@ same selected state/project and both finite issue IDs; `merge_acceptance` also
 provides the dedicated entrypoint. Resume the same journal and receipt files
 after interruptions. Supply `--screenshots` only after the trusted operator has
 rendered each exact validated candidate in an owned app with installed Chrome;
-the native agent must not download a browser or fabricate screenshots.
+the native agent must not download a browser or fabricate screenshots. Use the
+[source-bound Docker browser workflow](docker-operations.md#source-bound-browser-acceptance)
+to capture/import the exact tested trees and collect their private receipt map.
+The retired host Chrome helper cannot qualify Docker-only acceptance.
 
 Reserve two
 distinct finite UI source tasks: A adds queue status filtering with every status
