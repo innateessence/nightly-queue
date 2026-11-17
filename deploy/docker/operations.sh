@@ -46,10 +46,10 @@ case "$action" in
     docker volume inspect "$source_volume" >/dev/null
     mounts=(--volume "$source_volume:/backup-source:ro")
     for index in "${!volumes[@]}"; do
-      docker volume create "${facts[index+7]}" >/dev/null
+      docker volume create --label "com.docker.compose.project=$project" --label "com.docker.compose.volume=${volumes[index]}" "${facts[index+7]}" >/dev/null
       mounts+=(--volume "${facts[index+7]}:/restore/${volumes[index]}")
     done
-    docker volume create "${facts[13]}" >/dev/null
+    docker volume create --label "com.docker.compose.project=$project" --label com.docker.compose.volume=postgres-data "${facts[13]}" >/dev/null
     mounts+=(--volume "${facts[13]}:/restore-database")
     docker run "${limits[@]}" --network none "${mounts[@]}" "$backup_image" restore-files "$identity"
     ;;
