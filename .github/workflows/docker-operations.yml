@@ -1,0 +1,76 @@
+name: Docker operations
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-operations-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  operations:
+    name: Docker operations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      TRUSTED_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+      INTRODUCTION_SHA: dd08b9daddf765f43a290df7624ce73687a844aa
+    steps:
+      - name: Check out the exact candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the immutable base recipe
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.TRUSTED_BASE_SHA }}
+          path: recipe
+          persist-credentials: false
+      - name: Select the base Docker recipe
+        id: recipe
+        shell: bash
+        run: |
+          echo "RECIPE_PATH=$GITHUB_WORKSPACE/recipe" >> "$GITHUB_ENV"
+          if ! test -f recipe/deploy/docker/checks.sh; then
+            echo "bootstrap=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out the immutable Docker introduction
+        if: steps.recipe.outputs.bootstrap == 'true'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.INTRODUCTION_SHA }}
+          path: introduction
+          persist-credentials: false
+      - name: Select the introduction recipe
+        if: steps.recipe.outputs.bootstrap == 'true'
+        shell: bash
+        run: |
+          echo "RECIPE_PATH=$GITHUB_WORKSPACE/introduction" >> "$GITHUB_ENV"
+      - name: Run isolated Docker checks
+        shell: bash
+        env:
+          BOOTSTRAP: ${{ steps.recipe.outputs.bootstrap }}
+          VIBEARR_CHECK_OUTPUT: ${{ runner.temp }}/docker-checks
+        run: |
+          arguments=()
+          if test "$BOOTSTRAP" = true; then
+            arguments+=(--base "$TRUSTED_BASE_SHA" --introduction "$INTRODUCTION_SHA")
+          fi
+          bash "$RECIPE_PATH/deploy/docker/checks.sh" operations --candidate "$GITHUB_WORKSPACE/candidate" --commit "$CANDIDATE_SHA" "${arguments[@]}"
+      - name: Upload bounded Docker evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: docker-operations-evidence
+          path: ${{ runner.temp }}/docker-checks
+          if-no-files-found: error
+          retention-days: 7
