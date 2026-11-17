@@ -48,6 +48,11 @@ class RunnerSchedule(models.Model):
                 .filter(pk=1)
                 .values_list("pk", flat=True)
             )
+            if (
+                not self._state.adding
+                and not RunnerSchedule.objects.filter(pk=self.pk).exists()
+            ):
+                raise ValidationError("This schedule was deleted.")
             if self.pk is None:
                 ensure_default_schedule()
             self.full_clean()
@@ -176,6 +181,17 @@ class RunnerSettings(models.Model):
 
     def clean(self):
         super().clean()
+        from credentials.models import Credential
+
+        for field in (
+            "research_credential",
+            "implementation_credential",
+            "issue_credential",
+            "repository_credential",
+        ):
+            reference = getattr(self, f"{field}_id")
+            if reference and not Credential.objects.filter(pk=reference).exists():
+                raise ValidationError({field: "Select an available credential."})
         for field, validator in (
             ("execution_policy", validate_execution_policy),
             ("merge_profile", validate_merge_profile),
@@ -215,6 +231,11 @@ class RunnerSettings(models.Model):
     def save(self, *args, **kwargs):
         with transaction.atomic():
             list(RunnerSettings.objects.select_for_update().filter(pk=1))
+            if (
+                not self._state.adding
+                and not RunnerSettings.objects.filter(pk=self.pk).exists()
+            ):
+                raise ValidationError("This coding runner was deleted.")
             if self.schedule_id == 1:
                 ensure_default_schedule()
             self.full_clean()
@@ -245,4 +266,8 @@ class ProjectRunnerSettings(models.Model):
         self.full_clean()
         with transaction.atomic():
             list(RunnerSettings.objects.select_for_update().filter(pk=1))
+            from projects.models import Project
+
+            if not Project.objects.filter(pk=self.project_id).exists():
+                raise ValidationError("This project was deleted.")
             return super().save(*args, **kwargs)

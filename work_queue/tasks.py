@@ -123,6 +123,8 @@ def import_auto_issues(scheduled=False):
                     sync_error="",
                     sync_not_before=None,
                 )
+        except Project.DoesNotExist:
+            continue
         except (GitHubAPIError, ValidationError) as exc:
             logger.warning(
                 "Auto issue import failed for project %s; check API access and retry next scheduled sync.",

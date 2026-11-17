@@ -122,4 +122,5 @@ class UnifiedQueueTests(TestCase):
     def test_removing_imported_item_does_not_break_deduplication(self):
         response = self.client.post(reverse("remove_item", args=[self.imported.pk]))
         self.assertRedirects(response, reverse("index"))
-        self.assertTrue(QueueItem.objects.filter(pk=self.imported.pk).exists())
+        self.assertFalse(QueueItem.objects.filter(pk=self.imported.pk).exists())
+        self.assertIsNotNone(QueueItem.all_objects.get(pk=self.imported.pk).deleted_at)

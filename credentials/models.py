@@ -13,9 +13,16 @@ from django.utils import timezone
 from django.views.decorators.debug import sensitive_variables
 
 from .encryption import credential_cipher
+from vibearr_app.managers import ActiveManager
 
 
 class Credential(models.Model):
+    objects = ActiveManager()
+    all_objects = models.Manager()
+    deleted_at = models.DateTimeField(
+        null=True, blank=True, editable=False, db_index=True
+    )
+
     class Provider(models.TextChoices):
         GITHUB = "github", "GitHub"
         GITLAB = "gitlab", "GitLab"
@@ -30,7 +37,7 @@ class Credential(models.Model):
         SESSION = "session", "Codex session (JSON)"
         CONNECTION = "connection", "OpenCode connection (JSON)"
 
-    name = models.CharField(max_length=200, unique=True)
+    name = models.CharField(max_length=200)
     provider = models.CharField(
         max_length=20, choices=Provider.choices, default=Provider.GITHUB
     )
@@ -43,6 +50,15 @@ class Credential(models.Model):
 
     class Meta:
         ordering = ["name", "pk"]
+        base_manager_name = "all_objects"
+        default_manager_name = "objects"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["name"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="unique_active_credential_name",
+            )
+        ]
 
     @classmethod
     def from_db(cls, db, field_names, values):
@@ -61,6 +77,10 @@ class Credential(models.Model):
         self.name = self.name.strip()
         if not self.name:
             raise ValidationError({"name": "Enter a credential name."})
+        if Credential.objects.filter(name=self.name).exclude(pk=self.pk).exists():
+            raise ValidationError(
+                {"name": "A credential with this name already exists."}
+            )
         if not self.encrypted_payload:
             raise ValidationError("Enter a secret before saving the credential.")
         self.validate_provider_kind()
@@ -155,7 +175,13 @@ class Credential(models.Model):
         with transaction.atomic():
             RunnerSettings.objects.get_or_create(pk=1)
             RunnerSettings.objects.select_for_update().get(pk=1)
-            original = Credential.objects.select_for_update().filter(pk=self.pk).first()
+            original = (
+                Credential.all_objects.select_for_update().filter(pk=self.pk).first()
+            )
+            if (original and original.deleted_at) or (
+                self.pk and not original and not self._state.adding
+            ):
+                raise ValidationError("This credential was deleted.")
             if original and original.revoked_at:
                 self.revoked_at = original.revoked_at
             fields = kwargs.get("update_fields")
@@ -239,6 +265,8 @@ class APISettings(models.Model):
             credential = getattr(self, field)
             if credential is None:
                 continue
+            if not Credential.objects.filter(pk=credential.pk).exists():
+                raise ValidationError({field: "Select an available credential."})
             if (
                 credential.provider != provider
                 or credential.kind != Credential.Kind.TOKEN
@@ -248,8 +276,13 @@ class APISettings(models.Model):
                 )
 
     def save(self, *args, **kwargs):
-        self.full_clean()
-        return super().save(*args, **kwargs)
+        from runner_control.settings_models import RunnerSettings
+
+        with transaction.atomic():
+            RunnerSettings.objects.get_or_create(pk=1)
+            RunnerSettings.objects.select_for_update().get(pk=1)
+            self.full_clean()
+            return super().save(*args, **kwargs)
 
 
 class RunnerPreflightGrant(models.Model):

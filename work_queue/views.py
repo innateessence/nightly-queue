@@ -3,7 +3,7 @@ from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.db.models import Count, OuterRef, Q, Subquery
-from django.db.models.deletion import ProtectedError
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from django.views.generic import ListView
@@ -14,7 +14,7 @@ from runner_control.models import Run
 
 from .forms import QueueItemForm
 from .models import QueueItem
-from .services import claimable_items, source_wait_reason
+from .services import claimable_items, source_wait_reason, delete_queue_item
 from .tasks import import_auto_issues
 
 
@@ -145,18 +145,9 @@ def sync_issues(request):
 @require_POST
 def remove_item(request, pk):
     item = get_object_or_404(QueueItem, pk=pk)
-    if item.source == QueueItem.Source.GITHUB:
-        messages.error(request, "Imported issues are managed on GitHub.")
-        return redirect("index")
-    removable = QueueItem.objects.filter(pk=pk).exclude(status=QueueItem.Status.RUNNING)
     try:
-        removed, _ = removable.delete()
-    except ProtectedError:
-        messages.error(
-            request, "Work with runner history must be retained for recovery."
-        )
-        return redirect("index")
-    if not removed:
+        delete_queue_item(item)
+    except ValidationError:
         messages.error(request, "Stop and requeue running work before removing it.")
         return redirect("index")
     messages.success(request, "Work item removed from your queue.")

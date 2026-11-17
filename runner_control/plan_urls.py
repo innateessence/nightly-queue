@@ -1,6 +1,12 @@
 from django.urls import path
 
-from . import plan_views, operations_views, configuration_views, schedule_views
+from . import (
+    plan_views,
+    operations_views,
+    configuration_views,
+    schedule_views,
+    deletion_views,
+)
 
 urlpatterns = [
     path("schedules/", schedule_views.index, name="runner_schedule_list"),
@@ -10,7 +16,7 @@ urlpatterns = [
     ),
     path(
         "schedules/<int:schedule_id>/delete/",
-        schedule_views.delete,
+        deletion_views.schedule,
         name="runner_schedule_delete",
     ),
     path("coding-runners/", configuration_views.index, name="coding_runner_list"),
@@ -22,7 +28,7 @@ urlpatterns = [
     ),
     path(
         "coding-runners/<int:settings_id>/delete/",
-        configuration_views.delete,
+        deletion_views.runner,
         name="coding_runner_delete",
     ),
     path("activity/", plan_views.activity, name="runner_activity"),

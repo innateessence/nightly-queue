@@ -28,6 +28,12 @@ def retry(request, run_id):
     from .models import Run
 
     run = get_object_or_404(Run, pk=run_id)
+    if run.item_id and (run.item.deleted_at or run.item.project.deleted_at):
+        return HttpResponse(
+            "This work item or project was deleted and cannot be retried.",
+            status=409,
+            content_type="text/plain",
+        )
     try:
         result = requeue_items(
             QueueItem.objects.filter(pk=run.item_id),

@@ -130,6 +130,10 @@ Several runners can share a schedule. Assign each runner configuration to a prov
 identity. See [runner configuration](docs/runner-settings.md) for setup;
 existing identities continue using the preserved default configuration.
 
+Use the Delete links on queue rows and configuration lists to remove work items,
+projects, credentials, coding runners, and schedules. Confirmation pages explain
+affected settings and retained history. See [UI deletion](docs/ui-deletion.md).
+
 The web app and issue importer start with the default Compose services. Execution
 runs in a separate `vibearr-runner` service. Follow the [runner setup and operations
 guide](docs/runner-operations.md) for its identity, credentials, and deployment

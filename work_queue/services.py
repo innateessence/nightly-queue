@@ -86,6 +86,8 @@ class RepositoryObservationSuperseded(ValidationError):
 
 
 def verify_repository_authority(project, expected):
+    if project.deleted_at:
+        raise ValidationError("This project was deleted.")
     current = repository_authority_state(project)
     if current == expected:
         return
@@ -101,7 +103,7 @@ def verify_repository_authority(project, expected):
 
 @transaction.atomic
 def accept_repository_observation(*, project, repository, expected):
-    current = Project.objects.select_for_update().get(pk=project.pk)
+    current = Project.all_objects.select_for_update().get(pk=project.pk)
     verify_repository_authority(current, expected)
     if (
         current.github_repository_id
@@ -132,7 +134,9 @@ def import_issue(
     expected_authority=None,
     **metadata,
 ):
-    project = Project.objects.select_for_update().get(pk=project.pk)
+    project = Project.all_objects.select_for_update().get(pk=project.pk)
+    if project.deleted_at:
+        return False
     if expected_authority is not None:
         verify_repository_authority(project, expected_authority)
     if sync_lock_token is not None and (
@@ -146,7 +150,7 @@ def import_issue(
     repository_id = metadata.get("repository_id") or project.github_repository_id
     if repository_id:
         identity["github_repository_id"] = repository_id
-        legacy = QueueItem.objects.filter(
+        legacy = QueueItem.all_objects.filter(
             project=project,
             issue_number=number,
             github_repository_id__isnull=True,
@@ -155,7 +159,7 @@ def import_issue(
         legacy.update(github_repository_id=repository_id)
     else:
         identity["issue_repository"] = repository
-    item, created = QueueItem.objects.get_or_create(
+    item, created = QueueItem.all_objects.get_or_create(
         **identity,
         defaults={
             "source": QueueItem.Source.GITHUB,
@@ -164,6 +168,8 @@ def import_issue(
             "issue_repository": repository,
         },
     )
+    if item.deleted_at:
+        return False
     if expected_revision is not None and item.issue_revision != expected_revision:
         raise ValidationError(
             "Issue instructions changed after claim; retry explicitly with refreshed context."
@@ -281,7 +287,7 @@ def branch_wait_reason(item):
     if item.source == QueueItem.Source.GITHUB and branch.startswith("vibearr/manual-"):
         return "Requested branch collides with the reserved manual work namespace."
     others = (
-        QueueItem.objects.filter(project=project)
+        QueueItem.all_objects.filter(project=project)
         .exclude(pk=item.pk)
         .exclude(branch_name="")
     )
@@ -291,6 +297,8 @@ def branch_wait_reason(item):
 
 
 def source_wait_reason(item):
+    if item.deleted_at or item.project.deleted_at:
+        return "This work item or project was deleted."
     if item.status == QueueItem.Status.QUEUED and native_delivery_exists(item):
         return "Prior native delivery requires reconciliation before another execution."
     if item.source == QueueItem.Source.MANUAL:
@@ -371,11 +379,15 @@ def claim_next(*, execution_ref=""):
 @transaction.atomic
 def claim_item(item, *, execution_ref=""):
     project_id = item.project_id
-    Project.objects.select_for_update().get(pk=item.project_id)
+    project = Project.all_objects.select_for_update().get(pk=item.project_id)
+    if project.deleted_at:
+        return None
     item = (
-        QueueItem.objects.select_for_update().select_related("project").get(pk=item.pk)
+        QueueItem.all_objects.select_for_update()
+        .select_related("project")
+        .get(pk=item.pk)
     )
-    if item.project_id != project_id:
+    if item.project_id != project_id or item.deleted_at:
         return None
     if item.status != QueueItem.Status.QUEUED or source_wait_reason(item):
         return None
@@ -419,6 +431,20 @@ def claim_item(item, *, execution_ref=""):
         error_summary="",
     )
     return QueueItem.objects.select_related("project").get(pk=item.pk)
+
+
+@transaction.atomic
+def delete_queue_item(item):
+    from runner_control.models import Run
+
+    Project.all_objects.select_for_update().get(pk=item.project_id)
+    current = QueueItem.objects.select_for_update().get(pk=item.pk)
+    if (
+        current.status == QueueItem.Status.RUNNING
+        or Run.objects.filter(item=current, state=Run.State.ACTIVE).exists()
+    ):
+        raise ValidationError("Stop and requeue running work before deleting it.")
+    QueueItem.objects.filter(pk=current.pk).update(deleted_at=timezone.now())
 
 
 @transaction.atomic

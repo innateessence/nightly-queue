@@ -121,12 +121,14 @@ class CodingRunnerConfigurationViewsTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertTrue(RunnerSettings.objects.filter(pk=1).exists())
 
-    def test_assigned_runner_cannot_be_deleted(self):
+    def test_assigned_runner_is_disabled_when_configuration_is_deleted(self):
         identity = RunnerIdentity.objects.create(name="night", token_digest="a" * 64)
         saved = RunnerSettings.objects.create(name="Assigned", identity=identity)
         response = self.client.post(reverse("coding_runner_delete", args=[saved.pk]))
-        self.assertEqual(response.status_code, 409)
-        self.assertTrue(RunnerSettings.objects.filter(pk=saved.pk).exists())
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(RunnerSettings.objects.filter(pk=saved.pk).exists())
+        identity.refresh_from_db()
+        self.assertFalse(identity.enabled)
 
 
 class MultipleRunnerExecutionTests(ConfiguredProjectTestCase):
