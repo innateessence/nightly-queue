@@ -190,24 +190,28 @@ rereading a retained operation cannot renew it.
 
 ## Real acceptance
 
-The acceptance command creates only run-owned disposable resources and needs a
-private credential file. Use a dedicated state directory rather than an active
-executor's state:
+Drain and stop the supervisor, then qualify idle Docker workers as described in
+[Docker operations](docker-operations.md). Provision an explicitly selected,
+dedicated credential in the private runner secret volume. This command makes
+real model calls and requires `--execute`; ordinary qualification does not run it.
+Choose new state and evidence paths so previous operations remain available for
+reconciliation. Never import the operator's home or agent login.
 
 ```sh
-python -m vibearr_runner.codex_acceptance \
-  --image sha256:<codex-image-id> \
-  --database-image sha256:<postgres-image-id> \
-  --state /var/lib/vibearr/codex-acceptance \
-  --credential-file /run/secrets/codex-key \
+docker compose --profile checks run --rm --no-deps --entrypoint python qualification \
+  -m vibearr_runner.codex_acceptance --execute \
+  --state /artifacts/native-fixture-<new-run-name> \
+  --credential-file /run/vibearr/runner/acceptance-key \
   --kind token --model <configured-model-id> \
-  --evidence /var/lib/vibearr/codex-acceptance.json
+  --evidence /artifacts/native-fixture-<new-run-name>.json
 ```
 
-It runs the real boundary qualification, asks Codex to edit a fixture and run its
-test, restarts the executor during the session, retries the same start, verifies
-the exported changes with an independent offline test, cancels a second session,
-and exercises the bounded authentication-probe interface. The candidate project
+It uses the existing qualified fleet, asks Codex to edit a fixture and run its
+test, observes the same running worker operation from an independent controller
+process, reloads its saved session, and retries the same start. The registered
+offline runner check independently validates the export. It then cancels a
+second real foreground tool session and runs the bounded authentication probe.
+It does not restart workers or replace their boot qualification. The candidate project
 configuration contains an MCP marker that must remain unexecuted. These are real
 native calls; the command does not substitute fixture events for provider access.
 
