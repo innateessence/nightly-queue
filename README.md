@@ -123,6 +123,11 @@ repository URL, and save a GitHub token under Credentials. Select the issue-impo
 token in Settings and enable **Autonomous** on the project to discover its issues.
 You can also add tasks directly from the queue.
 
+Use **Configuration → Coding Runners** to define named runners with independent
+schedules, backends, and credentials. Assign each configuration to a provisioned
+runner identity. See [runner configuration](docs/runner-settings.md) for setup;
+existing identities continue using the preserved default configuration.
+
 The web app and issue importer start with the default Compose services. Execution
 runs in a separate `vibearr-runner` service. Follow the [runner setup and operations
 guide](docs/runner-operations.md) for its identity, credentials, and deployment

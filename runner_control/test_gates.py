@@ -178,7 +178,7 @@ class GateEvidenceTests(TestCase):
 
     def test_settings_show_reason_remaining_freshness_reset_and_boundary(self):
         self.post()
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         for text in (
             "test-runner",
             "usage_reserve",
@@ -196,12 +196,14 @@ class GateEvidenceTests(TestCase):
             timezone.now() - timedelta(minutes=4)
         ).isoformat()
         self.post()
-        self.assertContains(self.client.get(reverse("api_settings")), "Report expired")
+        self.assertContains(
+            self.client.get(reverse("coding_runner_edit", args=[1])), "Report expired"
+        )
 
     def test_settings_mark_changed_configuration(self):
         self.report["configuration_revision"] = "previous-revision"
         self.post()
         self.assertContains(
-            self.client.get(reverse("api_settings")),
+            self.client.get(reverse("coding_runner_edit", args=[1])),
             "Configuration changed since this report",
         )

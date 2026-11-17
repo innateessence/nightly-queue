@@ -35,7 +35,7 @@ class QueueViewTests(TestCase):
     def test_index_renders(self):
         response = self.client.get(reverse("index"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Leave it for the night.")
+        self.assertContains(response, '<h1 id="page-title">Queue</h1>', html=True)
         self.assertContains(response, "Add your first item")
         self.assertContains(
             response, "Eligible work runs high, normal, then low priority"

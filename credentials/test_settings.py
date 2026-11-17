@@ -133,8 +133,7 @@ class APISettingsTests(TestCase):
         response = self.client.get(self.url)
         self.assertContains(
             response,
-            f'<a href="{self.url}" aria-current="page">Settings</a>',
-            html=True,
+            f'href="{self.url}" aria-current="page"',
         )
 
     def test_selected_credential_is_protected_from_deletion(self):

@@ -45,7 +45,7 @@ class ProjectViewTests(TestCase):
         response = self.client.get(self.url)
         self.assertContains(response, project.name)
         self.assertContains(response, project.repository_url)
-        self.assertContains(response, "Base branch: develop")
+        self.assertContains(response, "<code>develop</code>")
         self.assertContains(response, f"Project #{project.pk}")
         self.assertContains(response, reverse("edit_project", args=[project.pk]))
 
@@ -53,7 +53,7 @@ class ProjectViewTests(TestCase):
         self.data["base_branch"] = ""
         self.create_project()
         response = self.client.get(self.url)
-        self.assertContains(response, "Base branch: Repository default")
+        self.assertContains(response, "<code>Repository default</code>")
 
     def test_create_normalizes_repository_and_redirects(self):
         response = self.client.post(self.url, self.data, follow=True)
@@ -171,12 +171,12 @@ class ProjectViewTests(TestCase):
         project.autonomous = True
         project.save()
         response = self.client.get(self.url)
-        self.assertContains(response, "Mode: Autonomous")
+        self.assertContains(response, "Autonomous</span>")
 
     def test_list_shows_manual_mode(self):
         self.create_project()
         response = self.client.get(self.url)
-        self.assertContains(response, "Mode: Manual")
+        self.assertContains(response, "Manual</span>")
 
     def test_edit_form_contains_saved_autonomous_toggle(self):
         project = self.create_project()

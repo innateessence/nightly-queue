@@ -1,8 +1,22 @@
 from django.urls import path
 
-from . import plan_views, operations_views
+from . import plan_views, operations_views, configuration_views
 
 urlpatterns = [
+    path("coding-runners/", configuration_views.index, name="coding_runner_list"),
+    path("coding-runners/add/", configuration_views.edit, name="coding_runner_add"),
+    path(
+        "coding-runners/<int:settings_id>/",
+        configuration_views.edit,
+        name="coding_runner_edit",
+    ),
+    path(
+        "coding-runners/<int:settings_id>/delete/",
+        configuration_views.delete,
+        name="coding_runner_delete",
+    ),
+    path("activity/", plan_views.activity, name="runner_activity"),
+    path("system/", plan_views.system, name="runner_system"),
     path(
         "runner/runs/<uuid:run_id>/retry/",
         operations_views.retry,

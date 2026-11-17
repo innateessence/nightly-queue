@@ -24,9 +24,9 @@
     {% for error in field.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
   </div>
 {% endfor %}
-<details>
+<details{% if runner_form.errors %} open{% endif %}>
   <summary>Coding runner stage overrides</summary>
-  <p class="field-hint">Inherit global uses the global value, including when the project input is blank. Use project value replaces it. Clear value explicitly removes it and may leave required configuration missing.</p>
+  <p class="field-hint">Inherit runner settings uses the assigned runner's value, including when the project input is blank. Use project value replaces it. Clear value explicitly removes it and may leave required configuration missing. The preview below uses the default runner.</p>
   {% include "runner_control/_claude_models.html" %}
   {{ runner_form.non_field_errors }}
   {% for field in runner_form %}
@@ -46,4 +46,4 @@
     {% for error in effective_configuration.errors %}<p class="field-error">{{ error.field }}: {{ error.message }}</p>{% endfor %}
   </details>
 {% endif %}
-{% if not form_unavailable %}<button class="button-primary" type="submit">{{ submit_label }}</button>{% endif %}
+{% if not form_unavailable %}<div class="form-actions"><button class="button-primary" type="submit">{{ submit_label }}</button></div>{% endif %}

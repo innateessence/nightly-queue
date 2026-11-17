@@ -148,17 +148,24 @@ def report_run(evidence):
         return None
 
 
-def present_gates(entries, configuration):
+def present_gates(entries, configuration=None):
     from django.utils import timezone
     from django.utils.dateparse import parse_datetime
 
     result = []
     for entry in entries:
-        safe = present_global_record(entry, configuration, run=report_run(entry))
+        from .configuration import configuration_document
+
+        current = (
+            configuration
+            if configuration is not None
+            else configuration_document(entry.runner)
+        )
+        safe = present_global_record(entry, current, run=report_run(entry))
         next_check = parse_datetime(entry.report["next_check_at"])
         safe.stale = next_check is None or next_check <= timezone.now()
         safe.configuration_changed = (
-            entry.report["configuration_revision"] != configuration["revision"]
+            entry.report["configuration_revision"] != current["revision"]
         )
         result.append(safe)
     return result

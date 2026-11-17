@@ -1,79 +1,54 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="dark light">
   <title>{% block title %}vibearr{% endblock %}</title>
   <link rel="icon" type="image/x-icon" sizes="16x16 32x32 48x48" href="{% static 'work_queue/favicon.ico' %}">
   <link rel="icon" type="image/svg+xml" href="{% static 'work_queue/favicon.svg' %}">
   <link rel="apple-touch-icon" sizes="180x180" href="{% static 'work_queue/apple-touch-icon.png' %}">
-  <link rel="stylesheet" href="{% static 'work_queue/queue.css' %}">
   <script>
     (function () {
-      var root = document.documentElement;
-      function pick() {
-        var params = new URLSearchParams(location.search);
-        var saved = null;
-        try { saved = localStorage.getItem("theme"); } catch (e) { e; }
-        var theme = params.get("theme") || saved;
-        if (theme !== "light" && theme !== "dark") {
-          theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-        }
-        return theme;
-      }
-      function applyTheme(theme) {
-        root.dataset.theme = theme;
-        root.style.colorScheme = theme;
-        var toggle = document.querySelector(".theme-toggle");
-        if (toggle) {
-          var icon = toggle.querySelector("[aria-hidden]");
-          if (icon) { icon.textContent = theme === "dark" ? "🌙" : "🌞"; }
-          toggle.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
-          toggle.setAttribute("aria-label", theme === "dark" ? "Switch to light theme" : "Switch to dark theme");
-        }
-      }
-      applyTheme(pick());
-      window.addEventListener("DOMContentLoaded", function () {
-        var toggle = document.querySelector(".theme-toggle");
-        if (!toggle) { return; }
-        applyTheme(root.dataset.theme);
-        toggle.addEventListener("click", function () {
-          var next = root.dataset.theme === "dark" ? "light" : "dark";
-          applyTheme(next);
-          try { localStorage.setItem("theme", next); } catch (e) { e; }
-        });
-      });
+      var theme = new URLSearchParams(location.search).get('theme');
+      try { theme = theme || localStorage.getItem('theme'); } catch (e) {}
+      document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
     })();
   </script>
+  <link rel="stylesheet" href="{% static 'work_queue/queue.css' %}">
+  <script src="{% static 'work_queue/app.js' %}" defer></script>
 </head>
 <body>
-  <header class="site-header">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="app-header">
     <a class="brand" href="{% url 'index' %}" aria-label="vibearr home">
-      <span class="brand-mark" aria-hidden="true">☾</span>
-      vibearr<span class="brand-dot">.</span>
+      {% include "_icon.html" with name="logo" %}<span>vib<span class="brand-accent">earr</span></span>
     </a>
-    <nav class="site-nav" aria-label="Main navigation">
-      <a href="{% url 'index' %}"{% block queue_current %}{% endblock %}>Queue</a>
-      <a href="{% url 'project_list' %}"{% block projects_current %}{% endblock %}>Projects</a>
-      <a href="{% url 'credential_list' %}"{% block credentials_current %}{% endblock %}>Credentials</a>
-      <a href="{% url 'runner_plan_history' %}">Runs</a>
-      <a href="{% url 'api_settings' %}"{% block settings_current %}{% endblock %}>Settings</a>
-      <a href="{% url 'runner_approval_inbox' %}">Approvals</a>
-    </nav>
-    <button class="theme-toggle" type="button" aria-pressed="false" aria-label="Switch to dark theme"><span aria-hidden="true">🌞</span></button>
+    <span class="app-description">Coding automation</span>
+    <button class="theme-toggle" type="button" aria-label="Switch to light theme" aria-pressed="true">{% include "_icon.html" with name="theme" %}<span class="theme-label">Appearance</span></button>
   </header>
-
-  <main>
+  <aside class="sidebar" aria-label="Application sidebar">
+    <nav class="site-nav" aria-label="Main navigation">
+      <span class="nav-group">Workspace</span>
+      <a href="{% url 'index' %}"{% block queue_current %}{% endblock %}>{% include "_icon.html" with name="queue" %}Queue</a>
+      <a href="{% url 'runner_activity' %}"{% block activity_current %}{% endblock %}>{% include "_icon.html" with name="activity" %}Activity</a>
+      <a href="{% url 'runner_plan_history' %}"{% block history_current %}{% endblock %}>{% include "_icon.html" with name="history" %}History</a>
+      <a href="{% url 'project_list' %}"{% block projects_current %}{% endblock %}>{% include "_icon.html" with name="projects" %}Projects</a>
+      <span class="nav-group">Configuration</span>
+      <a href="{% url 'credential_list' %}"{% block credentials_current %}{% endblock %}>{% include "_icon.html" with name="key" %}Credentials</a>
+      <a href="{% url 'coding_runner_list' %}"{% block runners_current %}{% endblock %}>{% include "_icon.html" with name="activity" %}Coding Runners</a>
+      <a href="{% url 'api_settings' %}"{% block settings_current %}{% endblock %}>{% include "_icon.html" with name="settings" %}Settings</a>
+      <a href="{% url 'runner_system' %}"{% block system_current %}{% endblock %}>{% include "_icon.html" with name="system" %}System</a>
+    </nav>
+    <div class="sidebar-footer">vibearr<span>Queue · Code · Validate · Deliver</span></div>
+  </aside>
+  <main id="main-content" tabindex="-1">
     {% block heading %}{% endblock %}
-
     {% for message in messages %}
-      <div class="notice" role="status">{{ message }}</div>
+      <div class="notice notice-{{ message.tags }}" role="status">{{ message }}</div>
     {% endfor %}
-
     {% block content %}{% endblock %}
-    <footer class="site-footer"><span>Off your mind. In your queue.</span><span>Built for a better tomorrow <span aria-hidden="true">☾</span></span></footer>
   </main>
 </body>
 </html>

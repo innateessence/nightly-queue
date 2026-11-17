@@ -1,0 +1,17 @@
+<article class="panel queue-item run-card">
+  <div class="item-meta"><span class="status-pill status-{{ run.state }}">{{ run.get_state_display }}</span><span>{{ run.get_stage_display }}</span></div>
+  <h2><a href="{% url 'runner_plan_detail' run.pk %}">{{ run.item.title|default:"Empty queue" }}</a></h2>
+  <p class="item-project">{{ run.runner.name }} · Started {{ run.created_at|date:"M j, H:i T" }} · {{ run.created_at|timesince }} ago<br><code>{{ run.pk }}</code></p>
+  <dl class="run-facts">
+    <div><dt>Outcome</dt><dd>{{ run.native_outcome|default:run.result_status|default:"In progress" }}</dd></div>
+    <div><dt>Validation</dt><dd>{{ run.native_status.validation_status|default:"Not reported" }}</dd></div>
+    <div><dt>Repair attempts</dt><dd>{{ run.native_status.repair_count|default:0 }}</dd></div>
+    <div><dt>Last heartbeat</dt><dd>{% if run.heartbeat_at %}{{ run.heartbeat_at|timesince }} ago{% else %}Not reported{% endif %}</dd></div>
+  </dl>
+  {% if run.wait_reason %}<p class="notice" role="status">Waiting: {{ run.wait_reason }}</p>{% endif %}
+  {% if run.error_summary %}<p class="field-error">{{ run.error_summary }}</p>{% endif %}
+  {% if run.native_status.detail %}<details><summary>Latest reported activity</summary><pre>{{ run.native_status.detail }}</pre></details>{% endif %}
+  {% if run.cancellation_requested_at %}<p role="status">Cancellation requested. {% if run.cancellation_confirmed_at %}Termination confirmed.{% else %}Waiting for termination confirmation.{% endif %}</p>{% endif %}
+  {% if run.retry_requested_at %}<p role="status">Retry requested; recovery must complete before another attempt.</p>{% endif %}
+  <div class="item-footer"><a href="{% url 'runner_plan_detail' run.pk %}">Details, evidence and controls →</a>{% if run.result_url %}<a href="{{ run.result_url }}" rel="noreferrer">View pull request</a>{% endif %}</div>
+</article>

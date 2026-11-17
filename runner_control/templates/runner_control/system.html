@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}System · vibearr{% endblock %}
+{% block system_current %} aria-current="page"{% endblock %}
+{% block heading %}<section class="page-heading"><div><p class="eyebrow">OPERATIONS</p><h1>System</h1><p class="subtitle">Processing, connections and the latest runner health reports.</p></div><a class="button-filter" href="{% url 'coding_runner_list' %}">Configure runners</a></section>{% endblock %}
+{% block content %}
+<div class="system-grid">
+  <section class="panel plan-section"><h2>Default runner processing</h2>
+    <p class="status-pill">{% if configuration.global.paused %}Paused{% elif not configuration.global.enabled %}Disabled{% elif not configuration.execution_ready %}Blocked{% else %}Configured{% endif %}</p>
+    <p>{{ configuration.readiness_reason }}</p>
+    <p class="field-hint">Docker-only worker qualification is required before execution can be enabled.</p>
+    <p>Schedule: {{ configuration.global.schedule_mode|default:"Not configured" }} · {{ configuration.global.timezone|default:"UTC" }}</p>
+    <p class="field-hint">Release readiness and the latest policy reports are separate. A saved setting does not prove a worker is running.</p>
+    <a href="{% url 'coding_runner_edit' 1 %}#runner-title">Pause, scheduling and usage reserves →</a>
+  </section>
+  <section class="panel plan-section"><h2>Connections and discovery</h2>
+    <p>{{ connection_count }} saved, unrevoked connection{{ connection_count|pluralize }}. Connectivity has not been tested by this page.</p>
+    <p>Issue sync interval: {{ sync.auto_sync_interval_seconds|default:"60" }} seconds</p>
+    <p>Last successful sync: {{ sync.last_auto_sync_success_at|default:"Not reported" }}</p>
+    <div class="inline-actions"><a href="{% url 'credential_list' %}">Manage connections</a><a href="{% url 'project_list' %}">Project policy and backend</a><a href="{% url 'api_settings' %}">Import settings</a></div>
+  </section>
+</div>
+<section class="panel plan-section"><h2>Worker storage</h2>
+  {% for health in health_reports %}
+    {% if health.presentation_error %}<p role="status">{{ health.presentation_error }}</p>{% else %}
+    <h3>{{ health.runner.name }}</h3><p>{{ health.report.free_bytes|filesizeformat }} free · Received {{ health.received_at }}</p>
+    {% if health.report.blocking_reason %}<p class="notice" role="status">{{ health.report.blocking_reason }}</p>{% endif %}
+    {% endif %}
+  {% empty %}<p>No storage report received. Free space and worker health are unknown.</p>{% endfor %}
+</section>
+<section class="panel plan-section"><h2>Schedule and processing diagnostics</h2>{% include "runner_control/_gates.html" %}</section>
+{% endblock %}

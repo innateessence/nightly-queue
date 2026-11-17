@@ -128,7 +128,7 @@ def provider(run):
     from .configuration import configuration_document
 
     reference = run.configuration_snapshot["effective"]["repository_credential_id"]
-    document = configuration_document()
+    document = configuration_document(run.runner)
     current = next(
         (
             entry

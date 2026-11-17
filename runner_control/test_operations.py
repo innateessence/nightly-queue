@@ -195,10 +195,10 @@ class RetentionTests(TestCase):
         self.assertContains(response, "Test task")
         self.assertIn("no-store", response.headers["Cache-Control"])
 
-    def test_history_lists_runs_and_global_blocking_reason(self):
-        response = self.client.get(reverse("runner_plan_history"))
-        self.assertContains(response, "Run history")
-        self.assertContains(response, "Release verification blocks normal execution")
+    def test_system_lists_global_blocking_reason(self):
+        response = self.client.get(reverse("runner_system"))
+        self.assertContains(response, "System")
+        self.assertContains(response, "do not qualify native execution")
 
     def test_machine_retention_endpoint_requires_machine_authorization(self):
         self.assertEqual(self.client.get(reverse("runner_retention")).status_code, 401)
@@ -730,8 +730,8 @@ class OperatorPresentationTests(TestCase):
             self.run.approvals.get().decision_note, "previous-run-selection"
         )
 
-    def test_history_scrubs_current_global_and_owned_historical_selections(self):
-        response = self.client.get(reverse("runner_plan_history"))
+    def test_system_scrubs_current_global_and_owned_historical_selections(self):
+        response = self.client.get(reverse("runner_system"))
         self.assert_safe(response, global_values=True)
         self.assertContains(response, "[redacted]")
         self.health.refresh_from_db()
@@ -748,7 +748,7 @@ class OperatorPresentationTests(TestCase):
     def test_unavailable_selected_key_hides_expanded_content(self):
         with override_settings(NQ_CREDENTIAL_KEY=""):
             detail = self.client.get(reverse("runner_plan_detail", args=[self.run.pk]))
-            history = self.client.get(reverse("runner_plan_history"))
+            history = self.client.get(reverse("runner_system"))
             gate = self.client.get(reverse("runner_gates"))
         self.assert_safe(detail)
         self.assert_safe(history, global_values=True)
@@ -766,9 +766,7 @@ class OperatorPresentationTests(TestCase):
             kind="token",
             encrypted_payload="invalid",
         )
-        self.assert_safe(
-            self.client.get(reverse("runner_plan_history")), global_values=True
-        )
+        self.assert_safe(self.client.get(reverse("runner_system")), global_values=True)
         self.assert_safe(
             self.client.get(reverse("runner_plan_detail", args=[self.run.pk]))
         )
@@ -838,7 +836,7 @@ class OperatorPresentationTests(TestCase):
 
     def test_settings_release_and_gate_sections_use_safe_presentation(self):
         self.qualification()
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assert_safe(response, global_values=True)
         self.assertContains(response, "Controlled release verification")
         self.assertContains(response, "[redacted]")
@@ -867,7 +865,7 @@ class OperatorPresentationTests(TestCase):
             project=self.project,
             overrides={"research_credential_id": {"mode": "replace", "value": 999999}},
         )
-        response = self.client.get(reverse("runner_plan_history"))
+        response = self.client.get(reverse("runner_system"))
         self.assert_safe(response, global_values=True)
         self.assertContains(response, "unavailable")
 
@@ -888,7 +886,7 @@ class OperatorPresentationTests(TestCase):
     def test_settings_form_withholds_secret_values_without_changing_configuration(self):
         self.settings.research_instructions = "previous-global-selection"
         self.settings.save()
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assert_safe(response, global_values=True)
         self.assertContains(response, "Selected credential content is withheld")
         self.assertNotContains(response, "Save coding runner settings")
@@ -926,9 +924,7 @@ class OperatorPresentationTests(TestCase):
         self.run.save(update_fields=["state", "active_slot"])
         self.health.report["blocking_reason"] = "previous-run-selection"
         self.health.save(update_fields=["report"])
-        self.assert_safe(
-            self.client.get(reverse("runner_plan_history")), global_values=True
-        )
+        self.assert_safe(self.client.get(reverse("runner_system")), global_values=True)
 
     def test_release_metadata_exception_does_not_unmask_other_secret_fields(self):
         entry = self.qualification()
@@ -947,7 +943,7 @@ class OperatorPresentationTests(TestCase):
     def test_selected_current_credential_name_cannot_leak_through_runner_choices(self):
         self.current.name = "Current label: current-global-selection"
         self.current.save(update_fields=["name"])
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assert_safe(response, global_values=True)
         self.assertContains(response, "Selected credential content is withheld")
         self.assertNotContains(response, "Save coding runner settings")
@@ -996,8 +992,9 @@ class OperatorPresentationTests(TestCase):
         response = self.client.get(reverse("api_settings"))
         self.assert_safe(response, global_values=True)
         self.assertContains(response, "Unselected safe label")
-        self.assertContains(response, "Save coding runner settings")
         self.assertContains(response, ">Save settings</button>", html=False)
+        runner_response = self.client.get(reverse("coding_runner_edit", args=[1]))
+        self.assertContains(runner_response, "Save coding runner settings")
 
     def escaped_selected_token(self):
         token = 'synthetic-quote-"-slash-\\-unicode-☃'
@@ -1020,7 +1017,7 @@ class OperatorPresentationTests(TestCase):
         commands = ["/usr/bin/echo " + token]
         self.settings.setup_commands = commands
         self.settings.save()
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assert_escaped_form_withheld(response, token)
         self.assertContains(response, "Selected credential content is withheld")
         self.settings.refresh_from_db()
@@ -1034,7 +1031,7 @@ class OperatorPresentationTests(TestCase):
         self.current.save()
         self.settings.setup_commands = ["/usr/bin/echo " + token]
         self.settings.save()
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assert_escaped_form_withheld(response, token)
         self.assertContains(response, "Selected credential content is withheld")
         self.settings.refresh_from_db()
@@ -1043,7 +1040,7 @@ class OperatorPresentationTests(TestCase):
     def test_bound_json_settings_inspect_decoded_selected_material(self):
         token = self.escaped_selected_token()
         response = self.client.post(
-            reverse("api_settings"),
+            reverse("coding_runner_edit", args=[1]),
             {
                 "section": "runner",
                 "runner-setup_commands": json.dumps(["/usr/bin/echo " + token]),
@@ -1058,7 +1055,7 @@ class OperatorPresentationTests(TestCase):
         token = self.escaped_selected_token()
         invalid = json.dumps(["/usr/bin/echo " + token])[:-1]
         response = self.client.post(
-            reverse("api_settings"),
+            reverse("coding_runner_edit", args=[1]),
             {"section": "runner", "runner-setup_commands": invalid},
         )
         self.assert_escaped_form_withheld(response, token)
@@ -1077,7 +1074,7 @@ class OperatorPresentationTests(TestCase):
         )
         self.settings.setup_commands = ['echo safe-quote-"-slash-\\-unicode-☃']
         self.settings.save()
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Save coding runner settings")
 

@@ -2,10 +2,9 @@ from django.db import transaction
 
 from vibearr_runner.policy import ExecutionPolicy, PolicyError
 
-from .configuration import effective_project_configuration
+from .configuration import effective_project_configuration, runner_settings
 from .models import Run
 from .services import RunConflict, lock_controller, verify_active
-from .settings_models import RunnerSettings
 
 
 @transaction.atomic
@@ -20,14 +19,16 @@ def current_native_policy(run, claim_token):
     snapshot = run.configuration_snapshot
     if snapshot.get("execution_kind") != "native":
         raise RunConflict("Legacy proposal execution is disabled.")
-    settings = RunnerSettings.objects.get(pk=1)
+    settings = runner_settings(run.runner)
+    if snapshot.get("runner_configuration_id", 1) != settings.pk:
+        raise RunConflict("Runner configuration assignment changed; retry explicitly.")
     if not settings.enabled or settings.paused:
         raise RunConflict("Native execution is disabled or paused.")
     try:
         policy = ExecutionPolicy.from_data(snapshot.get("execution_policy"))
     except PolicyError:
         raise RunConflict("The native policy snapshot is invalid.") from None
-    current = effective_project_configuration(run.item.project)
+    current = effective_project_configuration(run.item.project, run.runner)
     if (
         snapshot.get("policy_digest") != policy.digest
         or current["policy_digest"] != policy.digest

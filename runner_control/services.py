@@ -115,7 +115,7 @@ def claim_run(*, runner, run_id, configuration_revision="", project_ids=None):
             )
         try:
             revision, snapshot = locked_configuration_snapshot(
-                candidate.project, configuration_revision
+                candidate.project, configuration_revision, runner
             )
         except ValidationError as exc:
             if "configuration" not in getattr(exc, "message_dict", {}):

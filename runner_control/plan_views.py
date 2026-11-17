@@ -24,21 +24,27 @@ from .services import RunConflict
 
 
 @require_GET
+def activity(request):
+    runs = Run.objects.select_related("item", "runner").filter(state=Run.State.ACTIVE)
+    response = render(
+        request,
+        "runner_control/activity.html",
+        {"runs": [present_run(run) for run in runs]},
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@require_GET
 def history(request):
     runs = Run.objects.select_related("item", "runner").order_by("-created_at", "-pk")
     status = request.GET.get("state", "")
+    if status not in Run.State.values:
+        status = ""
     if status in Run.State.values:
         runs = runs.filter(state=status)
     page = Paginator(runs, 25).get_page(request.GET.get("page"))
     page.object_list = [present_run(run) for run in page]
-    configuration = configuration_document()
-    reports = present_gates(
-        RunnerGateEvidence.objects.select_related("runner"), configuration
-    )
-    health = [
-        present_global_record(entry, configuration, run=report_run(entry))
-        for entry in RunnerHealth.objects.select_related("runner")
-    ]
     response = render(
         request,
         "runner_control/plan_history.html",
@@ -46,9 +52,36 @@ def history(request):
             "runs": page,
             "page": page,
             "state_filter": status,
-            "health_reports": health,
+            "states": Run.State.choices,
+        },
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@require_GET
+def system(request):
+    from credentials.models import APISettings, Credential
+
+    configuration = configuration_document()
+    reports = present_gates(RunnerGateEvidence.objects.select_related("runner"))
+    health = [
+        present_global_record(
+            entry, configuration_document(entry.runner), run=report_run(entry)
+        )
+        for entry in RunnerHealth.objects.select_related("runner")
+    ]
+    response = render(
+        request,
+        "runner_control/system.html",
+        {
             "configuration": present_configuration(configuration),
             "runner_gate_evidence": reports,
+            "health_reports": health,
+            "connection_count": Credential.objects.filter(
+                revoked_at__isnull=True
+            ).count(),
+            "sync": APISettings.objects.filter(pk=1).first(),
         },
     )
     response["Cache-Control"] = "no-store"

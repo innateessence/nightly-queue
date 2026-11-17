@@ -186,8 +186,7 @@ class CredentialViewTests(TestCase):
         response = self.client.get(self.url)
         self.assertContains(
             response,
-            f'<a href="{self.url}" aria-current="page">Credentials</a>',
-            html=True,
+            f'href="{self.url}" aria-current="page"',
         )
 
     def test_get_does_not_create_credentials(self):

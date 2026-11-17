@@ -87,7 +87,7 @@ class RunnerSettingsTests(TestCase):
             },
         )
         data = {key: "" if value is None else value for key, value in data.items()}
-        return self.client.post("/settings/", data)
+        return self.client.post("/coding-runners/1/", data)
 
     def test_settings_post_rejects_null_commands_without_database_error(self):
         response = self.post_setup_commands("null")
@@ -259,7 +259,7 @@ class RunnerSettingsTests(TestCase):
         )
 
     def test_settings_page_shows_runner_controls(self):
-        response = self.client.get("/settings/")
+        response = self.client.get("/coding-runners/1/")
         self.assertContains(response, "Coding runner")
         self.assertContains(response, "Minimum remaining usage (%)")
         self.assertContains(response, "release-gated")
@@ -283,7 +283,7 @@ class RunnerSettingsTests(TestCase):
             },
         )
         data = {key: "" if value is None else value for key, value in data.items()}
-        response = self.client.post("/settings/", data)
+        response = self.client.post("/coding-runners/1/", data)
         self.assertEqual(response.status_code, 302)
         self.assertTrue(RunnerSettings.objects.get(pk=1).paused)
         self.assertEqual(APISettings.objects.get(pk=1).auto_sync_interval_hours, 12)

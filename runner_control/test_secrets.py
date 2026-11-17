@@ -14,7 +14,7 @@ from projects.models import Project
 from work_queue.services import enqueue_item, requeue_items
 
 from .auth import token_digest
-from .configuration import configuration_document
+from .configuration import configuration_document, settings_values
 from .models import Run, RunnerIdentity
 from .services import claim_run
 from .settings_models import ProjectRunnerSettings, RunnerSettings
@@ -105,6 +105,47 @@ class SelectedSecretTests(TestCase):
                 "purpose": purpose,
             }
         )
+
+    def configure_separate_runner(self):
+        values = settings_values(self.settings)
+        values["implementation_credential_id"] = self.unselected.pk
+        return RunnerSettings.objects.create(
+            name="Separate", identity=self.runner, **values
+        )
+
+    def test_assigned_runner_preflight_uses_its_own_account(self):
+        self.configure_separate_runner()
+        RunnerPreflightGrant.objects.create(
+            runner=self.runner, credential=self.unselected
+        )
+        response = self.preflight(self.unselected)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["material"]["secret"], "unselected-private-secret"
+        )
+        self.assertEqual(self.preflight(self.backend).status_code, 400)
+
+    def test_assigned_run_receives_its_snapshotted_credential(self):
+        self.configure_separate_runner()
+        self.run = claim_run(
+            runner=self.runner,
+            run_id=uuid.uuid4(),
+            configuration_revision=configuration_document(self.runner)["revision"],
+        )
+        response = self.run_secret()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["material"]["secret"], "unselected-private-secret"
+        )
+
+    def test_additional_runner_names_redact_selected_material(self):
+        saved = self.configure_separate_runner()
+        saved.name = "Runner unselected-private-secret"
+        saved.save()
+        response = self.client.get(reverse("coding_runner_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "unselected-private-secret")
+        self.assertContains(response, "Runner [redacted]")
 
     def test_selected_preflight_returns_only_backend_material(self):
         response = self.preflight()

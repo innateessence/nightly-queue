@@ -1,131 +1,77 @@
 {% extends "base.html" %}
-
 {% block title %}Your queue · vibearr{% endblock %}
 {% block queue_current %} aria-current="page"{% endblock %}
-
 {% block heading %}
-    <section class="page-heading" aria-labelledby="page-title">
-      <div>
-        <p class="eyebrow">LESS BUSYWORK. MORE TOMORROW.</p>
-        <h1 id="page-title">Leave it for the night.</h1>
-        <p class="subtitle">Manual work and GitHub issues, together in one queue.</p>
-      </div>
-      <div class="queue-total"><span class="status-dot" aria-hidden="true"></span> {{ queue_count }} executable · {{ queue_total }} queued total</div>
-    </section>
-
+<section class="page-heading" aria-labelledby="page-title">
+  <div><h1 id="page-title">Queue</h1><p class="subtitle">Manage work across your projects.</p></div>
+  <div class="heading-actions"><span class="queue-total">{{ queue_count }} executable · {{ queue_total }} queued total</span><a href="#add-item" class="button-primary" data-open-panel="add-item">{% include "_icon.html" with name="plus" %}Add work item</a></div>
+</section>
 {% endblock %}
-
 {% block content %}
-    <div class="workspace">
-      <section class="panel composer" aria-labelledby="add-title">
-        <div class="section-heading">
-          <span class="section-icon" aria-hidden="true">＋</span>
-          <div><h2 id="add-title">Add a work item</h2><p>A little context goes a long way.</p></div>
-        </div>
-        <form method="post" action="{% url 'index' %}">
-          {% csrf_token %}
-          {% if form.errors %}
-            <div class="form-errors" role="alert">
-              <p>Please check your work item:</p>
-              {% for field in form %}
-                {% for error in field.errors %}<p>{{ field.label }}: {{ error }}</p>{% endfor %}
-              {% endfor %}
-              {{ form.non_field_errors }}
-            </div>
-          {% endif %}
-          <div class="field">
-            <label for="{{ form.project.id_for_label }}">Project <span class="required">*</span></label>
-            {{ form.project }}
-            <p class="field-hint"><a href="{% url 'project_list' %}">Manage projects</a></p>
-            {% if not has_projects %}<p class="field-hint">Create a project on the <a href="{% url 'project_list' %}">Projects page</a> before adding work.</p>{% endif %}
-          </div>
-          <div class="field">
-            <label for="{{ form.title.id_for_label }}">What needs doing? <span class="required">*</span></label>
-            {{ form.title }}
-          </div>
-          <div class="field">
-            <label for="{{ form.instructions.id_for_label }}">Instructions <span class="optional">optional</span></label>
-            {{ form.instructions }}
-            <p class="field-hint">Give the coding agent enough detail to get started.</p>
-          </div>
-          <div class="field">
-            <label for="{{ form.priority.id_for_label }}">Priority</label>
-            {{ form.priority }}
-          </div>
-          <button class="button-primary" type="submit"><span aria-hidden="true">＋</span> Add to queue</button>
-          <p class="form-footnote">Saved for your coding runner.</p>
-          <p class="field-hint">GitHub issues from autonomous projects join this queue at the interval set in <a href="{% url 'api_settings' %}">Settings</a>. Use “Sync issues now” to import them immediately.</p>
-        </form>
-      </section>
-
-      <section class="queue-section" aria-labelledby="queue-title">
-        <div class="queue-heading">
-          <div><h2 id="queue-title">Your queue <span class="count-badge">{{ queue_count }}</span></h2><p>A clear head starts with a clear list.</p></div>
-          <form method="post" action="{% url 'sync_issues' %}">
-            {% csrf_token %}
-            <button class="button-filter" type="submit">Sync issues now</button>
-          </form>
-        </div>
-        <form method="get" class="queue-filters" role="search" aria-label="Search work items">
-          <label class="sr-only" for="queue-search">Search title and instructions</label>
-          <input type="search" id="queue-search" name="q" value="{{ query }}" placeholder="Search your queue…">
-          <label class="sr-only" for="priority-filter">Filter by priority</label>
-          <select id="priority-filter" name="priority">
-            <option value="">All priorities</option>
-            {% for value, label in priorities %}<option value="{{ value }}"{% if priority == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
-          </select>
-          <label class="sr-only" for="project-filter">Filter by project</label>
-          <select id="project-filter" name="project">
-            <option value="">All projects</option>
-            {% for option in projects %}<option value="{{ option.pk }}"{% if project == option.pk|stringformat:"s" %} selected{% endif %}>{{ option.name }}</option>{% endfor %}
-          </select>
-          <button type="submit" class="button-filter">Filter</button>
-        </form>
-        {% if filtered %}<div class="filter-summary">{{ items|length }} item{{ items|length|pluralize }} found <a href="{% url 'index' %}">Clear filters</a></div>{% endif %}
-        <div class="queue-items">
-          {% for item in items %}
-            <article class="panel queue-item">
-              <div class="item-meta">
-                <span class="queued-label"><span class="status-dot" aria-hidden="true"></span> {{ item.get_status_display }}</span>
-                <span class="order-label">{{ item.get_source_display }}</span>
-                <span class="priority priority-{{ item.priority }}">{{ item.get_priority_display }} priority</span>
-              </div>
-              <h3>{{ item.title }}</h3>
-              {% if item.issue_number %}<p class="item-project"><a href="{{ item.issue_repository|slice:':-4' }}/issues/{{ item.issue_number }}" target="_blank" rel="noopener noreferrer">Issue #{{ item.issue_number }}</a> · {{ item.get_issue_state_display }}</p>{% endif %}
-              <p class="item-project"><a href="{{ item.project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ item.project.name }}</a> · #{{ item.project_id }}{% if item.branch_name %} · {{ item.branch_name }}{% endif %}</p>
-              {% if item.waiting_reason %}<p class="item-instructions" role="status">{{ item.waiting_reason }}</p>{% endif %}
-              {% if item.instructions %}<p class="item-instructions">{{ item.instructions }}</p>{% endif %}
-              {% if item.result_url %}<p class="item-project"><a href="{{ item.result_url }}" target="_blank" rel="noopener noreferrer">View result</a></p>{% endif %}
-              {% if item.error_summary %}<p class="item-instructions">{{ item.error_summary }}</p>{% endif %}
-              <div class="item-footer">
-                <span>Added <time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at|date:"M j, Y · H:i T" }}</time></span>
-                {% if item.source == 'manual' and item.status != 'running' %}<form method="post" action="{% url 'remove_item' item.pk %}">
-                  {% csrf_token %}
-                  <button class="button-remove" type="submit" aria-label="Remove {{ item.title }} from queue">Remove</button>
-                </form>{% endif %}
-              </div>
-            </article>
-          {% empty %}
-            <div class="panel empty-state">
-              <div class="empty-illustration" aria-hidden="true"><span>☾</span><i>✦</i></div>
-              {% if filtered %}
-              <span class="eyebrow">A LITTLE ROOM TO SEARCH</span>
-              <h3>No matching work items.</h3>
-              <p>Try another search or priority. Your other items are still in the queue.</p>
-              <a href="{% url 'index' %}" class="empty-link">Clear filters <span aria-hidden="true">↗</span></a>
-              {% else %}
-              <span class="eyebrow">A LITTLE SPACE TO THINK</span>
-              <h3>Your evening starts with a clean slate.</h3>
-              <p>Got something on your mind? Add your first work item and give it a place to land.</p>
-              <a href="#{{ form.title.id_for_label }}" class="empty-link">Add your first item <span aria-hidden="true">↗</span></a>
-              {% endif %}
-            </div>
-          {% endfor %}
-        </div>
-        <aside class="integration-note">
-          <span class="integration-icon" aria-hidden="true">↳</span>
-          <div><strong>Ready for a coding runner.</strong><p>Eligible work runs high, normal, then low priority, oldest first within each priority. Held issues and unmet dependencies wait here.</p></div>
-        </aside>
-      </section>
-    </div>
+<details class="add-panel panel" id="add-item"{% if form.errors %} open{% endif %}>
+  <summary>Add a work item</summary>
+  <section class="composer" aria-labelledby="add-title">
+    <div class="section-heading"><h2 id="add-title">Add a work item</h2><button type="button" class="icon-button close-panel" data-close-panel aria-label="Close add work item">{% include "_icon.html" with name="close" %}</button></div>
+    <form method="post" action="{% url 'index' %}">
+      {% csrf_token %}
+      {% if form.errors %}<div class="form-errors" role="alert"><p>Please check your work item:</p>{% for field in form %}{% for error in field.errors %}<p>{{ field.label }}: {{ error }}</p>{% endfor %}{% endfor %}{{ form.non_field_errors }}</div>{% endif %}
+      <div class="form-grid">
+        <div class="field"><label for="{{ form.project.id_for_label }}">Project <span class="required">*</span></label>{{ form.project }}<p class="field-hint"><a href="{% url 'project_list' %}">Manage projects</a></p>{% if not has_projects %}<p class="field-hint">Create a project on the <a href="{% url 'project_list' %}">Projects page</a> before adding work.</p>{% endif %}</div>
+        <div class="field"><label for="{{ form.priority.id_for_label }}">Priority</label>{{ form.priority }}</div>
+        <div class="field field-wide"><label for="{{ form.title.id_for_label }}">Title <span class="required">*</span></label>{{ form.title }}</div>
+        <div class="field field-wide"><label for="{{ form.instructions.id_for_label }}">Instructions <span class="optional">optional</span></label>{{ form.instructions }}</div>
+      </div>
+      <div class="form-actions"><button class="button-primary" type="submit">{% include "_icon.html" with name="plus" %}Add to queue</button><button class="button-filter close-panel" type="button" data-close-panel>Cancel</button></div>
+    </form>
+  </section>
+</details>
+<section class="panel list-panel" aria-label="Work items">
+  <div class="list-toolbar">
+    <nav class="status-tabs" aria-label="Filter by status">{% for tab in status_links %}<a href="?{{ tab.query }}"{% if status == tab.value %} aria-current="page"{% endif %}>{{ tab.label }} <span class="count-badge">{{ tab.count }}</span></a>{% endfor %}</nav>
+    <form method="post" action="{% url 'sync_issues' %}">{% csrf_token %}<button class="button-filter" type="submit">{% include "_icon.html" with name="refresh" %}Sync issues now</button></form>
+  </div>
+  <form method="get" class="queue-filters" role="search" aria-label="Search work items">
+    <label class="sr-only" for="queue-search">Search title and instructions</label><input type="search" id="queue-search" name="q" value="{{ query }}" placeholder="Search work items…">
+    <label class="sr-only" for="project-filter">Filter by project</label><select id="project-filter" name="project"><option value="">All projects</option>{% for option in projects %}<option value="{{ option.pk }}"{% if project == option.pk|stringformat:"s" %} selected{% endif %}>{{ option.name }}</option>{% endfor %}</select>
+    <label class="sr-only" for="priority-filter">Filter by priority</label><select id="priority-filter" name="priority"><option value="">All priorities</option>{% for value, label in priorities %}<option value="{{ value }}"{% if priority == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <label class="sr-only" for="status-filter">Filter by status</label><select id="status-filter" name="status"><option value="">All statuses</option>{% for value, label in statuses %}<option value="{{ value }}"{% if status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <button type="submit" class="button-filter">{% include "_icon.html" with name="filter" %}Filter</button>
+  </form>
+  {% if filtered %}<div class="filter-summary">{{ items|length }} item{{ items|length|pluralize }} found <a href="{% url 'index' %}?{{ clear_filters_query }}">Clear filters{% if status %} · keep {{ status }}{% endif %}</a></div>{% endif %}
+  {% if items %}
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Work items table">
+    <table class="data-table queue-table">
+      <thead><tr><th scope="col">Status</th><th scope="col" class="title-column">Work item</th><th scope="col">Project</th><th scope="col">Priority</th><th scope="col">Added</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody>{% for item in items %}
+        <tr>
+          <td><span class="status-pill status-{{ item.status }}">{{ item.get_status_display }}</span>{% if item.waiting_reason %}<span class="cell-note warning-text">Waiting</span>{% endif %}</td>
+          <td>
+            <details class="item-details"><summary>{{ item.title }}</summary><div class="task-context">
+              {% if item.instructions %}<p class="item-instructions">{{ item.instructions }}</p>{% else %}<p class="field-hint">No instructions provided.</p>{% endif %}
+              {% if item.waiting_reason %}<p class="notice notice-warning" role="status">{{ item.waiting_reason }}</p>{% endif %}
+              {% if item.error_summary %}<p class="field-error">{{ item.error_summary }}</p>{% endif %}
+              {% if item.branch_name %}<p class="field-hint">Branch: <code>{{ item.branch_name }}</code></p>{% endif %}
+              {% if item.latest_run_id %}<p><a href="{% url 'runner_plan_detail' item.latest_run_id %}">View latest attempt and controls →</a></p>{% endif %}
+              {% if item.result_url %}<p><a href="{{ item.result_url }}" target="_blank" rel="noopener noreferrer">View result {% include "_icon.html" with name="external" %}</a></p>{% endif %}
+            </div></details>
+            <span class="cell-note">{% if item.issue_number %}<a href="{{ item.issue_repository|slice:':-4' }}/issues/{{ item.issue_number }}" target="_blank" rel="noopener noreferrer">{{ item.get_source_display }} #{{ item.issue_number }}</a> · {{ item.get_issue_state_display }}{% else %}{{ item.get_source_display }} · #{{ item.pk }}{% endif %}</span>
+          </td>
+          <td><a href="{{ item.project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ item.project.name }}</a></td>
+          <td><span class="priority priority-{{ item.priority }}" aria-label="{{ item.get_priority_display }} priority">{{ item.get_priority_display }}<span class="sr-only"> priority</span></span></td>
+          <td class="date-cell"><time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at|date:"M j, Y" }}<span class="cell-note">{{ item.created_at|date:"H:i T" }}</span></time></td>
+          <td class="row-actions">{% if item.source == 'manual' and item.status != 'running' %}<form method="post" action="{% url 'remove_item' item.pk %}">{% csrf_token %}<button class="button-remove" type="submit" aria-label="Remove {{ item.title }} from queue">Remove</button></form>{% endif %}</td>
+        </tr>
+      {% endfor %}</tbody>
+    </table>
+  </div>
+  <div class="table-footer">{{ items|length }} work item{{ items|length|pluralize }}<span>Expand a title for instructions and run details</span></div>
+  {% else %}
+  <div class="empty-state">
+    {% include "_icon.html" with name="queue" %}
+    {% if filtered %}<h2>No matching work items.</h2><p>Try another search, project, priority or status.</p><a href="{% url 'index' %}?{{ clear_filters_query }}" class="button-filter">Clear filters</a>
+    {% else %}<h2>No work items yet</h2><p>Add a task or sync issues from your autonomous projects.</p><a href="#add-item" class="button-primary" data-open-panel="add-item">{% include "_icon.html" with name="plus" %}Add your first item</a>{% endif %}
+  </div>
+  {% endif %}
+</section>
+<p class="page-note">Eligible work runs high, normal, then low priority, oldest first within each priority. Held issues and unmet dependencies wait here. Configure automatic issue imports in <a href="{% url 'api_settings' %}">Settings</a>.</p>
 {% endblock %}
