@@ -363,8 +363,13 @@ class NativeCodexAdapter:
                 "Runtime qualification changed before native start; reconcile existing execution."
             )
         operation = self.bound(session)
-        if capabilities.get("accepting_work") is not True and self.client.status(operation)["state"] == "not-started":
-            raise NativeSessionError("Runtime capacity blocks a new native start; reconcile the original operation.")
+        if (
+            capabilities.get("accepting_work") is not True
+            and self.client.status(operation)["state"] == "not-started"
+        ):
+            raise NativeSessionError(
+                "Runtime capacity blocks a new native start; reconcile the original operation."
+            )
         return self.client.start(operation)
 
     def prepare_auth_probe(self, **request) -> NativeSession:
