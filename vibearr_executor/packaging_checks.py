@@ -14,7 +14,9 @@ def main():
     except PermissionError:
         pass
     else:
-        raise RuntimeError("Packaging tasks must not read the controller's raw source input.")
+        raise RuntimeError(
+            "Packaging tasks must not read the controller's raw source input."
+        )
     os.mkdir("/work/.packaging-tmp", 0o700)
     os.environ["TMPDIR"] = "/work/.packaging-tmp"
     os.environ["SHELLCHECK_OPTS"] = "--norc"

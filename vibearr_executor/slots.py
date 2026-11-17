@@ -292,7 +292,9 @@ class SlotRuntime:
             if self.active or self.fenced:
                 raise Conflict("Worker slot is busy or fenced for reconciliation.")
             if record["worker_boot"] != self.boot:
-                raise Conflict("Prepared operation belongs to an earlier worker boot; reconcile it before new work.")
+                raise Conflict(
+                    "Prepared operation belongs to an earlier worker boot; reconcile it before new work."
+                )
             if (
                 self.qualifying
                 and self.probe_operation
