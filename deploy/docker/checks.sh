@@ -167,7 +167,20 @@ if [[ $mode == full || $mode == boundary || $mode == candidate ]]; then
   compose up -d --wait agent-worker setup-worker validation-worker worker-gateway >> "$output/restart.log" 2>&1
   compose run --rm --no-deps qualification finish > "$output/qualification.log" 2>&1
   compose run --rm --no-deps --entrypoint cat qualification /run/vibearr/runner/docker-qualification.json > "$output/qualification.json"
-  compose run --rm --no-deps resource-check > "$output/resource-check.log" 2>&1
+  resource_container=$project-resource-check
+  if docker container inspect "$resource_container" >/dev/null 2>&1; then
+    echo 'The resource check container name already exists; select a new project.' >&2
+    exit 2
+  fi
+  resource_status=0
+  compose run --no-deps --name "$resource_container" resource-check > "$output/resource-check.log" 2>&1 || resource_status=$?
+  if [[ $(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$resource_container") != "$project" ]]; then
+    echo 'Resource observation does not belong to this check project.' >&2
+    exit 2
+  fi
+  docker inspect --format '{"container_id":"{{.Id}}","image":"{{.Image}}","oom_killed":{{.State.OOMKilled}},"exit_code":{{.State.ExitCode}},"running":{{.State.Running}},"memory_bytes":{{.HostConfig.Memory}},"memory_swap_bytes":{{.HostConfig.MemorySwap}},"nano_cpus":{{.HostConfig.NanoCpus}},"pids":{{.HostConfig.PidsLimit}}}' "$resource_container" > "$output/resource-observation.json"
+  docker rm "$resource_container" > "$output/resource-cleanup.log"
+  if ((resource_status)); then exit "$resource_status"; fi
   ids=$(compose ps -q)
   # shellcheck disable=SC2086
   docker inspect $ids | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit --inspect > "$output/runtime-inspection.json"

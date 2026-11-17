@@ -21,6 +21,19 @@ def oom_kills():
 
 
 def main():
+    cgroup = Path("/sys/fs/cgroup")
+    print(
+        json.dumps(
+            {
+                "kind": "memory-probe-starting",
+                "memory_bytes": (cgroup / "memory.max").read_text().strip(),
+                "current_bytes": (cgroup / "memory.current").read_text().strip(),
+                "oom_group": (cgroup / "memory.oom.group").read_text().strip(),
+                "oom_score_adj": Path("/proc/self/oom_score_adj").read_text().strip(),
+            }
+        ),
+        flush=True,
+    )
     configure([])
     profile = Profile(
         "memory-boundary-probe",
