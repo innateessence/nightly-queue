@@ -52,7 +52,8 @@ GitHub reports them closed. They remain in All work and the Closed filter, but
 leave the queued count and filter. Issues first discovered closed use the same
 status. Reopening these unexecuted issues queues them again; running, succeeded,
 and failed work keep their execution status and history. Closure never supplies
-merge evidence. Apply work_queue migration 0005 to reconcile existing closed
+merge evidence. Apply work_queue migration `0006_queueitem_closed` after the
+existing soft-deletion migration to reconcile existing closed
 issues still marked queued, including those served from the conditional cache.
 
 Repository and author identities are numeric GitHub IDs. Known repositories are

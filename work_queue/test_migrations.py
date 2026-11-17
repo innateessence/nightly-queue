@@ -15,7 +15,10 @@ class AutoQueueMigrationTests(TransactionTestCase):
         executor = MigrationExecutor(connection)
         self.addCleanup(self.restore_schema)
         target = [
-            ("work_queue", "0004_mergeevidence_queueitem_author_id_and_more"),
+            (
+                "work_queue",
+                "0005_alter_queueitem_options_alter_queueitem_managers_and_more",
+            ),
             ("projects", "0006_project_github_authority_version"),
         ]
         executor.migrate(target)

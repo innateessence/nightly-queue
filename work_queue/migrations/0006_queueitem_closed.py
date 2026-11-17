@@ -21,7 +21,12 @@ def restore_queued_issues(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-    dependencies = [("work_queue", "0004_mergeevidence_queueitem_author_id_and_more")]
+    dependencies = [
+        (
+            "work_queue",
+            "0005_alter_queueitem_options_alter_queueitem_managers_and_more",
+        )
+    ]
 
     operations = [
         migrations.AlterField(
