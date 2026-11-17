@@ -14,6 +14,7 @@ from .account_bridge import AccountBridge, BridgeHandler, BRIDGE_PORT
 from .account_client import AccountClient
 from .account_leases import AccountLeases
 from .account_server import AccountHandler
+from .codex_account import AccountStore
 from .codex_account_rpc import AccountRPC
 from .codex_task import BINARY, launch
 from .contracts import canonical, digest
@@ -48,6 +49,56 @@ def fixture_token(rotation):
     "Requires the pinned Docker agent image; no provider credentials or model calls.",
 )
 class PinnedAccountCLITests(unittest.TestCase):
+    def test_pinned_cli_reads_an_import_without_a_refresh_timestamp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        errors = []
+        original = json.loads
+
+        def observe(content, *args, **kwargs):
+            value = original(content, *args, **kwargs)
+            if isinstance(value, dict) and "error" in value:
+                errors.append(value["error"])
+            return value
+
+        def inspect(home, *, force):
+            with patch(
+                "vibearr_executor.codex_account_rpc.json.loads", side_effect=observe
+            ):
+                with AccountRPC(home, timeout=20) as cli:
+                    cli.request(
+                        1,
+                        "initialize",
+                        {
+                            "clientInfo": {
+                                "name": "vibearr-import-fixture",
+                                "version": "1",
+                            }
+                        },
+                    )
+                    cli.send({"method": "initialized", "params": {}})
+                    with self.assertRaises(ValueError):
+                        cli.request(2, "account/read", {"refreshToken": False})
+            self.assertRegex(
+                errors[-1]["message"],
+                r"^workspace routing discovery (failed|timed out)$",
+            )
+
+        seed = {
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "access_token": fixture_token(0),
+                "id_token": fixture_token(0),
+                "refresh_token": "fixture-private-refresh-token-initial",
+                "account_id": "fixture-account",
+            },
+        }
+        material = AccountStore(root, inspect).material(
+            {"id": 4, "version": 1}, canonical(seed).decode()
+        )
+        self.assertEqual(json.loads(material)["tokens"]["refresh_token"], "")
+
     def serve(self, address, handler, **attributes):
         server = ThreadingHTTPServer(address, handler)
         for name, value in attributes.items():

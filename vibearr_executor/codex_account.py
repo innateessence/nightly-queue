@@ -2,6 +2,7 @@
 
 import fcntl
 import base64
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -114,6 +115,22 @@ def account_identity(auth: dict) -> dict:
     return {"account_id": auth["tokens"]["account_id"], "user_id": user}
 
 
+def imported_timestamp(auth: dict) -> str:
+    issued = 0
+    try:
+        payload = auth["tokens"]["access_token"].split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "==="))
+        candidate = claims.get("iat") if isinstance(claims, dict) else None
+        if (
+            type(candidate) is int
+            and 0 <= candidate <= datetime.now(timezone.utc).timestamp()
+        ):
+            issued = candidate
+    except (ValueError, TypeError, KeyError, IndexError, UnicodeError, RecursionError):
+        pass
+    return datetime.fromtimestamp(issued, timezone.utc).isoformat()
+
+
 class AccountStore:
     def __init__(self, root: Path, refresh: Callable[..., None]):
         self.root, self.refresh = Path(root), refresh
@@ -209,11 +226,17 @@ class AccountStore:
             return self.access(home, identity, force=force)
 
     def access(self, home: Path, identity: dict, *, force: bool) -> str:
+        path = home / "auth.json"
+        stored = managed_auth(private_bytes(path))
+        if "last_refresh" not in stored:
+            # The pinned CLI requires a timestamp before it can read token data.
+            stored["last_refresh"] = imported_timestamp(stored)
+            durable(path, canonical(stored))
         if not force:
             try:
                 auth_material(
                     "session",
-                    canonical(managed_auth(private_bytes(home / "auth.json"))).decode(),
+                    canonical(stored).decode(),
                 )
             except ValueError:
                 force = True

@@ -65,6 +65,9 @@ The Docker account service keeps the full managed `auth.json` in a private named
 volume, bound to that connection's ID, version, user and workspace. The pinned
 CLI performs provider refresh and preserves rotated credentials there. Repeating
 a task preparation never overwrites that cache with the original saved seed.
+Imports without `last_refresh` receive the access token's issuance time in the
+private cache, or the Unix epoch if unavailable. Codex retains its normal expiry
+and age checks; importing a session does not claim it was refreshed recently.
 
 The supervisor obtains a lease bound to one operation, source/context, account,
 worker instance/boot and deadline. The task receives access material and that

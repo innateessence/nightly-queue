@@ -72,6 +72,37 @@ class ManagedAccountStoreTests(unittest.TestCase):
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
 
+    def test_import_without_timestamp_does_not_claim_a_recent_refresh(self):
+        seed = json.loads(self.seed)
+        seed.pop("last_refresh")
+        observed = []
+
+        def inspect(home, *, force):
+            observed.append(
+                json.loads((home / "auth.json").read_bytes())["last_refresh"]
+            )
+
+        store = AccountStore(self.root, inspect)
+        original = json.dumps(seed)
+        store.material(self.reference, original)
+        store.material(self.reference, original)
+        self.assertEqual(observed, ["1970-01-01T00:00:00+00:00"] * 2)
+
+    def test_import_without_timestamp_uses_the_access_token_issuance_time(self):
+        seed = json.loads(self.seed)
+        seed.pop("last_refresh")
+        parts = seed["tokens"]["access_token"].split(".")
+        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "==="))
+        claims["iat"] = 1704067200
+        parts[1] = (
+            base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+        )
+        seed["tokens"]["access_token"] = ".".join(parts)
+        store = AccountStore(self.root, lambda home, force: None)
+        store.material(self.reference, json.dumps(seed))
+        saved = json.loads((self.root / "4-1/codex/auth.json").read_bytes())
+        self.assertEqual(saved["last_refresh"], "2024-01-01T00:00:00+00:00")
+
     def test_another_seed_requires_a_new_credential_version(self):
         store = AccountStore(self.root, self.refresh)
         store.material(self.reference, self.seed)
