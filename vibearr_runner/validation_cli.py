@@ -106,7 +106,7 @@ def run_candidate(client, source, profile, *, run_id=None, state=None, deadline=
 
 def main():
     from vibearr_executor.contracts import canonical
-    from vibearr_executor.qualify import Harness, qualify, smoke_profiles
+    from vibearr_executor.client import Client
     from vibearr_executor.validation_profile import ValidationProfile
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -118,39 +118,27 @@ def main():
     parser.add_argument("--acceptance", action="store_true")
     args = parser.parse_args()
     profile = ValidationProfile.parse(json.loads(args.profile.read_bytes()))
-    profiles = (
-        smoke_profiles(profile.image, profile.database_image)
-        + profile.executor_profiles()
-        + [profile.setup_profile()]
-    )
+    if args.acceptance:
+        parser.error(
+            "Run Docker checks for full validation acceptance; host executor assembly is retired."
+        )
     args.state.mkdir(mode=0o700, parents=True, exist_ok=True)
-    qualify(args.state, profiles)
-    harness = Harness(args.state, profiles)
-    harness.start()
     output = args.state / "candidate"
     output.mkdir(mode=0o700)
-    try:
-        source = CandidateSource.from_git(args.checkout, args.commit)
-        if args.acceptance:
-            from .validation_acceptance import acceptance
-
-            report = acceptance(harness.client, source, profile, output)
-        else:
-            report = run_candidate(harness.client, source, profile, state=output)
-        args.evidence.write_bytes(canonical(report) + b"\n")
-        print(
-            json.dumps(
-                {
-                    "state": report["result"]["state"],
-                    "commit_sha": source.commit_sha,
-                    "tree_sha": source.tree_sha,
-                    "evidence": str(args.evidence),
-                }
-            )
+    source = CandidateSource.from_git(args.checkout, args.commit)
+    report = run_candidate(Client.from_environment(), source, profile, state=output)
+    args.evidence.write_bytes(canonical(report) + b"\n")
+    print(
+        json.dumps(
+            {
+                "state": report["result"]["state"],
+                "commit_sha": source.commit_sha,
+                "tree_sha": source.tree_sha,
+                "evidence": str(args.evidence),
+            }
         )
-        return 0 if report["result"]["state"] == "passed" else 1
-    finally:
-        harness.shutdown()
+    )
+    return 0 if report["result"]["state"] == "passed" else 1
 
 
 if __name__ == "__main__":

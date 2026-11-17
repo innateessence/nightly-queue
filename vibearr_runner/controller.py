@@ -167,6 +167,10 @@ class Controller:
         self.check_shutdown()
         if self.maintenance and self.maintenance(state, configuration) is not True:
             return "wait"
+        from .drain import acknowledge
+
+        if acknowledge(self.journal, state):
+            return "drained"
         self.check_shutdown()
         self.gates.adapters.update(
             self.backends.usage_adapters(

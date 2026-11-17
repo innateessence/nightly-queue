@@ -13,27 +13,27 @@ class CredentialInitializationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.path = Path(self.temporary.name) / "secret"
-        self.chown = patch("deploy.docker.initialize.os.chown")
-        self.chown.start()
-        self.addCleanup(self.chown.stop)
+
+    def write(self, value):
+        write_once(self.path, value, uid=os.getuid(), gid=os.getgid())
 
     def test_existing_generated_credential_survives_restart(self):
-        write_once(self.path, "")
+        self.write("")
         original = self.path.read_bytes()
-        write_once(self.path, "")
+        self.write("")
         self.assertEqual(self.path.read_bytes(), original)
 
     def test_environment_cannot_silently_replace_saved_key(self):
-        write_once(self.path, "original")
+        self.write("original")
         with self.assertRaisesRegex(RuntimeError, "conflicts"):
-            write_once(self.path, "replacement")
+            self.write("replacement")
         self.assertEqual(self.path.read_text().strip(), "original")
 
     def test_world_readable_existing_credential_is_rejected(self):
         self.path.write_text("secret")
         self.path.chmod(0o644)
         with self.assertRaisesRegex(RuntimeError, "unsafe"):
-            write_once(self.path, "")
+            self.write("")
 
     def test_existing_database_cannot_receive_implicit_replacement_credentials(self):
         database = self.path.parent / "database"
@@ -48,7 +48,7 @@ class CredentialInitializationTests(unittest.TestCase):
             "deploy.docker.initialize.os.fsync", side_effect=OSError("disk failure")
         ):
             with self.assertRaises(OSError):
-                write_once(self.path, "new private value")
+                self.write("new private value")
         self.assertFalse(self.path.exists())
         self.assertEqual(list(self.path.parent.iterdir()), [])
 

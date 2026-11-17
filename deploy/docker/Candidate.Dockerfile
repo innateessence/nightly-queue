@@ -1,0 +1,5 @@
+ARG SOURCE_IMAGE
+ARG TOOLS_IMAGE
+FROM ${SOURCE_IMAGE} AS source
+FROM ${TOOLS_IMAGE}
+COPY --from=source / /input

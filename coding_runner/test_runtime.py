@@ -662,6 +662,7 @@ class JournalTests(TestCase):
 
     def test_public_directory_is_rejected(self):
         self.path.mkdir(mode=0o755)
+        self.path.chmod(0o755)
         with self.assertRaises(JournalError):
             Journal(self.path)
 

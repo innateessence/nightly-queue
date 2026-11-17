@@ -119,6 +119,7 @@ services:
       - gateway-data:/var/lib/gateway
       - postgres-data:/var/lib/existing-postgres:ro
       - browser-artifacts:/var/lib/vibearr-browser
+      - check-artifacts:/var/lib/vibearr-checks
     network_mode: none
 
   postgres:
@@ -308,12 +309,15 @@ services:
     command: [finish]
     environment:
       VIBEARR_RUNTIME_PROTOCOL: compose-slot-v2
+      VIBEARR_EXECUTOR_URL: http://worker-gateway:8791
+      VIBEARR_EXECUTOR_TOKEN_FILE: /run/vibearr/runner/control-token
     networks: [worker-control]
     volumes:
       - runner-secrets:/run/vibearr/runner
       - agent-secrets:/run/slots/agent:ro
       - setup-secrets:/run/slots/setup:ro
       - validation-secrets:/run/slots/validation:ro
+      - check-artifacts:/artifacts
 
   resource-check:
     <<: *slot
@@ -346,6 +350,10 @@ services:
     restart: "no"
     build: {context: ., target: tools}
     image: "${VIBEARR_TOOLS_IMAGE:-vibearr-tools:local}"
+    mem_limit: 2048m
+    memswap_limit: 2048m
+    cpus: 2
+    tmpfs: ["/tmp:rw,nosuid,nodev,exec,size=1024m"]
     command: [python, manage.py, check]
     volumes:
       - application-secrets:/run/vibearr/application:ro
@@ -353,6 +361,7 @@ services:
       - runner-secrets:/run/vibearr/runner
       - backup-data:/var/lib/vibearr-backups
       - runner-data:/var/lib/vibearr
+      - check-artifacts:/artifacts
     depends_on:
       vibearr: {condition: service_healthy}
 
@@ -469,6 +478,7 @@ volumes:
     external: true
     name: "${VIBEARR_RESTORE_BACKUP_VOLUME:-${COMPOSE_PROJECT_NAME:-nightly-queue}_backup-data}"
   browser-artifacts:
+  check-artifacts:
   agent-database-secrets:
   validation-database-secrets:
   agent-control:

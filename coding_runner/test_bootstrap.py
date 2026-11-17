@@ -291,34 +291,64 @@ class AcceptanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cursor"):
             self_acceptance.evidence_entries(queue, str(uuid4()))
 
-    def test_restart_receipt_requires_same_agent_container(self):
+    def test_restart_receipt_requires_same_agent_worker_boot(self):
+        identity = {
+            "runtime": "compose-slot-v2",
+            "protocol_version": 2,
+            "instance_id": str(uuid4()),
+            "worker_boot": str(uuid4()),
+            "binding_digest": "b" * 64,
+        }
         record = {
             "run_id": "run",
-            "agent": {"receipt": {"operation_id": "agent", "container_id": "original"}},
-            "delivery": {"validation": {"checks": [{"operation_id": "validation"}]}},
+            "agent": {
+                "receipt": {"operation_id": "agent", "execution_identity": identity}
+            },
         }
         operation = {
             "operation_id": "agent",
-            "container_id": "original",
+            "execution_identity": identity,
             "run_id": "run",
             "state": "running",
             "phase": "agent",
             "pid": 1,
         }
-        other = {**operation, "pid": 2, "container_id": "replacement"}
+        other = {
+            **operation,
+            "pid": 2,
+            "execution_identity": {**identity, "worker_boot": str(uuid4())},
+        }
         receipt = {"executor_observations": {"agent": [operation, other]}}
-        with self.assertRaisesRegex(ValueError, "container identity"):
+        with self.assertRaisesRegex(ValueError, "worker identity"):
             self_acceptance.restart_evidence(record, receipt)
 
     def test_restart_requires_real_validation_observation(self):
+        identity = {
+            "runtime": "compose-slot-v2",
+            "protocol_version": 2,
+            "instance_id": str(uuid4()),
+            "worker_boot": str(uuid4()),
+            "binding_digest": "b" * 64,
+        }
         record = {
             "run_id": "run",
-            "agent": {"receipt": {"operation_id": "agent", "container_id": "original"}},
-            "delivery": {"validation": {"checks": [{"operation_id": "validation"}]}},
+            "agent": {
+                "receipt": {"operation_id": "agent", "execution_identity": identity}
+            },
+            "validation": {
+                "checks": [
+                    {
+                        "receipt": {
+                            "operation_id": "validation",
+                            "execution_identity": identity,
+                        }
+                    }
+                ]
+            },
         }
         operation = {
             "operation_id": "agent",
-            "container_id": "original",
+            "execution_identity": identity,
             "run_id": "run",
             "state": "running",
             "phase": "agent",
@@ -327,7 +357,7 @@ class AcceptanceTests(unittest.TestCase):
         receipt = {
             "executor_observations": {"agent": [operation, {**operation, "pid": 2}]}
         }
-        with self.assertRaisesRegex(ValueError, "validation across"):
+        with self.assertRaisesRegex(ValueError, "independent validation"):
             self_acceptance.restart_evidence(record, receipt)
 
     def test_private_operator_file_rejects_world_readable_secret_and_links(self):

@@ -187,18 +187,19 @@ merge order, the runtime boundary and acceptance gates.
 Run application checks in Docker:
 
 ```sh
-docker compose exec vibearr python manage.py test
-docker compose exec vibearr python -m unittest nq.test_cli
-docker compose exec vibearr python manage.py makemigrations --check --dry-run
-docker compose exec vibearr python manage.py check
-docker compose exec vibearr black --check .
-docker compose exec vibearr ruff check .
-docker compose exec vibearr mypy . --config-file mypy.ini
+bash test.sh
+bash test.sh work_queue.test_api
+docker compose --profile tools run --rm tools python manage.py makemigrations --check --dry-run
+docker compose --profile tools run --rm tools python manage.py check
+docker compose --profile tools run --rm tools black --check .
+docker compose --profile tools run --rm tools ruff check .
+docker compose --profile tools run --rm tools mypy . --config-file mypy.ini
 ```
 
-The Docker-only operations branch supplies tools containers for Git acceptance,
-distribution builds, qualification and browser screenshots. CI must use the same
-container images and profiles. Missing container tooling does not permit host
+The [Docker checks](docs/docker-operations.md#development-and-ci) use disposable
+projects for Git acceptance, distribution builds, qualification, browser captures
+and backup/restore. CI uses the same container images and profiles. Missing
+container tooling does not permit host
 Python, pip, Git task execution, browsers, services or package installation.
 
 Native agent integrations use pinned CLI images and explicitly selected connections.

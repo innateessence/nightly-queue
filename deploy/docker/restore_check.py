@@ -20,6 +20,10 @@ def main():
         raise RuntimeError(
             "Select an exact backup UUID in a disposable acceptance project."
         )
+    if (Path("/var/lib/vibearr") / "journal.json").exists():
+        raise RuntimeError(
+            "Restored controller authority remained in the active journal."
+        )
     root = Path("/run/vibearr/runner")
     old = (root / ("retired-api-token." + options.backup_id)).read_text().strip()
     token = (root / "api-token").read_text().strip()
@@ -28,6 +32,7 @@ def main():
         old == token
         or (root / "restore-required.json").exists()
         or not history.is_dir()
+        or not (history / "journal.json").is_file()
     ):
         raise RuntimeError(
             "Restored authority was not replaced with a fresh active identity."
@@ -51,6 +56,7 @@ def main():
                 "old_token_rejected": True,
                 "new_token_authenticated": True,
                 "processing_enabled": False,
+                "controller_journal_archived": (history / "journal.json").is_file(),
             }
         )
     )

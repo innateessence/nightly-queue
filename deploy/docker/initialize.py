@@ -99,6 +99,7 @@ def main():
         Path("/var/lib/vibearr-backups"),
         Path("/var/lib/gateway"),
         Path("/var/lib/vibearr-browser"),
+        Path("/var/lib/vibearr-checks"),
     ):
         private(directory)
     print("Docker volumes initialized; saved credentials preserved.")

@@ -141,11 +141,20 @@ def cycle_once(directory, project_id, issue_number):
                 observed = executor.status(manifest["operation_id"])
                 if observed.get("state") != "running":
                     continue
+                from .native_contract import validate_execution_identity
+
+                identity = validate_execution_identity(
+                    observed.get("execution_identity")
+                )
+                if identity["worker_boot"] != observed.get("worker_boot"):
+                    raise RuntimeError(
+                        "Running operation does not identify its original worker boot."
+                    )
                 observations.append(
                     {
                         "operation_id": manifest["operation_id"],
                         "run_id": manifest["run_id"],
-                        "container_id": observed.get("container_id"),
+                        "execution_identity": identity,
                         "state": observed["state"],
                         "phase": manifest["phase"],
                         "pid": os.getpid(),
@@ -278,9 +287,11 @@ def run_acceptance(
         generations += 1
         for operation in progress.get("executor_observations", []):
             previous = executor_observations.setdefault(operation["operation_id"], [])
-            if previous and operation["container_id"] != previous[0]["container_id"]:
+            if previous and operation["execution_identity"] != previous[0].get(
+                "execution_identity"
+            ):
                 raise RuntimeError(
-                    "Supervisor restart replaced the original running operation container."
+                    "Supervisor restart changed the original running worker identity."
                 )
             if len(previous) < 2:
                 previous.append(operation)

@@ -34,6 +34,7 @@ from .worker import terminate_children
 
 PROTOCOL_VERSION = 2
 RUNTIME = "compose-slot-v2"
+MAX_ARTIFACT_STORAGE = 512 * 1024**2
 
 
 class SlotRuntime:
@@ -92,15 +93,22 @@ class SlotRuntime:
                     descendants_terminated=True,
                     paused=False,
                     result={
+                        "schema_version": 1,
                         "run_id": record["manifest"]["run_id"],
                         "operation_id": record["operation_id"],
                         "exit_code": None,
                         "terminated": True,
                         "timed_out": False,
                         "worker_restart": True,
+                        "started_at": None,
+                        "ended_at": time.time(),
                         "export_error": "Worker restarted; no verified candidate export survived.",
                     },
                 )
+                if "execution_identity" in record:
+                    record["result"]["execution_identity"] = record[
+                        "execution_identity"
+                    ]
                 (path / "backend-secret").unlink(missing_ok=True)
                 self.seal(record)
 
@@ -146,6 +154,17 @@ class SlotRuntime:
     def save(self, record):
         durable(self.path(record["operation_id"]) / "record.json", canonical(record))
 
+    def execution_identity(self):
+        from .slot_safety import binding
+
+        return {
+            "runtime": "compose-slot-v2",
+            "protocol_version": 2,
+            "instance_id": self.instance,
+            "worker_boot": self.boot,
+            "binding_digest": digest(canonical(binding(self))),
+        }
+
     def seal(self, record):
         record["receipt_digest"] = digest(
             canonical(
@@ -169,6 +188,7 @@ class SlotRuntime:
             "receipt_digest",
             "wait_reason",
             "worker_boot",
+            "execution_identity",
             "resources_removed",
             "tombstone",
         }
@@ -189,7 +209,7 @@ class SlotRuntime:
             path = self.artifacts / expected_digest
             if not path.exists():
                 used = sum(path.stat().st_size for path in self.artifacts.iterdir())
-                if used + len(content) > 512 * 1024 * 1024:
+                if used + len(content) > MAX_ARTIFACT_STORAGE:
                     raise Rejected("Worker artifact capacity is exhausted.")
                 durable(path, content)
         return {
@@ -233,6 +253,7 @@ class SlotRuntime:
                 "manifest": data,
                 "state": "prepared",
                 "worker_boot": self.boot,
+                "execution_identity": self.execution_identity(),
             }
             self.save(record)
             return self.public(record)
@@ -350,6 +371,7 @@ class SlotRuntime:
                 os.chown(target, 1000, 1000)
                 environment["VIBEARR_BACKEND_SECRET_FILE"] = str(target)
             record["dependency_artifact"] = dependency
+            record["execution_identity"] = self.execution_identity()
             record.update(
                 state="launching",
                 worker_boot=self.boot,
@@ -375,6 +397,7 @@ class SlotRuntime:
             "schema_version": 1,
             "run_id": record["manifest"]["run_id"],
             "operation_id": operation_id,
+            "execution_identity": record["execution_identity"],
             "exit_code": None,
             "terminated": False,
             "timed_out": False,
@@ -510,10 +533,26 @@ class SlotRuntime:
         with self.lock:
             record = self.record(operation_id)
             if record["state"] == "prepared":
+                result = {
+                    "schema_version": 1,
+                    "run_id": record["manifest"]["run_id"],
+                    "operation_id": operation_id,
+                    "exit_code": None,
+                    "terminated": True,
+                    "timed_out": False,
+                    "canceled": True,
+                    "started_at": None,
+                    "ended_at": time.time(),
+                    "log_digest": digest(b""),
+                    "log_bytes": 0,
+                    "log_truncated": False,
+                }
+                if "execution_identity" in record:
+                    result["execution_identity"] = record["execution_identity"]
                 record.update(
                     state="exited",
                     descendants_terminated=True,
-                    result={"exit_code": None, "terminated": True, "timed_out": False},
+                    result=result,
                     paused=False,
                 )
                 (self.path(operation_id) / "backend-secret").unlink(missing_ok=True)

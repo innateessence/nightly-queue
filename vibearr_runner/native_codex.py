@@ -330,7 +330,13 @@ class NativeCodexAdapter:
         )
         self.client.upload("source", source)
         self.client.upload("context", encoded)
-        self.client.prepare(manifest)
+        prepared = self.client.prepare(manifest)
+        session = NativeSession.from_data(
+            {
+                **session.to_data(),
+                "execution_identity": prepared.get("execution_identity"),
+            }
+        )
         self.client.supply_secret(operation_id, runtime_secret)
         return session
 

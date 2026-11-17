@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "kind": "disposable-docker-operations",
+  "generation": "vibearr-check-operations-b1",
+  "source_kind": "uncommitted-worktree-snapshot",
+  "exact_commit": null,
+  "images": {
+    "application": "sha256:f922907b7a5be54e60897b63dfe935e9b7e0c32a4724e9c8a8fcc24840551c27",
+    "tools": "sha256:e3a86a6b122438c4442a5227bad64c9938d7b23a137f6d2c38c6363c271018b8",
+    "runner": "sha256:997eaaf139bf04de50ccd1e67fe068bad9f6573e4746b4faa298049fd5676e62",
+    "backup": "sha256:5c7290246599fde1e7f37a8ec5e9fbf19a06a5b3919c57e61cbd384a690de2f4",
+    "browser": "sha256:28393ad37bdd901ae8b2f93ddabd5a2e6d234842b66729c6bf674be54da5e977"
+  },
+  "observations": {
+    "drain-request.log": {
+      "requested": true,
+      "request_id": "3806dfe3-3200-41cd-a757-070f3db796be",
+      "drained": false
+    },
+    "drain-ack.log": {
+      "requested": true,
+      "request_id": "3806dfe3-3200-41cd-a757-070f3db796be",
+      "drained": true
+    },
+    "backup.log": {
+      "backup_id": "288fe32d-e830-4718-a013-5899e095f9b8",
+      "complete": true,
+      "tables": 32
+    },
+    "restore-verify.log": {
+      "kind": "disposable-backup-fixture",
+      "action": "verify",
+      "credential_decrypted": true,
+      "queue_and_history_preserved": true
+    },
+    "restore-authority.log": {
+      "kind": "disposable-restore-authority-check",
+      "backup_id": "288fe32d-e830-4718-a013-5899e095f9b8",
+      "old_token_rejected": true,
+      "new_token_authenticated": true,
+      "processing_enabled": false,
+      "controller_journal_archived": true
+    }
+  },
+  "release_acceptance": false,
+  "paid_model_calls": false
+}

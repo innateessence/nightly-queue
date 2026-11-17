@@ -29,6 +29,12 @@ class SlotManifestTests(unittest.TestCase):
         ):
             self.runtime = SlotRuntime(Path(self.temporary.name), [self.profile])
         self.addCleanup(self.runtime.close)
+        binding = patch(
+            "vibearr_executor.slot_safety.binding",
+            return_value={"fixture": "metadata-only"},
+        )
+        binding.start()
+        self.addCleanup(binding.stop)
         source = pack({"test.txt": (0o644, b"candidate")})
         context = b"context"
         for kind, value in [("source", source), ("context", context)]:
@@ -63,9 +69,8 @@ class SlotManifestTests(unittest.TestCase):
         self.assertEqual(self.runtime.prepare(self.manifest), first)
 
     def test_repeated_upload_is_available_when_artifact_storage_is_full(self):
-        with (self.runtime.artifacts / "capacity-fixture").open("wb") as stream:
-            stream.truncate(512 * 1024**2)
-        repeated = self.runtime.upload("context", b"context", digest(b"context"))
+        with patch("vibearr_executor.slots.MAX_ARTIFACT_STORAGE", 0):
+            repeated = self.runtime.upload("context", b"context", digest(b"context"))
         self.assertEqual(repeated["sha256"], self.manifest["context_digest"])
 
     def test_validation_rejects_backend_credentials(self):
@@ -99,6 +104,34 @@ class SlotManifestTests(unittest.TestCase):
         self.assertEqual(status["state"], "exited")
         self.assertTrue(status["descendants_terminated"])
         self.assertIsNone(self.runtime.process)
+
+    def test_stopped_prepared_work_has_a_complete_native_termination_receipt(self):
+        prepared = self.runtime.prepare(self.manifest)
+        receipt = self.runtime.stop(self.manifest["operation_id"])["result"]
+        self.assertEqual(receipt["run_id"], self.manifest["run_id"])
+        self.assertEqual(receipt["operation_id"], self.manifest["operation_id"])
+        self.assertEqual(receipt["execution_identity"], prepared["execution_identity"])
+        self.assertTrue(receipt["canceled"])
+        self.assertTrue(receipt["terminated"])
+
+    def test_worker_restart_preserves_the_original_operation_identity_in_its_failure(
+        self,
+    ):
+        prepared = self.runtime.prepare(self.manifest)
+        record = self.runtime.record(self.manifest["operation_id"])
+        record["state"] = "running"
+        self.runtime.save(record)
+        self.runtime.close()
+        with (
+            patch("vibearr_executor.slots.terminate_children"),
+            patch.object(SlotRuntime, "reset"),
+        ):
+            restarted = SlotRuntime(Path(self.temporary.name), [self.profile])
+        self.addCleanup(restarted.close)
+        receipt = restarted.status(self.manifest["operation_id"])["result"]
+        self.assertEqual(receipt["execution_identity"], prepared["execution_identity"])
+        self.assertTrue(receipt["export_error"])
+        self.assertIsNone(receipt["exit_code"])
 
     def test_task_cannot_select_a_command_in_its_manifest(self):
         self.manifest["argv"] = ["untrusted"]

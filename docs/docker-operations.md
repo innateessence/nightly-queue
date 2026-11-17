@@ -60,6 +60,10 @@ Every worker restart invalidates its previous boot proof. Successful fleet
 qualification creates the private validation profile. Model readiness and
 delivery authority require separate checks. The supervisor is started explicitly
 only after those checks and release acceptance; qualification does not start it.
+New native receipts use schema 2 with the protected slot instance, boot and
+binding digest. They identify reusable workers without inventing per-task
+container IDs. Historical container receipts remain readable; they cannot supply
+the new worker restart acceptance evidence.
 
 The disposable validation job exercises all nine checks from the installed
 trusted recipe. `--dependency` adds a synthetic dependency change and verifies
@@ -74,15 +78,73 @@ docker compose --profile checks run --rm --no-deps browser
 Browser PNGs and its JSON report stay in `browser-artifacts`. Export only selected
 artifacts using an explicit operator Docker copy; no browser runs on the host.
 
+## Development and CI
+
+`bash test.sh` builds a disposable `vibearr-check-*` Compose project and runs the
+application suite, formatting/type checks, offline distributions, worker boot and
+resource qualification, all nine candidate checks, dependency-change validation,
+browser captures and a fenced backup/restore. It never reuses deployment volumes
+or starts a paid agent. It removes its own containers and volumes on exit and
+prints the directory containing exported logs and public evidence.
+
+For a focused application suite, use `bash test.sh work_queue.test_api`. Run
+`bash deploy/docker/checks.sh boundary` or `operations` for those standalone
+checks. `VIBEARR_CHECK_OUTPUT` selects a new evidence directory; the command
+refuses an existing directory or disposable project with existing state.
+
+CI takes the check recipe from the immutable PR base and imports candidate Git
+objects as data without configuration, hooks or credentials. The validation job
+checks the exact candidate commit through qualified workers; packaging runs with
+no network or credentials under the separate task UID. A pinned introduction
+commit supplies the recipe when the PR base predates Docker checks. Local runs
+without `--candidate` validate a disposable snapshot and do not claim an exact
+committed revision. Use `--candidate <checkout> --commit <sha>` for exact input.
+Run `candidate`, `boundary` and `operations` separately for that input. Boundary
+and operations build the candidate implementation with the protected Dockerfiles
+and Compose recipe in their own disposable projects. Candidate validation keeps
+its worker and checking tools from the protected recipe, so candidate runtime
+changes cannot replace their own validation controls. These CI observations do
+not replace qualification on the actual deployment after review.
+
+## Drain and upgrade
+
+Request a drain while the current supervisor is running, wait for that request's
+acknowledgement, then stop it. Owned work and recovery continue while new claims
+are fenced. A timeout leaves the drain request in place and requires inspection;
+it does not establish that work has stopped.
+
+```sh
+docker compose --profile tools run --rm --no-deps tools python -m vibearr_runner.drain on
+docker compose --profile tools run --rm --no-deps tools python -m vibearr_runner.drain wait --timeout 3600
+docker compose --profile runner stop vibearr-runner
+```
+
+Retain the current immutable image IDs and take the quiescent backup below before
+changing images. Build or select reviewed replacement images, preserve the same
+data project, and run migrations through Compose. Check application health and
+qualify every updated worker boot before restarting a previously active
+supervisor. The persistent drain still prevents claims during those checks.
+Only after recovery, connection readiness and release acceptance are satisfied,
+clear the drain explicitly and start that supervisor:
+
+```sh
+docker compose --profile tools run --rm --no-deps tools python -m vibearr_runner.drain off
+docker compose --profile runner up -d --no-deps vibearr-runner
+```
+
+Rollback requires compatible images and schema or an isolated restore of the
+matching snapshot. Do not promise automatic rollback across irreversible
+migrations. Keep processing disabled until the full Docker release acceptance
+has succeeded.
+
 ## Backup
 
-Complete or reconcile all owned work before backup. Stop the supervisor to
-prevent another claim. The backup job refuses a database with active runs.
+Drain and stop the supervisor using the commands above before backup. The backup
+job refuses a database with active runs.
 Stop all writers before declaring the snapshot quiescent; leave PostgreSQL
 running for its transaction-consistent logical dump:
 
 ```sh
-docker compose --profile runner stop vibearr-runner
 docker compose --profile runner stop vibearr celery-worker celery-beat agent-worker setup-worker validation-worker worker-gateway valkey
 docker compose --profile operations build backup
 docker compose --profile operations run --rm --no-deps backup backup --quiesced
@@ -140,8 +202,3 @@ Inspect and reconcile archived GitHub publications before claims. Keep the old
 deployment fenced: a restore test must never start a second publishing
 supervisor. The disposable round-trip fixture checks encryption, queue state and
 run history; it is not real delivery or dependent-issue release acceptance.
-
-For upgrades, retain the prior image IDs and a verified backup, use compatible
-container migrations, check health, and qualify the updated workers. Rollback
-requires compatible images and schema or an isolated restore of the matching
-snapshot. Do not promise automatic rollback across irreversible migrations.

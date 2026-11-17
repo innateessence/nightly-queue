@@ -34,6 +34,11 @@ no paid model calls were made.
 - `docker-browser.json` and `../screenshots/docker/`: actual Chromium desktop and
   mobile PNGs in both themes, with released static CSS and no page errors or
   failed requests. Desktop light and mobile dark output were visually inspected.
+- `docker-drain-restore.json`: a later disposable operations run started a
+  processing-disabled supervisor, acknowledged the current drain request, and
+  stopped it before backup. Restore preserved the controller journal in its
+  archive, rejected the old token and authenticated a fresh disabled identity.
+  The observations record that run's images and uncommitted snapshot scope.
 
 Image and tree identities in the reports identify their particular test
 generations. Later review fixes receive their own unit tests and fresh boot
@@ -61,6 +66,9 @@ against the final images; earlier reports cannot be relabeled as that evidence.
   capabilities. The corrected broker restarted and shut down with exit code zero.
 - Tools commands load private credential files through their entrypoint. Bare
   container exec does not inherit secrets loaded into the running web process.
+- New native receipts identify the protected slot instance and boot. Delivery
+  binding and restart evidence use those identities rather than fabricated
+  per-task container IDs. The focused API suite covers the complete receipt chain.
 
 The operations checkpoint passed 976 application tests, 19 focused
 initialization/filesystem/environment tests, Black, Ruff and mypy. Backup and
@@ -68,5 +76,6 @@ restore capacity checks require a 1 GiB reserve. Snapshot bundles stay in privat
 named volumes; only sanitized evidence and browser PNGs are in the repository.
 
 This is an intermediate review, not the final no-P2-or-higher signoff. D4 still
-requires Docker CI/test orchestration, drain/upgrade and delivery recovery,
-completion of documentation replacement, and real dependent two-issue acceptance.
+requires the final integrated checks, pinned CI against the committed candidate,
+native delivery/browser recovery, completion of documentation replacement and
+real dependent two-issue acceptance.

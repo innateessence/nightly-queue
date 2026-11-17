@@ -2,7 +2,7 @@
 FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c AS worker
 LABEL io.vibearr.worker.protocol="2"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp
-RUN apt-get update && apt-get install -y --no-install-recommends git iptables ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends git iptables ca-certificates shellcheck \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /input /control /work /secrets /home/task /opt/validation /opt/candidate
 COPY vibearr_executor/validation-requirements.txt /opt/validation/requirements.txt

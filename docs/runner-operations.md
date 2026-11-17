@@ -141,23 +141,23 @@ eligible terminal data; disk pressure never deletes recoverable work as a fallba
 
 ## Verification layers
 
-`bash test.sh` runs portable Django/control/migration checks plus a real independent
-runner image with a read-only root, non-root user, no capabilities, no network,
-and private tmpfs state. Its standard-library, Git, HTTP, and deterministic
-recovery checks do not require Git in the Django image. The actual namespace probe
-must either succeed or produce the fail-closed unsupported result. The two actual
-sandbox implementation checks and full OS isolation suite run separately; portable
-success does not claim deployment qualification.
+`bash test.sh` runs the full disposable Docker pipeline described in
+[Docker operations](docker-operations.md#development-and-ci). Portable runner
+checks and Git acceptance run in a tools image; worker qualification additionally
+exercises actual UID, network, resource, cancellation, restart and reset controls.
+The full run also validates the candidate and a dependency change, takes browser
+captures and verifies backup/restore. Portable success alone does not qualify a
+deployment or enable claims.
 
 Dispatch `.github/workflows/runner-deployment-boundary.yml` on a designated
 self-hosted runner labelled `runner-deployment-qualification`. Supply the reviewed
-Compose overlay and immutable `repository@sha256:...` image. The job verifies the
-configured image, runs the full boundary suite inside that exact deployment, and
-uploads `runner-deployment-boundary/runner-boundary.json` only after success.
-Unsupported namespaces fail the job; no skip, privileged mode, global sysctl
-change, or unconfined policy is a substitute. Match the deployed source commit
-and explicit image/policy digest bootstrap variables to the artifact. The artifact
-binds source/code, kernel, image, policy, architecture, Python, and bubblewrap.
+Compose project name and installed tools image ID (`sha256:...`). The job reads
+the authenticated fleet proof and selected operator Docker inspection facts;
+it does not restart workers or qualify them itself. Perform the disruptive
+synthetic qualification with the supervisor stopped as described in
+[worker readiness](docker-operations.md#worker-readiness) first. Every worker
+restart invalidates its prior boot proof. Unsupported controls fail qualification;
+privileged mode, host security changes or a host executor are not substitutes.
 
 ## Historical proposal qualification reference (container-only commands)
 
