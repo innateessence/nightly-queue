@@ -53,8 +53,9 @@ Native adapter/authentication and dispatch readiness remain separate and false
 until those integrations are installed, regardless of historical release evidence.
 
 Native configuration requires an implementation backend/model/credential and
-GitHub issue/delivery credentials. Codex initially accepts an API token, not a
-subscription session. Separate research backend/model/credentials remain available
+GitHub issue/delivery credentials. Codex uses the selected ChatGPT account through
+the protected Docker login service; no API key is required. Real provider refresh
+credentials stay outside candidate execution. Separate research backend/model/credentials remain available
 as saved settings but are inactive for native requirements and account inventory.
 Setup and validation command settings remain until trusted validation profiles
 are implemented. The native executor will select immutable registered recipes;

@@ -6,6 +6,7 @@ from .proxy import Handler, Proxy
 HOSTS = {
     "agent": {"chatgpt.com"},
     "setup": {"pypi.org", "files.pythonhosted.org"},
+    "account": {"auth.openai.com", "chatgpt.com"},
 }
 
 

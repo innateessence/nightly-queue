@@ -13,6 +13,20 @@ from .codex_account import OAUTH_ISSUER
 from .codex_task import BINARY, VERSION
 
 
+def account_environment(home: Path) -> dict[str, str]:
+    environment = {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "LANG": "C.UTF-8",
+        "HOME": str(home.parent),
+        "CODEX_HOME": str(home),
+        "CODEX_REFRESH_TOKEN_URL_OVERRIDE": OAUTH_ISSUER + "/oauth/token",
+    }
+    for name in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
+        if name in os.environ:
+            environment[name] = os.environ[name]
+    return environment
+
+
 class AccountRPC:
     def __init__(self, home: Path, *, binary: str = BINARY, timeout: float = 60):
         self.home, self.binary, self.timeout = Path(home), binary, timeout
@@ -23,16 +37,7 @@ class AccountRPC:
         self.deadline = 0.0
 
     def __enter__(self) -> "AccountRPC":
-        environment = {
-            "PATH": "/usr/local/bin:/usr/bin:/bin",
-            "LANG": "C.UTF-8",
-            "HOME": str(self.home.parent),
-            "CODEX_HOME": str(self.home),
-            "CODEX_REFRESH_TOKEN_URL_OVERRIDE": OAUTH_ISSUER + "/oauth/token",
-        }
-        for name in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
-            if name in os.environ:
-                environment[name] = os.environ[name]
+        environment = account_environment(self.home)
         arguments = [
             self.binary,
             "-c",
@@ -148,8 +153,8 @@ class AccountRPC:
         )
 
 
-def refresh_account(home: Path, *, force: bool = False) -> None:
-    with AccountRPC(home) as client:
+def refresh_account(home: Path, *, force: bool = False, timeout: float = 60) -> None:
+    with AccountRPC(home, timeout=timeout) as client:
         client.request(
             1,
             "initialize",

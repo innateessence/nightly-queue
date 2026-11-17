@@ -15,6 +15,7 @@ MAX_EVENTS = 2048
 MAX_OUTPUT = 1024 * 1024
 MAX_LINE = MAX_OUTPUT
 AUTH_PROMPT = "Authentication diagnostic: reply with a short greeting only. Do not run tools, edit files, or access another repository."
+_ACCOUNT_CLIENT_DEFAULT = object()
 
 
 def auth_source():
@@ -173,8 +174,19 @@ class NativeCodexAdapter:
     version = CODEX_VERSION
     resume_supported = False
 
-    def __init__(self, client):
+    def __init__(self, client, *, account_client=_ACCOUNT_CLIENT_DEFAULT):
         self.client = client
+        if account_client is _ACCOUNT_CLIENT_DEFAULT:
+            import os
+
+            account_client = None
+            if os.environ.get("VIBEARR_CODEX_ACCOUNT_URL") or os.environ.get(
+                "VIBEARR_CODEX_ACCOUNT_TOKEN_FILE"
+            ):
+                from vibearr_executor.account_client import AccountClient
+
+                account_client = AccountClient.from_environment()
+        self.accounts = account_client
 
     def selected_profile(self, policy: ExecutionPolicy, kind: str):
         from vibearr_executor import SLOT_QUALIFICATION_VERSION
@@ -197,6 +209,17 @@ class NativeCodexAdapter:
         ):
             raise NativeSessionError(
                 "Qualify the installed executor and resolve its capacity before native work."
+            )
+        authentication = capabilities.get("account_auth", {})
+        if not isinstance(authentication, dict):
+            raise NativeSessionError("Installed executor account protocol is invalid.")
+        managed = (
+            type(authentication.get("lease_protocol")) is int
+            and authentication["lease_protocol"] == 1
+        )
+        if kind == "session" and managed and self.accounts is None:
+            raise NativeSessionError(
+                "Configure the protected Docker Codex account login service."
             )
         for value in capabilities.get("profiles", []):
             if value.get("profile_id") != policy.runtime_profile:
@@ -260,7 +283,13 @@ class NativeCodexAdapter:
             for key in ("id", "version"):
                 if type(reference[key]) is not int or reference[key] < 1:
                     raise ValueError
-            runtime_secret = auth_material(kind, secret)
+            if kind == "session" and self.accounts is not None:
+                from vibearr_executor.codex_account import managed_auth
+
+                managed_auth(secret.encode())
+                runtime_secret = ""
+            else:
+                runtime_secret = auth_material(kind, secret)
         except (KeyError, TypeError, ValueError):
             raise NativeSessionError(
                 "Selected native Codex credential is unavailable or invalid."
@@ -337,6 +366,37 @@ class NativeCodexAdapter:
                 "execution_identity": prepared.get("execution_identity"),
             }
         )
+        if kind == "session" and self.accounts is not None:
+            from vibearr_executor.account_leases import lease_secret
+
+            binding = {
+                key: manifest[key]
+                for key in (
+                    "operation_id",
+                    "run_id",
+                    "source_digest",
+                    "context_digest",
+                    "deadline",
+                )
+            }
+            binding.update(
+                account_digest=context["account_digest"],
+                execution_identity=session.execution_identity,
+                credential={"id": reference["id"], "version": reference["version"]},
+            )
+            capsule = lease_secret(self.accounts.prepare(binding, secret))
+            if capsule["binding"] != binding:
+                raise NativeSessionError(
+                    "Account service returned another operation's lease."
+                )
+            if (
+                capsule["auth"]["tokens"]["account_id"]
+                != managed_auth(secret.encode())["tokens"]["account_id"]
+            ):
+                raise NativeSessionError(
+                    "Account service returned another account's access material."
+                )
+            runtime_secret = canonical(capsule).decode()
         self.client.supply_secret(operation_id, runtime_secret)
         return session
 
@@ -536,7 +596,13 @@ class NativeCodexAdapter:
             reference = credential["credential"]
             if reference["provider"] != "codex":
                 raise NativeSessionError("Select a native Codex credential.")
-            auth_material(reference["kind"], credential["material"]["secret"])
+            if reference["kind"] == "session" and self.accounts is not None:
+                from vibearr_executor.codex_account import managed_auth
+
+                managed_auth(credential["material"]["secret"].encode())
+                self.accounts.healthy()
+            else:
+                auth_material(reference["kind"], credential["material"]["secret"])
             profile = self.selected_profile(
                 ExecutionPolicy.from_data(policy), reference["kind"]
             )

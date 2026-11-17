@@ -1,12 +1,14 @@
 """Private managed account storage; task processes receive access tokens only."""
 
 import fcntl
+import base64
 import hashlib
 import json
 import os
 from pathlib import Path
 import stat
-from typing import Any, Callable
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator
 
 from .codex_task import auth_material
 from .contracts import canonical
@@ -29,7 +31,7 @@ def private_directory(path: Path) -> None:
         raise ValueError("Account storage must be private and owned by its service.")
 
 
-def private_bytes(path: Path) -> bytes:
+def private_bytes(path: Path, maximum: int = MAX_AUTH) -> bytes:
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor, "rb") as stream:
         details = os.fstat(stream.fileno())
@@ -38,13 +40,13 @@ def private_bytes(path: Path) -> bytes:
             or details.st_uid != os.getuid()
             or details.st_mode & 0o077
             or details.st_nlink != 1
-            or details.st_size > MAX_AUTH
+            or details.st_size > maximum
         ):
             raise ValueError(
                 "Account files must be bounded private regular files without links."
             )
-        content = stream.read(MAX_AUTH + 1)
-    if len(content) > MAX_AUTH:
+        content = stream.read(maximum + 1)
+    if len(content) > maximum:
         raise ValueError("Account file exceeds its byte limit.")
     return content
 
@@ -99,6 +101,19 @@ def managed_auth(content: bytes) -> dict[str, Any]:
         ) from None
 
 
+def account_identity(auth: dict) -> dict:
+    user = None
+    try:
+        payload = auth["tokens"]["id_token"].split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "==="))
+        value = claims.get("sub") if isinstance(claims, dict) else None
+        if isinstance(value, str) and value:
+            user = value
+    except (ValueError, TypeError, KeyError, IndexError, UnicodeError):
+        pass
+    return {"account_id": auth["tokens"]["account_id"], "user_id": user}
+
+
 class AccountStore:
     def __init__(self, root: Path, refresh: Callable[..., None]):
         self.root, self.refresh = Path(root), refresh
@@ -107,6 +122,17 @@ class AccountStore:
     def material(
         self, credential: dict[str, int], secret: str, *, force: bool = False
     ) -> str:
+        with self.bound(credential, secret) as (home, identity):
+            return self.access(home, identity, force=force)
+
+    def register(self, credential: dict[str, int], secret: str) -> dict:
+        with self.bound(credential, secret):
+            return {"registered": True, "credential": credential}
+
+    @contextmanager
+    def bound(
+        self, credential: dict[str, int], secret: str
+    ) -> Iterator[tuple[Path, dict]]:
         if (
             not isinstance(credential, dict)
             or set(credential) != {"id", "version"}
@@ -116,7 +142,7 @@ class AccountStore:
                 "Bind account storage to its saved credential ID and version."
             )
         seed = managed_auth(secret.encode())
-        account = seed["tokens"]["account_id"]
+        identity = account_identity(seed)
         directory = self.root / f"{credential['id']}-{credential['version']}"
         private_directory(directory)
         descriptor = os.open(
@@ -128,8 +154,8 @@ class AccountStore:
             private_directory(home)
             binding = {
                 **credential,
-                "seed_digest": hashlib.sha256(secret.encode()).hexdigest(),
-                "account_id": account,
+                "seed_digest": hashlib.sha256(canonical(seed)).hexdigest(),
+                **identity,
             }
             metadata = directory / "binding.json"
             path = home / "auth.json"
@@ -138,7 +164,7 @@ class AccountStore:
                     raise ValueError(
                         "Account seed changed without a new credential version."
                     )
-                if managed_auth(private_bytes(path))["tokens"]["account_id"] != account:
+                if account_identity(managed_auth(private_bytes(path))) != identity:
                     raise ValueError(
                         "The saved account differs from the selected credential."
                     )
@@ -149,10 +175,52 @@ class AccountStore:
                     )
                 durable(path, canonical(seed))
                 durable(metadata, canonical(binding))
-            self.refresh(home, force=force)
-            current = managed_auth(private_bytes(path))
-            if current["tokens"]["account_id"] != account:
-                raise ValueError(
-                    "Codex refreshed a different account; sign in to the selected account again."
+            yield home, identity
+
+    def current(
+        self, credential: dict[str, int], seed_digest: str, *, force: bool = False
+    ) -> str:
+        if (
+            not isinstance(credential, dict)
+            or set(credential) != {"id", "version"}
+            or any(type(value) is not int or value < 1 for value in credential.values())
+        ):
+            raise ValueError("Select a saved account credential and version.")
+        directory = self.root / f"{credential['id']}-{credential['version']}"
+        private_directory(directory)
+        descriptor = os.open(
+            directory / "account.lock", os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+        )
+        with os.fdopen(descriptor, "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            binding = json.loads(private_bytes(directory / "binding.json"))
+            if not isinstance(binding, dict):
+                raise ValueError("Account binding is invalid.")
+            identity = {key: binding.get(key) for key in ("account_id", "user_id")}
+            if binding != {**credential, "seed_digest": seed_digest, **identity}:
+                raise ValueError("Account lease does not bind the saved credential.")
+            home = directory / "codex"
+            private_directory(home)
+            if (
+                account_identity(managed_auth(private_bytes(home / "auth.json")))
+                != identity
+            ):
+                raise ValueError("The saved account differs from its lease.")
+            return self.access(home, identity, force=force)
+
+    def access(self, home: Path, identity: dict, *, force: bool) -> str:
+        if not force:
+            try:
+                auth_material(
+                    "session",
+                    canonical(managed_auth(private_bytes(home / "auth.json"))).decode(),
                 )
-            return auth_material("session", canonical(current).decode())
+            except ValueError:
+                force = True
+        self.refresh(home, force=force)
+        current = managed_auth(private_bytes(home / "auth.json"))
+        if account_identity(current) != identity:
+            raise ValueError(
+                "Codex refreshed a different account; sign in to the selected account again."
+            )
+        return auth_material("session", canonical(current).decode())

@@ -53,7 +53,9 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
         saved.enabled = True
         saved.validation_commands = []
         saved.execution_policy.update(
-            runtime_profile="codex-token-v1", validation_profile="vibearr-python312-v1"
+            runtime_profile="codex-token-v1",
+            validation_profile="vibearr-python312-v1",
+            network_hosts=["api.openai.com", "pypi.org", "files.pythonhosted.org"],
         )
         saved.save()
         Project.objects.filter(pk=self.project.pk).update(

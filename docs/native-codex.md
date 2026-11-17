@@ -42,13 +42,14 @@ Later candidate dependency changes are resolved and checked by
 the independent, credential-free validation builder; the model phase retains
 only its model endpoint allowlist.
 
-The image-owned Docker registry installs the API-key profile `native-default`.
+The image-owned Docker registry installs the account profiles `native-default`
+and `codex-session-v1`.
 Its fixed limits are two CPUs, 4096 MiB memory, 128 PIDs and a 2048 MiB task
 workspace. Project policy must match those enforced ceilings; smaller limits
 require a separately reviewed matching slot rather than an unenforced manifest.
 The adapter checks the complete launch recipe digest against capabilities before
-preparing work. The generic profile helper retains earlier token/session IDs for
-protocol compatibility; they are not installed profiles in this fleet.
+preparing work. The generic profile helper retains token recipes for protocol
+compatibility; the Docker fleet does not install them.
 
 Set `execution_policy.runtime_profile` to `native-default` and
 `execution_policy.validation_profile` to the generated validation profile's ID.
@@ -58,40 +59,43 @@ before any production claim; historical proposal release evidence is unrelated.
 
 ## Authentication
 
-A dedicated Codex API key is the default. Select a saved Codex token credential;
-the adapter supplies it only to this task's CLI as `CODEX_API_KEY`. Its agent
-profile permits `api.openai.com`. Dependency installation belongs to a separate
-credential-free setup phase, and validation has no external network.
+Select the saved Codex session connection and model. Authentication uses the same
+ChatGPT account login as interactive Codex; no Codex API key is required.
+The Docker account service keeps the full managed `auth.json` in a private named
+volume, bound to that connection's ID, version, user and workspace. The pinned
+CLI performs provider refresh and preserves rotated credentials there. Repeating
+a task preparation never overwrites that cache with the original saved seed.
 
-The adapter also understands an explicitly selected Codex session credential,
-but the supplied Docker fleet does not register a session profile or its egress
-proxy. Session credentials fail readiness on this fleet. Supporting them requires
-a separately reviewed image-owned profile and matching restricted proxy, followed
-by boundary and live account qualification; changing a task manifest is insufficient.
+The supervisor obtains a lease bound to one operation, source/context, account,
+worker instance/boot and deadline. The task receives access material and that
+opaque capability. Its temporary managed login uses the capability as its
+`refresh_token`, with a fixed loopback renewal endpoint. Codex's built-in renewal
+calls the trusted worker bridge, which checks the current running operation and
+asks the protected service to refresh. The real provider refresh credential
+stays in protected storage. Retired, expired, paused and other-worker leases fail.
 
-The session parser accepts the pinned CLI's `auth.json` format, including the optional
-`login_owner_id` and `oauth_provenance` metadata. These fields do not select an
-issuer, endpoint, permission, or refresh mechanism. The supervisor removes the
-refresh token and metadata before delivery. The wrapper uses the pinned CLI's
-non-refreshing `chatgptAuthTokens` mode with a private temporary login file. This
-profile permits only `chatgpt.com`; `auth.openai.com` is not available to the task.
-An invalid access token, or one expiring within five minutes, fails diagnostics.
-Replace an expired session through the credential store outside task execution.
-Tasks never refresh or write back the operator's login.
+Task egress permits only `chatgpt.com`. Only the separate account service proxy
+permits `auth.openai.com` and `chatgpt.com`. Dependency installation belongs to a
+credential-free setup phase; validation has no external network. Candidate
+configuration cannot change these destinations or the fixed renewal endpoint.
+The session parser accepts optional `login_owner_id` and official
+`oauth_provenance` metadata without allowing them to select another issuer.
 
-The adapter never discovers a host login automatically. A copied session must be
-selected deliberately and kept outside source control. API keys remain preferable
-for unattended public-repository work; OpenAI's
-[automation authentication guidance](https://developers.openai.com/codex/noninteractive/)
-describes the account-session limitations. Earlier session smoke evidence used
-only a hand-authored disposable fixture and cannot qualify this Docker fleet.
+Register and repair the selected login using the
+[Docker account commands](docker-operations.md#codex-account-login).
+Device sign-in requires drained tasks and a stopped account service. It must use
+the same selected user/workspace. Host home directories and login caches are
+never discovered or mounted. Restored deployments require a fresh device login
+before any account can refresh.
 
-The CLI and its tools can access the selected API key or access-token material.
-That exposure is contained to the task, not isolated from its own tools. They
-receive no refresh token, GitHub token, queue token, application encryption key,
-or personal configuration. Known structured secret values and their JSON-escaped
-forms are redacted from logs and rejected from exports. This does not promise
-removal of arbitrary encodings or a provider-side spending limit.
+The CLI and its tools can access task access tokens and their scoped renewal
+capability. Before delivering a rotation, the worker durably records its access
+and ID tokens for log redaction and export rejection. All initial and rotated
+values and their JSON-escaped forms are protected. Tasks receive no provider
+refresh credential, GitHub token, queue token, application encryption key or
+personal configuration. Protection does not remove arbitrary encodings or set a
+provider-side spending limit. Offline synthetic refresh tests do not establish
+real account routing, model access or deployment qualification.
 
 ## Fixed CLI configuration
 
@@ -186,7 +190,7 @@ ID/version, model, authentication kind, profile, image, CLI, operation, and sess
 Cache that proof only in protected supervisor state. Calling
 `diagnostics(policy, grant, model=model, proof=proof)` additionally verifies its
 bindings and a maximum 15-minute lifetime. A changed account, model, image,
-profile, runtime, expired proof, or locally expired session requires another
+profile, runtime or expired proof requires another
 automated probe. Issue content and agent output cannot supply this proof. Runtime
 diagnostics remain runtime-only and do not infer native account readiness.
 The lifetime starts at the protected receipt's actual completion timestamp;
@@ -196,7 +200,8 @@ rereading a retained operation cannot renew it.
 
 Drain and stop the supervisor, then qualify idle Docker workers as described in
 [Docker operations](docker-operations.md). Provision an explicitly selected,
-dedicated credential in the private runner secret volume. This command makes
+saved session credential in the private runner secret volume, using its actual
+saved connection ID and version. This command makes
 real model calls and requires `--execute`; ordinary qualification does not run it.
 Choose new state and evidence paths so previous operations remain available for
 reconciliation. Never import the operator's home or agent login.
@@ -205,8 +210,9 @@ reconciliation. Never import the operator's home or agent login.
 docker compose --profile checks run --rm --no-deps --entrypoint python qualification \
   -m vibearr_runner.codex_acceptance --execute \
   --state /artifacts/native-fixture-<new-run-name> \
-  --credential-file /run/vibearr/runner/acceptance-key \
-  --kind token --model <configured-model-id> \
+  --credential-file /run/vibearr/runner/acceptance-session \
+  --credential-id <saved-connection-id> --credential-version <current-version> \
+  --kind session --model <configured-model-id> \
   --evidence /artifacts/native-fixture-<new-run-name>.json
 ```
 

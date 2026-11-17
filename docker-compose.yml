@@ -72,6 +72,21 @@ x-test-database: &test-database
     timeout: 3s
     retries: 20
 
+x-account: &account
+  <<: *security
+  profiles: [runner]
+  image: "${VIBEARR_AGENT_IMAGE:-vibearr-agent:local}"
+  user: "10001:10001"
+  mem_limit: 512m
+  memswap_limit: 512m
+  cpus: 1
+  environment:
+    HTTP_PROXY: http://account-proxy:3128
+    HTTPS_PROXY: http://account-proxy:3128
+    NO_PROXY: localhost,127.0.0.1,::1
+  volumes: [account-data:/var/lib/codex-account]
+  networks: [account-jobs]
+
 x-backup: &backup
   <<: *security
   profiles: [operations]
@@ -109,6 +124,8 @@ services:
       - application-secrets:/run/vibearr/application
       - database-secrets:/run/vibearr/database
       - runner-secrets:/run/vibearr/runner
+      - account-secrets:/run/vibearr/account
+      - account-data:/var/lib/codex-account
       - agent-secrets:/run/vibearr/agent
       - setup-secrets:/run/vibearr/setup
       - validation-secrets:/run/vibearr/validation
@@ -207,6 +224,7 @@ services:
       VIBEARR_SLOT_IMAGE_ID: "${VIBEARR_AGENT_IMAGE_ID:-}"
       VIBEARR_TEST_DATABASE_IMAGE_ID: "${VIBEARR_DATABASE_IMAGE_ID:-}"
       VIBEARR_TEST_DATABASE: agent-database
+      VIBEARR_CODEX_ACCOUNT_URL: http://codex-account:8793
     volumes:
       - agent-control:/control
       - agent-secrets:/run/vibearr:ro
@@ -215,6 +233,67 @@ services:
     depends_on:
       agent-database: {condition: service_healthy}
       model-proxy: {condition: service_started}
+      codex-account: {condition: service_healthy}
+
+  codex-account:
+    <<: *account
+    entrypoint: [python, -I, -m, vibearr_executor.account_server]
+    volumes:
+      - account-data:/var/lib/codex-account
+      - account-secrets:/run/codex-account:ro
+    networks: [worker-control, account-jobs]
+    depends_on:
+      initialize: {condition: service_completed_successfully}
+      account-proxy: {condition: service_started}
+    healthcheck:
+      test: [CMD, python, -I, -c, "import urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://127.0.0.1:8793/health', timeout=3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  account-login:
+    <<: *account
+    profiles: [operations]
+    restart: "no"
+    entrypoint: [python, -I, -m, vibearr_executor.account_login]
+    depends_on:
+      initialize: {condition: service_completed_successfully}
+      account-proxy: {condition: service_started}
+
+  account-register:
+    <<: *application
+    profiles: [operations]
+    restart: "no"
+    build: {context: ., target: tools}
+    image: "${VIBEARR_TOOLS_IMAGE:-vibearr-tools:local}"
+    command: [python, manage.py, docker_register_codex_account]
+    environment:
+      <<: *app-environment
+      VIBEARR_CODEX_ACCOUNT_URL: http://codex-account:8793
+      VIBEARR_CODEX_ACCOUNT_TOKEN_FILE: /run/codex-account/control-token
+    volumes:
+      - application-secrets:/run/vibearr/application:ro
+      - database-secrets:/run/vibearr/database:ro
+      - account-secrets:/run/codex-account:ro
+    networks: [application, worker-control]
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1
+    depends_on:
+      postgres: {condition: service_healthy}
+      codex-account: {condition: service_healthy}
+
+  account-proxy:
+    <<: *security
+    profiles: [runner, operations]
+    image: "${VIBEARR_WORKER_IMAGE:-vibearr-worker:local}"
+    entrypoint: [python, -I, -m, vibearr_executor.slot_proxy]
+    user: "10001:10001"
+    environment: {VIBEARR_PROXY_PHASE: account}
+    networks: [account-jobs, proxy-egress]
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 1
 
   setup-worker:
     <<: *slot
@@ -314,9 +393,12 @@ services:
       VIBEARR_RUNTIME_PROTOCOL: compose-slot-v2
       VIBEARR_EXECUTOR_URL: http://worker-gateway:8791
       VIBEARR_EXECUTOR_TOKEN_FILE: /run/vibearr/runner/control-token
+      VIBEARR_CODEX_ACCOUNT_URL: http://codex-account:8793
+      VIBEARR_CODEX_ACCOUNT_TOKEN_FILE: /run/codex-account/control-token
     networks: [worker-control]
     volumes:
       - runner-secrets:/run/vibearr/runner
+      - account-secrets:/run/codex-account:ro
       - agent-secrets:/run/slots/agent:ro
       - setup-secrets:/run/slots/setup:ro
       - validation-secrets:/run/slots/validation:ro
@@ -379,6 +461,8 @@ services:
       - database-secrets:/snapshot/database-secrets:ro
       - runner-secrets:/snapshot/runner-secrets:ro
       - runner-data:/snapshot/runner-data:ro
+      - account-data:/snapshot/account-data:ro
+      - account-secrets:/snapshot/account-secrets:ro
       - agent-secrets:/snapshot/agent-secrets:ro
       - setup-secrets:/snapshot/setup-secrets:ro
       - validation-secrets:/snapshot/validation-secrets:ro
@@ -415,6 +499,8 @@ services:
       - database-secrets:/restore/database-secrets
       - runner-secrets:/restore/runner-secrets
       - runner-data:/restore/runner-data
+      - account-data:/restore/account-data
+      - account-secrets:/restore/account-secrets
       - agent-secrets:/restore/agent-secrets
       - setup-secrets:/restore/setup-secrets
       - validation-secrets:/restore/validation-secrets
@@ -446,9 +532,12 @@ services:
       VIBEARR_EXECUTOR_TOKEN_FILE: /run/vibearr/runner/control-token
       VIBEARR_RUNTIME_PROTOCOL: compose-slot-v2
       VIBEARR_VALIDATION_PROFILE_FILE: /run/vibearr/runner/validation-profile.json
+      VIBEARR_CODEX_ACCOUNT_URL: http://codex-account:8793
+      VIBEARR_CODEX_ACCOUNT_TOKEN_FILE: /run/codex-account/control-token
     volumes:
       - runner-data:/var/lib/vibearr
       - runner-secrets:/run/vibearr/runner:ro
+      - account-secrets:/run/codex-account:ro
       - browser-artifacts:/screenshots:ro
     networks: [queue-control, worker-control, runner-egress]
     depends_on:
@@ -463,6 +552,7 @@ networks:
   agent-jobs: {internal: true}
   setup-jobs: {internal: true}
   validation-jobs: {internal: true}
+  account-jobs: {internal: true}
   proxy-egress:
 
 volumes:
@@ -475,6 +565,8 @@ volumes:
   application-secrets:
   database-secrets:
   runner-secrets:
+  account-secrets:
+  account-data:
   agent-secrets:
   setup-secrets:
   validation-secrets:

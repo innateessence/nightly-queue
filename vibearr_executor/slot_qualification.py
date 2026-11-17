@@ -55,7 +55,12 @@ def prepare(runtime, case, *, seconds=30, secret=""):
     runtime.probe_operation, runtime.probe_profile = operation, profile
     runtime.qualifying = True
     source = pack({"payload.txt": (0o644, b"fresh candidate\n")})
-    context = canonical({"case": case})
+    context_data = {"case": case}
+    if case == "network" and runtime.account_bridge is not None:
+        from .slot_network import address
+
+        context_data["account_control_ip"] = address("codex-account")
+    context = canonical(context_data)
     for kind, content in (("source", source), ("context", context)):
         runtime.upload(kind, content, digest(content))
     manifest = Manifest(

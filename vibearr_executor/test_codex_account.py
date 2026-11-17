@@ -97,6 +97,7 @@ class ManagedAccountStoreTests(unittest.TestCase):
 
     def test_expired_seed_can_be_repaired_by_managed_cli_refresh(self):
         def renew(home, *, force):
+            self.assertTrue(force)
             (home / "auth.json").write_text(account_secret())
 
         store = AccountStore(self.root, renew)

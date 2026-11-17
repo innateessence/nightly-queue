@@ -75,6 +75,11 @@ def capabilities(runtime):
             {**profile.data(), "profile_digest": profile.digest}
             for profile in runtime.profiles.values()
         ],
+        "account_auth": (
+            {"lease_protocol": 1, "bridge_port": 8792}
+            if runtime.account_bridge is not None
+            else {}
+        ),
         "reason": runtime.fenced
         or (
             "Worker slot qualified for this boot."

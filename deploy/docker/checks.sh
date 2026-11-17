@@ -226,7 +226,7 @@ if [[ $mode == full || $mode == operations ]]; then
     browser_report=$(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.records report_path < "$output/browser.log")
     compose run --rm --no-deps --entrypoint python qualification -m vibearr_runner.browser_receipts --report "$browser_report" --run-id 11111111-1111-4111-8111-111111111111 --state /artifacts/browser-acceptance > "$output/browser-receipt-check.log" 2>&1
   fi
-  compose stop vibearr celery-worker celery-beat agent-worker setup-worker validation-worker worker-gateway valkey > "$output/quiesce.log" 2>&1
+  compose stop vibearr celery-worker celery-beat agent-worker setup-worker validation-worker worker-gateway codex-account valkey > "$output/quiesce.log" 2>&1
   compose run --rm --no-deps backup backup --quiesced > "$output/backup.log" 2>&1
   backup_id=$(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.records backup_id < "$output/backup.log")
   restored run --rm --no-deps restore-files restore-files "$backup_id" > "$output/restore-files.log" 2>&1

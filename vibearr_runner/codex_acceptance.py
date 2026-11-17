@@ -446,6 +446,8 @@ def main():
     parser.add_argument("--inspect-session", type=Path)
     parser.add_argument("--state", type=Path)
     parser.add_argument("--credential-file", type=Path)
+    parser.add_argument("--credential-id", type=int)
+    parser.add_argument("--credential-version", type=int)
     parser.add_argument("--kind", choices=("token", "session"), default="session")
     parser.add_argument("--model")
     parser.add_argument("--evidence", type=Path)
@@ -460,7 +462,15 @@ def main():
     args = parser.parse_args()
     if args.inspect_session:
         if any(
-            (args.execute, args.state, args.credential_file, args.model, args.evidence)
+            (
+                args.execute,
+                args.state,
+                args.credential_file,
+                args.credential_id,
+                args.credential_version,
+                args.model,
+                args.evidence,
+            )
         ):
             parser.error(
                 "Inspect a saved session without requesting new acceptance work."
@@ -469,17 +479,31 @@ def main():
         return
     if not args.execute or any(
         value is None
-        for value in (args.state, args.credential_file, args.model, args.evidence)
+        for value in (
+            args.state,
+            args.credential_file,
+            args.credential_id,
+            args.credential_version,
+            args.model,
+            args.evidence,
+        )
     ):
         parser.error(
-            "Explicitly select --execute, a new --state, --credential-file, --model and --evidence."
+            "Explicitly select --execute, a new --state, --credential-file, --credential-id, --credential-version, --model and --evidence."
         )
+    if args.credential_id < 1 or args.credential_version < 1:
+        parser.error("Select the actual saved credential ID and current version.")
     if args.evidence.exists() or args.evidence.is_symlink():
         parser.error("Select a new acceptance evidence path; preserve prior results.")
     from vibearr_executor.validation_profile import ValidationProfile
 
     credential = {
-        "credential": {"id": 1, "provider": "codex", "kind": args.kind, "version": 1},
+        "credential": {
+            "id": args.credential_id,
+            "provider": "codex",
+            "kind": args.kind,
+            "version": args.credential_version,
+        },
         "material": {"secret": private_secret(args.credential_file)},
     }
     report = acceptance(

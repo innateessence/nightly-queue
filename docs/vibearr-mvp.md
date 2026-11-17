@@ -26,8 +26,8 @@ command approval, plan approval, ready label, manual merge, or service restart i
 needed between the two issues. Failures remain visible and do not block unrelated
 eligible work forever.
 
-The first release supports one repository, one active run, native Codex, API-key
-authentication, continuous processing, and GitHub polling. Existing manual tasks,
+The first release supports one repository, one active run, native Codex, ChatGPT
+account authentication, continuous processing, and GitHub polling. Existing manual tasks,
 schedules, pause/cancel, and optional usage reserves keep working. Claude Code,
 OpenCode, additional repositories, and the full *arr dashboard follow this loop.
 
@@ -69,10 +69,12 @@ never replaces existing secrets implicitly.
 The setup needs GitHub issue reads, repository clone/push and PR writes, check and
 status reads, and merge permission. Use existing scoped credential delivery;
 import and execution credentials remain separate. Request issue-comment/label
-writes only when status updates use them. The native CLI receives its Codex API
-credential, not a personal home directory, subscription login, GitHub credential,
-queue token, or encryption key. Supporting subscription auth is a later capability
-unless it is proven separately without blocking the API-key path.
+writes only when status updates use them. Codex uses the selected ChatGPT account
+through the protected Docker login service, with persistent CLI-managed refresh.
+The task receives access tokens and an operation-scoped renewal capability. Its
+real provider refresh credential, personal home directory, GitHub credential,
+queue token and encryption key remain outside candidate execution. An API key is
+not a prerequisite. See [native authentication](native-codex.md#authentication).
 
 Run startup diagnostics before claiming: API identity/ownership, configuration,
 selected credentials and preflight grants, runtime launch, agent version/auth,

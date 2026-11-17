@@ -14,6 +14,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from .artifacts import extract, result_manifest, snapshot, unpack
+from .account_bridge import AccountBridge
 from .contracts import (
     MAX_ARCHIVE,
     MAX_CONTEXT,
@@ -77,6 +78,7 @@ class SlotRuntime:
         self.active = ""
         self.fenced = ""
         self.qualifying = False
+        self.account_bridge: AccountBridge | None = None
         from .slot_artifacts import DependencyArtifacts
 
         self.dependency_artifacts = DependencyArtifacts(self)
@@ -279,6 +281,11 @@ class SlotRuntime:
             path = self.path(operation_id) / "backend-secret"
             if path.exists() and path.read_text() != secret:
                 raise Conflict("Operation already binds a different credential.")
+            if self.account_bridge is not None:
+                from .codex_task import ARGV, HOSTS
+
+                if profile.argv == ARGV and profile.network_hosts == HOSTS["session"]:
+                    self.account_bridge.bind(record, json.loads(secret))
             durable(path, secret.encode())
             return self.public(record)
 
@@ -395,7 +402,9 @@ class SlotRuntime:
 
     def run(self, operation_id, profile, environment, secret):
         record = self.record(operation_id)
-        protected = protection_material(secret, record.get("database_url", ""))
+        protected = self.protection(
+            operation_id, secret, record.get("database_url", "")
+        )
         logs = bytearray()
         result = {
             "schema_version": 1,
@@ -446,6 +455,9 @@ class SlotRuntime:
                     logs.extend(content)
                     if len(logs) > MAX_LOG:
                         raise Rejected("Task output exceeds the bounded log limit.")
+                    protected = self.protection(
+                        operation_id, secret, record.get("database_url", "")
+                    )
                     durable(
                         self.path(operation_id) / "logs.bin",
                         redact(bytes(logs), protected, incomplete=True),
@@ -456,6 +468,11 @@ class SlotRuntime:
                     terminate_children()
             result["exit_code"] = self.process.wait(timeout=10)
             terminate_children()
+            if self.account_bridge is not None:
+                self.account_bridge.fence(operation_id)
+            protected = self.protection(
+                operation_id, secret, record.get("database_url", "")
+            )
             result["terminated"] = True
             from .validation_profile import BUILD_ARGV
 
@@ -507,6 +524,11 @@ class SlotRuntime:
             except Exception:
                 self.fenced = "Termination or reset is unknown; worker remains fenced."
                 result["terminated"] = False
+            if self.account_bridge is not None:
+                self.account_bridge.close(operation_id)
+            protected = self.protection(
+                operation_id, secret, record.get("database_url", "")
+            )
             content = redact(bytes(logs[:MAX_LOG]), protected, incomplete=True)
             durable(self.path(operation_id) / "logs.bin", content)
             result.update(
@@ -528,6 +550,13 @@ class SlotRuntime:
                 self.seal(record)
                 self.process = None
                 self.active = ""
+                if self.account_bridge is not None:
+                    self.account_bridge.release(operation_id)
+
+    def protection(self, operation_id, secret, database_url):
+        if self.account_bridge is not None:
+            return self.account_bridge.protection(operation_id, secret, database_url)
+        return protection_material(secret, database_url)
 
     def status(self, operation_id):
         with self.lock:
@@ -561,6 +590,9 @@ class SlotRuntime:
                 )
                 (self.path(operation_id) / "backend-secret").unlink(missing_ok=True)
                 self.seal(record)
+                if self.account_bridge is not None:
+                    self.account_bridge.close(operation_id)
+                    self.account_bridge.release(operation_id)
             elif operation_id == self.active:
                 self.cancel.set()
         if operation_id == self.active and self.thread:
@@ -677,6 +709,12 @@ class SlotRuntime:
                 compact_result(record)
             if "logs" in selected:
                 (self.path(operation_id) / "logs.bin").unlink(missing_ok=True)
+                if self.account_bridge is not None:
+                    self.account_bridge.close(operation_id)
+                if not (self.path(operation_id) / "account-lease.json").exists():
+                    (self.path(operation_id) / "account-protection.json").unlink(
+                        missing_ok=True
+                    )
             if "source" in selected:
                 for key in ("source_digest", "context_digest"):
                     value = record["manifest"][key]

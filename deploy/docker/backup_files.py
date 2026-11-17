@@ -3,10 +3,12 @@
 import hashlib
 import json
 import os
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import shutil
 import stat
 import tarfile
+import tempfile
+from uuid import uuid4
 
 
 VOLUMES = (
@@ -14,6 +16,8 @@ VOLUMES = (
     "database-secrets",
     "runner-secrets",
     "runner-data",
+    "account-data",
+    "account-secrets",
     "agent-secrets",
     "setup-secrets",
     "validation-secrets",
@@ -227,3 +231,37 @@ def read_json(path):
         if not stat.S_ISREG(info.st_mode) or info.st_size > 64 * 1024**2:
             raise ValueError("Backup metadata must be a bounded regular file.")
         return json.load(stream)
+
+
+def private_restore_file(path, content):
+    descriptor, temporary = tempfile.mkstemp(prefix=".restore-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
+            os.fchown(stream.fileno(), 10001, 10001)
+            os.fchmod(stream.fileno(), 0o600)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def fence_account_restore(root, backup_id):
+    authority = str(uuid4())
+    marker = {
+        "backup_id": backup_id,
+        "authority": authority,
+        "account_sign_in_required": True,
+    }
+    for name, content in (
+        ("restore-required.json", json.dumps(marker).encode()),
+        ("authority", authority.encode()),
+    ):
+        private_restore_file(root / name, content)
+    return marker
