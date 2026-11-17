@@ -37,6 +37,7 @@ class ExecutorFixture:
         self.state = "not-started"
         self.receipt = None
         self.qualified = True
+        self.accepting_work = True
         self.qualification_version = QUALIFICATION_VERSION
         self.binding_digest = "b" * 64
         self.export_unchanged = False
@@ -49,7 +50,7 @@ class ExecutorFixture:
             "qualification_version": self.qualification_version,
             "binding_digest": self.binding_digest,
             "qualified": self.qualified,
-            "accepting_work": True,
+            "accepting_work": self.accepting_work,
             "profiles": [
                 {**self.profile.data(), "profile_digest": self.profile.digest}
             ],
@@ -217,6 +218,20 @@ class NativeCodexTests(unittest.TestCase):
         second = self.adapter.start(session)
         self.assertEqual(first["container_id"], second["container_id"])
         self.assertEqual(self.client.starts, 1)
+
+    def test_retry_of_running_work_is_allowed_when_the_fleet_has_no_new_capacity(self):
+        session = self.prepare()
+        self.adapter.start(session)
+        self.client.accepting_work = False
+        self.assertEqual(self.adapter.start(session)["state"], "running")
+        self.assertEqual(self.client.starts, 1)
+
+    def test_busy_fleet_cannot_start_an_unstarted_operation(self):
+        session = self.prepare()
+        self.client.accepting_work = False
+        with self.assertRaisesRegex(NativeSessionError, "capacity"):
+            self.adapter.start(session)
+        self.assertEqual(self.client.starts, 0)
 
     def test_recovery_round_trip_reconciles_same_operation(self):
         session = self.prepare()

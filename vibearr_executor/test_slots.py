@@ -91,6 +91,13 @@ class SlotManifestTests(unittest.TestCase):
             self.runtime.status(self.manifest["operation_id"])["state"], "not-started"
         )
 
+    def test_prepared_work_cannot_be_started_under_a_new_worker_boot(self):
+        self.runtime.prepare(self.manifest)
+        self.runtime.boot = str(uuid4())
+        with self.assertRaisesRegex(Conflict, "earlier worker boot"):
+            self.runtime.start(self.manifest["operation_id"])
+        self.assertIsNone(self.runtime.process)
+
     def test_active_or_prepared_data_cannot_be_removed_by_retention(self):
         self.runtime.prepare(self.manifest)
         with self.assertRaises(Conflict):

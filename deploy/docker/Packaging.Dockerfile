@@ -11,4 +11,5 @@ COPY deploy /opt/executor/deploy
 COPY vibearr/test_distributions.py /opt/validation/distribution_checks.py
 COPY .github/actionlint.yaml /opt/validation/actionlint.yaml
 COPY --from=source / /input-source
+RUN chmod 0700 /input-source
 ENTRYPOINT ["python", "-m", "deploy.docker.packaging_job"]

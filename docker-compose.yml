@@ -303,6 +303,9 @@ services:
     <<: *security
     profiles: [checks]
     restart: "no"
+    mem_limit: 2048m
+    memswap_limit: 2048m
+    cpus: 2
     build: {context: ., target: tools}
     image: "${VIBEARR_TOOLS_IMAGE:-vibearr-tools:local}"
     entrypoint: [python, -m, deploy.docker.qualify]
