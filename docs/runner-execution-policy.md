@@ -1,5 +1,12 @@
 # Native execution policy
 
+> **Docker-only runtime requirement:** Follow the [Docker-only runtime plan](docker-only-runtime-plan.md)
+> and [deployment contract](mvp-deployment.md). Every Python, Git, coding CLI,
+> packaging, test, qualification and browser command in this reference executes
+> inside its appropriate container, never on the host. Host-service/daemon-launcher
+> procedures and their old proofs are historical and cannot qualify the new worker
+> boundary. Missing container tools must be implemented in D1–D4; no host fallback.
+
 New built-in runner configuration uses `execution_kind: native`. The authenticated
 configuration API retains outer schema version 1 for compatible readback and adds
 `delivery_contract` with native receipt version 2. Each project and claim snapshot

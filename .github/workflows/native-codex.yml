@@ -19,7 +19,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Build digest-pinned Codex and native tool host
-        run: docker build -f vibearr_executor/Codex.Dockerfile -t vibearr-ci-codex .
+        run: docker build -f vibearr_executor/Slot.Dockerfile --target agent -t vibearr-ci-codex .
       - name: Check installed native executables without credentials or network
         run: |
           image=$(docker image inspect vibearr-ci-codex --format '{{.Id}}')

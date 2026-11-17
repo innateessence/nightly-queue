@@ -433,11 +433,18 @@ def collect_run(
         ),
         None,
     )
-    if agent is None or not any(
-        value["state"] == "passed"
-        and value["tree_sha"] == delivery["workspace"]["tree_sha"]
-        for value in validations
-    ):
+    validation = next(
+        (
+            value
+            for value in validations
+            if value["state"] == "passed"
+            and value["tree_sha"] == delivery["workspace"]["tree_sha"]
+            and {entry["receipt"]["operation_id"] for entry in value["checks"]}
+            == {entry["operation_id"] for entry in checks}
+        ),
+        None,
+    )
+    if agent is None or validation is None:
         raise ValueError(
             "Acceptance lacks the matching native session and independently validated tree."
         )
@@ -464,6 +471,7 @@ def collect_run(
     return {
         **base,
         "agent": agent,
+        "validation": validation,
         "agent_intent": intents[agent["intent_id"]],
         "delivery": delivery,
         "pull_created_at": observed["created_at"],
@@ -580,15 +588,19 @@ def restart_evidence(record, receipt):
         raise ValueError(
             "Acceptance lacks an actual agent observation across independent supervisor processes."
         )
-    container = record["agent"]["receipt"]["container_id"]
+    from .native_contract import validate_execution_identity
+
+    identity = validate_execution_identity(
+        record["agent"]["receipt"].get("execution_identity")
+    )
     if any(
         value["run_id"] != record["run_id"]
         or value["state"] != "running"
-        or value["container_id"] != container
+        or value.get("execution_identity") != identity
         for value in actual
     ):
         raise ValueError(
-            "Restart observation differs from the final protected agent/container identity."
+            "Restart observation differs from the final protected agent worker identity."
         )
     validation = [
         values
@@ -598,19 +610,22 @@ def restart_evidence(record, receipt):
         and len({value["pid"] for value in values}) > 1
     ]
     checks = {
-        value["operation_id"] for value in record["delivery"]["validation"]["checks"]
+        value["receipt"]["operation_id"]: validate_execution_identity(
+            value["receipt"].get("execution_identity")
+        )
+        for value in record["validation"]["checks"]
     }
     if not any(
         values[0]["operation_id"] in checks
         and all(
-            value["container_id"] == values[0]["container_id"]
+            value.get("execution_identity") == checks[values[0]["operation_id"]]
             and value["run_id"] == record["run_id"]
             for value in values
         )
         for values in validation
     ):
         raise ValueError(
-            "Acceptance lacks same-container independent validation across a supervisor restart."
+            "Acceptance lacks independent validation on the same worker boot across a supervisor restart."
         )
     if receipt.get("reporting_acknowledged") is not True:
         raise ValueError("Acceptance lacks the actual completion acknowledgement.")

@@ -1,62 +1,9 @@
 #!/usr/bin/env bash
-# Build and run the vibearr app via docker-compose.
-# Source code is bind-mounted into the container, so code changes do NOT
-# require an image rebuild - just re-run ./run.sh (or restart the services).
-# Usage:
-#   ./run.sh            # start the container (builds image only if missing)
-#   ./run.sh --build    # force rebuild the image (only needed when requirements.txt changes)
-#   ./run.sh --stop     # stop and remove the container
-#   PORT=7778 ./run.sh  # expose on a different host port (default 7777)
 set -euo pipefail
-
-# shellcheck disable=SC2086
-# shellcheck disable=SC2048
-
-COMPOSE_FILE="docker-compose.yml"
-
-info() { echo -e "\033[1;33m[*] ${*}\033[0m"; }
-error() { echo -e "\033[1;31m[-] ERROR: ${*}\033[0m" >&2 ; exit 1 ; }
-
-REBUILD=0
-ACTION="run"
-
-for arg in "$@"; do
-    case "$arg" in
-        --build) REBUILD=1 ;;
-        --stop)  ACTION="stop" ;;
-        -h|--help)
-            grep '^# ' "$0" | sed 's/^# \{0,1\}//'
-            exit 0 ;;
-        *) error "unknown flag: $arg (try --help)" ;;
-    esac
-done
-
-cd "$(dirname "$0")" || error "Failed to change directory to $(dirname "$0")"
-
-if ! docker compose -f "$COMPOSE_FILE" config >/dev/null 2>&1; then
-    error "docker compose is not available or $COMPOSE_FILE is invalid"
-fi
-
-if [[ "${ACTION}" == "stop" ]]; then
-    info "Stopping container..."
-    docker compose -f "$COMPOSE_FILE" down
-    echo "==> stopped"
-    exit 0
-fi
-
-if [[ "${REBUILD}" -eq 1 ]] || ! docker image inspect "vibearr-app" >/dev/null 2>&1; then
-    info "Building image..."
-    docker compose -f "$COMPOSE_FILE" build
-else
-    info "Reusing existing image vibearr-app (use --build to force rebuild)"
-fi
-
-info "Starting container..."
-docker compose -f "$COMPOSE_FILE" up -d --wait
-echo
-echo "    app:      http://127.0.0.1:${PORT:-7777}/"
-echo "    admin:    http://127.0.0.1:${PORT:-7777}/admin/"
-echo
-echo "    logs:     docker compose -f ${COMPOSE_FILE} logs -f"
-echo "    shell:    docker compose -f ${COMPOSE_FILE} exec vibearr sh"
-echo "    stop:     ./run.sh --stop"
+cd "$(dirname "$0")"
+case "${1:-}" in
+  --stop) docker compose down ;;
+  --build) docker compose build && docker compose up -d --wait ;;
+  "") docker compose up -d --build --wait ;;
+  *) echo 'Usage: ./run.sh [--build|--stop]' >&2; exit 2 ;;
+esac

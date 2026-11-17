@@ -55,6 +55,7 @@ def compact_result(record: dict) -> None:
         "schema_version",
         "run_id",
         "operation_id",
+        "execution_identity",
         "exit_code",
         "terminated",
         "termination",

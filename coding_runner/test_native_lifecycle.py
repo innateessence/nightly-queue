@@ -30,7 +30,10 @@ from vibearr_runner.workspaces import WorkspaceManager
 SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
 REPOSITORY_READ = NativeGitHub.repository
 if SDK_AVAILABLE:
-    from vibearr_executor import PROTOCOL_VERSION, QUALIFICATION_VERSION
+    from vibearr_executor import (
+        SLOT_PROTOCOL_VERSION as PROTOCOL_VERSION,
+        SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION,
+    )
     from vibearr_executor.artifacts import pack, unpack, result_manifest
     from vibearr_executor.contracts import canonical, digest
     from vibearr_executor.validation_profile import ValidationProfile
@@ -60,7 +63,7 @@ class Executor:
     def capabilities(self):
         return {
             "schema_version": 1,
-            "runtime": "docker-oci-v1",
+            "runtime": "compose-slot-v2",
             "protocol_version": PROTOCOL_VERSION,
             "qualification_version": QUALIFICATION_VERSION,
             "qualified": True,

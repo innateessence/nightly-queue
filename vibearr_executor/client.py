@@ -1,6 +1,8 @@
 import base64
 import ipaddress
 import json
+import os
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -40,8 +42,22 @@ class Client:
             loopback = ipaddress.ip_address(parsed.hostname or "").is_loopback
         except ValueError:
             loopback = parsed.hostname == "localhost"
+        slot = (
+            os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "compose-slot-v2"
+            and parsed.hostname
+            in {"agent-worker", "setup-worker", "validation-worker", "worker-gateway"}
+            and parsed.port == 8791
+        )
+        if slot:
+            addresses = socket.getaddrinfo(parsed.hostname, parsed.port, socket.AF_INET)
+            if not addresses or any(
+                not ipaddress.ip_address(value[4][0]).is_private for value in addresses
+            ):
+                raise Rejected(
+                    "Docker worker control must resolve on private container networks."
+                )
         if parsed.scheme not in {"http", "https"} or (
-            parsed.scheme == "http" and not loopback
+            parsed.scheme == "http" and not loopback and not slot
         ):
             raise Rejected("Use HTTPS or loopback executor control.")
         if (

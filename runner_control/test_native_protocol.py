@@ -215,6 +215,7 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
             fixed.image,
             "e" * 64,
             manifest,
+            getattr(self, "worker_identity", None),
         )
         self.agent_intent = self.write(
             "native_intent",
@@ -224,7 +225,7 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
 
     def observed(self, operation_id, original, changed, exit_code=0):
         end = timezone.now().timestamp()
-        return {
+        observed = {
             "state": "exited",
             "operation_id": operation_id,
             "descendants_terminated": True,
@@ -244,6 +245,14 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
                 "artifact": result_manifest(original, changed),
             },
         }
+        if hasattr(self, "worker_identity"):
+            observed.pop("container_id")
+            observed.update(
+                execution_identity=self.worker_identity,
+                worker_boot=self.worker_identity["worker_boot"],
+            )
+            observed["result"]["execution_identity"] = self.worker_identity
+        return observed
 
     def complete_agent(self):
         self.prepare_agent()
@@ -504,6 +513,30 @@ class NativeProtocolTests(NativeProtocolMixin, TestCase):
         )
         self.assertEqual(result.native_outcome, "delivered")
         self.assertEqual(result.state, "completed")
+
+    def test_docker_slot_receipts_authorize_the_complete_delivery_chain(self):
+        self.worker_identity = {
+            "runtime": "compose-slot-v2",
+            "protocol_version": 2,
+            "instance_id": str(uuid4()),
+            "worker_boot": str(uuid4()),
+            "binding_digest": "d" * 64,
+        }
+        self.complete_delivery()
+        self.write("verified_delivery", self.evidence)
+        self.terminate()
+        result = finish_run(
+            runner=self.runner,
+            run_id=self.run.pk,
+            claim_token=self.claim,
+            status="succeeded",
+            result_url=self.pull["url"],
+            outcome="delivered",
+        )
+        self.assertEqual(result.state, "completed")
+        receipt = result.evidence.get(kind="native_agent").payload["receipt"]
+        self.assertEqual(receipt["execution_identity"], self.worker_identity)
+        self.assertNotIn("container_id", receipt)
 
     def test_finish_keeps_ownership_until_all_resources_terminal(self):
         self.complete_agent()

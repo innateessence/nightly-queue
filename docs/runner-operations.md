@@ -1,5 +1,15 @@
 # Runner operations and release verification
 
+Use [Docker operations](docker-operations.md) for current container commands,
+identity bootstrap, qualification, backup and empty-target restoration.
+
+> **Docker-only runtime requirement:** Follow the [Docker-only runtime plan](docker-only-runtime-plan.md)
+> and [deployment contract](mvp-deployment.md). Every Python, Git, coding CLI,
+> packaging, test, qualification and browser command in this reference executes
+> inside its appropriate container, never on the host. Host-service/daemon-launcher
+> procedures and their old proofs are historical and cannot qualify the new worker
+> boundary. Missing container tools must be implemented in D1–D4; no host fallback.
+
 ## Native policy upgrade
 
 The [native execution policy](runner-execution-policy.md) replaces human command
@@ -11,7 +21,8 @@ because its decision still reads Approved.
 
 New claims snapshot native policy and a version 2 delivery contract. Research-only
 settings no longer gate native execution. The [OCI executor](isolated-executor.md)
-now supplies automated runtime/profile qualification on the dedicated Docker host.
+provides the earlier protocol reference. The replacement qualification runs in
+containers against the socketless worker stack.
 Native adapter/authentication and dispatch remain separate, so normal execution
 remains unavailable. Runtime diagnostics work before any production claim. The
 controlled proposal qualification procedure below is retained for historical
@@ -28,8 +39,8 @@ UI publicly as an authenticated multi-user service.
 
 1. Back up PostgreSQL, the credential encryption key, and the stopped runner
    volume. Keep the key and tokens outside Git and outside task workspaces.
-2. Apply `python manage.py migrate` with Python 3.12. Provision a separate runner
-   identity with `python manage.py provision_runner --help`; protect its token.
+2. Apply `docker compose exec vibearr python manage.py migrate`. Provision a separate runner
+   identity with `docker compose exec vibearr python manage.py provision_runner --help`; protect its token.
 3. Configure backend, model, validation commands, issue-reading credential, and
    repository-delivery credential through Settings. Issue-import credentials do
    not implicitly authorize runner access. Explicit preflight credential grants
@@ -40,7 +51,7 @@ UI publicly as an authenticated multi-user service.
    state volume) outside the UI. The service has no database or encryption key.
 5. Run the authenticated `--check` command. It reads configuration without binding
    new ownership or claiming work. Use the same private volume on every restart.
-6. Install and qualify the [OCI executor](isolated-executor.md). Keep execution
+6. Implement and qualify the [Docker-only worker stack](docker-only-runtime-plan.md). Keep execution
    disabled until the native adapter/authentication, validation and dispatch path
    is installed. The historical controlled proposal qualification below cannot
    authorize native execution.
@@ -130,25 +141,25 @@ eligible terminal data; disk pressure never deletes recoverable work as a fallba
 
 ## Verification layers
 
-`bash test.sh` runs portable Django/control/migration checks plus a real independent
-runner image with a read-only root, non-root user, no capabilities, no network,
-and private tmpfs state. Its standard-library, Git, HTTP, and deterministic
-recovery checks do not require Git in the Django image. The actual namespace probe
-must either succeed or produce the fail-closed unsupported result. The two actual
-sandbox implementation checks and full OS isolation suite run separately; portable
-success does not claim deployment qualification.
+`bash test.sh` runs the full disposable Docker pipeline described in
+[Docker operations](docker-operations.md#development-and-ci). Portable runner
+checks and Git acceptance run in a tools image; worker qualification additionally
+exercises actual UID, network, resource, cancellation, restart and reset controls.
+The full run also validates the candidate and a dependency change, takes browser
+captures and verifies backup/restore. Portable success alone does not qualify a
+deployment or enable claims.
 
 Dispatch `.github/workflows/runner-deployment-boundary.yml` on a designated
 self-hosted runner labelled `runner-deployment-qualification`. Supply the reviewed
-Compose overlay and immutable `repository@sha256:...` image. The job verifies the
-configured image, runs the full boundary suite inside that exact deployment, and
-uploads `runner-deployment-boundary/runner-boundary.json` only after success.
-Unsupported namespaces fail the job; no skip, privileged mode, global sysctl
-change, or unconfined policy is a substitute. Match the deployed source commit
-and explicit image/policy digest bootstrap variables to the artifact. The artifact
-binds source/code, kernel, image, policy, architecture, Python, and bubblewrap.
+Compose project name and installed tools image ID (`sha256:...`). The job reads
+the authenticated fleet proof and selected operator Docker inspection facts;
+it does not restart workers or qualify them itself. Perform the disruptive
+synthetic qualification with the supervisor stopped as described in
+[worker readiness](docker-operations.md#worker-readiness) first. Every worker
+restart invalidates its prior boot proof. Unsupported controls fail qualification;
+privileged mode, host security changes or a host executor are not substitutes.
 
-## Controlled live qualification
+## Historical proposal qualification reference (container-only commands)
 
 This branch implements a Codex Responses API structured-proposal candidate.
 Native Codex CLI tools remain unsupported. Stored sessions do not establish API

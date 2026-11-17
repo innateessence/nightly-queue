@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "docker-browser-smoke",
+  "browser": "chromium",
+  "screenshots": [
+    {
+      "path": "queue-desktop-light.png",
+      "bytes": 131796
+    },
+    {
+      "path": "queue-desktop-dark.png",
+      "bytes": 130320
+    },
+    {
+      "path": "queue-mobile-light.png",
+      "bytes": 127877
+    },
+    {
+      "path": "queue-mobile-dark.png",
+      "bytes": 126993
+    }
+  ],
+  "page_errors": [],
+  "failed_requests": []
+}
