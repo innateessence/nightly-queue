@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Logs · vibearr{% endblock %}
+{% block logs_current %} aria-current="page"{% endblock %}
+{% block extra_styles %}<link rel="stylesheet" href="{% static 'system_logs/logs.css' %}">{% endblock %}
+{% block heading %}
+<section class="page-heading" aria-labelledby="page-title">
+  <div><h1 id="page-title">Logs</h1><p class="subtitle">Browse application events, warnings, and errors.</p></div>
+  <a class="button-filter" href="{% url 'system_logs' %}{% if filters_query %}?{{ filters_query }}{% endif %}">{% include "_icon.html" with name="refresh" %}Refresh</a>
+</section>
+{% endblock %}
+{% block content %}
+<div class="settings-layout logs-layout">
+  <nav class="section-nav log-categories" aria-label="Log categories">
+    {% for category in categories %}
+      {% if category.url %}<a href="{{ category.url }}"{% if category.active %} aria-current="page"{% endif %}>{{ category.label }}</a>
+      {% else %}<span class="log-category-disabled" aria-disabled="true">{{ category.label }}<small>Coming later</small></span>{% endif %}
+    {% endfor %}
+  </nav>
+  <div class="settings-content">
+    <section class="panel list-panel" aria-labelledby="system-logs-title">
+      <div class="log-heading"><h2 id="system-logs-title">System Logs</h2><span class="count-badge">{{ page.paginator.count }} entr{{ page.paginator.count|pluralize:"y,ies" }}</span></div>
+      <p class="log-description">Web application and issue synchronization events. Newest first.</p>
+      <form method="get" class="queue-filters log-filters" role="search" aria-label="Filter system logs">
+        <label class="sr-only" for="log-search">Search log messages</label><input id="log-search" name="q" type="search" value="{{ query }}" maxlength="200" placeholder="Search log messages…">
+        <label class="sr-only" for="log-level">Log level</label><select id="log-level" name="level"><option value="">All levels</option>{% for value, label in levels %}<option value="{{ value }}"{% if level == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+        <label class="sr-only" for="log-source">Log source</label><select id="log-source" name="source"><option value="">All sources</option>{% for option in sources %}<option value="{{ option }}"{% if source == option %} selected{% endif %}>{{ option }}</option>{% endfor %}</select>
+        <button class="button-filter" type="submit">{% include "_icon.html" with name="filter" %}Filter</button>
+      </form>
+      {% if filtered %}<div class="filter-summary">Showing matching entries. <a href="{% url 'system_logs' %}">Clear filters</a></div>{% endif %}
+      {% if page.object_list %}
+      <div class="table-scroll" tabindex="0" role="region" aria-label="System log entries">
+        <table class="data-table log-table">
+          <thead><tr><th scope="col">Time (UTC)</th><th scope="col">Level</th><th scope="col">Source</th><th scope="col">Message</th></tr></thead>
+          <tbody>{% for entry in page %}<tr>
+            <td class="log-time"><time datetime="{{ entry.created_at|date:'c' }}">{{ entry.created_at|date:"M j, Y" }}<span class="cell-note">{{ entry.created_at|date:"H:i:s" }}</span></time></td>
+            <td><span class="status-pill log-level-{{ entry.level }}">{{ entry.get_level_display }}</span></td>
+            <td class="log-source"><code>{{ entry.source }}</code></td>
+            <td class="log-message">{{ entry.message }}{% if entry.details %}<details><summary>Exception details</summary><pre>{{ entry.details }}</pre></details>{% endif %}</td>
+          </tr>{% endfor %}</tbody>
+        </table>
+      </div>
+      <nav class="table-footer log-pagination" aria-label="Log pages"><span>Entries {{ page.start_index }}–{{ page.end_index }} of {{ page.paginator.count }}</span><span>
+        {% if page.has_previous %}<a href="?{{ page_query }}page={{ page.previous_page_number }}">← Newer</a>{% endif %}
+        <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+        {% if page.has_next %}<a href="?{{ page_query }}page={{ page.next_page_number }}">Older →</a>{% endif %}
+      </span></nav>
+      {% else %}<div class="empty-state">{% include "_icon.html" with name="logs" %}
+        {% if filtered %}<h3>No matching logs</h3><p>Try another search, level, or source.</p><a class="button-filter" href="{% url 'system_logs' %}">Clear filters</a>
+        {% else %}<h3>No system logs yet</h3><p>Application events will appear here as they occur.</p>{% endif %}
+      </div>{% endif %}
+    </section>
+    <p class="page-note">Logs are retained for {{ retention_days }} days, up to {{ max_entries }} entries. Credentials are redacted before storage. Refresh to load the latest events.</p>
+  </div>
+</div>
+{% endblock %}
