@@ -1,5 +1,12 @@
 # Automatic PR merge
 
+> **Docker-only runtime requirement:** Follow the [Docker-only runtime plan](docker-only-runtime-plan.md)
+> and [deployment contract](mvp-deployment.md). Every Python, Git, coding CLI,
+> packaging, test, qualification and browser command in this reference executes
+> inside its appropriate container, never on the host. Host-service/daemon-launcher
+> procedures and their old proofs are historical and cannot qualify the new worker
+> boundary. Missing container tools must be implemented in D1–D4; no host fallback.
+
 Automatic delivery uses the existing native execution policy's
 `delivery_mode: "merge"`. The default remains `pull_request`. A merge-mode run
 keeps its original claim from native execution through remote CI, merge, issue

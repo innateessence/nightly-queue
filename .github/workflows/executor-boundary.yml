@@ -8,83 +8,69 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: docker-qualify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   qualify:
     name: Qualify OCI executor
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 60
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      TRUSTED_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+      INTRODUCTION_SHA: 982a4d17b11a53cce3350b68a1471bc7cca6f734
     steps:
-      - name: Check out repository
+      - name: Check out the exact candidate
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: candidate
+          fetch-depth: 0
           persist-credentials: false
-      - name: Test portable executor contracts
-        run: python3.12 -m unittest discover -s vibearr_executor -t . -v
-      - name: Build pinned runtime and install pinned disposable database
-        run: |
-          docker build -f vibearr_executor/Dockerfile -t vibearr-ci-executor .
-          docker pull postgres:17@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
-      - name: Exercise actual OCI execution and restart boundary
-        run: |
-          task_image=$(docker image inspect vibearr-ci-executor --format '{{.Id}}')
-          database_image=$(docker image inspect postgres:17@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f --format '{{.Id}}')
-          python3.12 -m vibearr_executor.network_probe \
-            --image "$task_image" --database-image "$database_image" \
-            --profiles-output "$RUNNER_TEMP/ordinary-profiles.json"
-          python3.12 -m vibearr_runner.verify --boundary \
-            --executor-image "$task_image" --database-image "$database_image" \
-            --profiles "$RUNNER_TEMP/ordinary-profiles.json" \
-            --executor-state "$RUNNER_TEMP/executor-state" --evidence "$RUNNER_TEMP/executor-boundary.json"
-      - name: Verify ordinary registered operation preserves qualification
-        run: |
-          task_image=$(docker image inspect vibearr-ci-executor --format '{{.Id}}')
-          database_image=$(docker image inspect postgres:17@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f --format '{{.Id}}')
-          python3.12 -m vibearr_executor.network_probe \
-            --image "$task_image" --database-image "$database_image" \
-            --state "$RUNNER_TEMP/executor-state" --evidence "$RUNNER_TEMP/ordinary-operation.json"
-      - name: Exercise installed executor service and client outside checkout
-        run: |
-          python3.12 -m venv "$RUNNER_TEMP/executor-build"
-          "$RUNNER_TEMP/executor-build/bin/python" -m pip install setuptools==80.9.0 wheel==0.48.0
-          "$RUNNER_TEMP/executor-build/bin/python" -m pip wheel --no-build-isolation --no-deps ./vibearr_executor --wheel-dir "$RUNNER_TEMP/executor-wheels"
-          python3.12 -m venv "$RUNNER_TEMP/installed-executor"
-          "$RUNNER_TEMP/installed-executor/bin/python" -m pip install --no-index --no-deps "$RUNNER_TEMP"/executor-wheels/*.whl
-          task_image=$(docker image inspect vibearr-ci-executor --format '{{.Id}}')
-          cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/installed-executor/bin/python" -I -m vibearr_executor.artifact_smoke \
-            --image "$task_image" --state "$RUNNER_TEMP/installed-executor-state" \
-            --evidence "$RUNNER_TEMP/installed-executor-smoke.json"
-      - name: Upload runtime qualification evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - name: Check out the immutable base recipe
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          name: executor-boundary
-          path: ${{ runner.temp }}/executor-boundary.json
-          if-no-files-found: error
-          retention-days: 7
-      - name: Upload installed artifact service evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+          ref: ${{ env.TRUSTED_BASE_SHA }}
+          path: recipe
+          persist-credentials: false
+      - name: Select the base Docker recipe
+        id: recipe
+        shell: bash
+        run: |
+          echo "RECIPE_PATH=$GITHUB_WORKSPACE/recipe" >> "$GITHUB_ENV"
+          if ! test -f recipe/deploy/docker/checks.sh; then
+            echo "bootstrap=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out the immutable Docker introduction
+        if: steps.recipe.outputs.bootstrap == 'true'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          name: installed-executor-smoke
-          path: ${{ runner.temp }}/installed-executor-smoke.json
-          if-no-files-found: error
-          retention-days: 7
-      - name: Upload ordinary operation qualification observations
+          ref: ${{ env.INTRODUCTION_SHA }}
+          path: introduction
+          persist-credentials: false
+      - name: Select the introduction recipe
+        if: steps.recipe.outputs.bootstrap == 'true'
+        shell: bash
+        run: |
+          echo "RECIPE_PATH=$GITHUB_WORKSPACE/introduction" >> "$GITHUB_ENV"
+      - name: Run isolated Docker checks
+        shell: bash
+        env:
+          BOOTSTRAP: ${{ steps.recipe.outputs.bootstrap }}
+          VIBEARR_CHECK_OUTPUT: ${{ runner.temp }}/docker-checks
+        run: |
+          arguments=()
+          if test "$BOOTSTRAP" = true; then
+            arguments+=(--base "$TRUSTED_BASE_SHA" --introduction "$INTRODUCTION_SHA")
+          fi
+          bash "$RECIPE_PATH/deploy/docker/checks.sh" boundary --candidate "$GITHUB_WORKSPACE/candidate" --commit "$CANDIDATE_SHA" "${arguments[@]}"
+      - name: Upload bounded Docker evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: ordinary-operation
-          path: ${{ runner.temp }}/ordinary-operation.json
-          if-no-files-found: ignore
+          name: docker-qualify-evidence
+          path: ${{ runner.temp }}/docker-checks
+          if-no-files-found: error
           retention-days: 7
-      - name: Show bounded executor diagnostics on failure
-        if: failure()
-        run: |
-          python3.12 - <<'PY'
-          import os
-          from pathlib import Path
-          root = Path(os.environ["RUNNER_TEMP"]) / "executor-state"
-          for path in root.rglob("server.log"):
-              print(path.name, path.read_text()[-12000:])
-          for path in root.rglob("last-failure.json"):
-              print(path.name, path.read_text()[-12000:])
-          PY

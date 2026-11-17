@@ -41,7 +41,7 @@ def validation_diagnostics(policy, client=None, profile=None, *, capabilities=No
     try:
         from vibearr_executor.client import Client, ExecutorUnavailable
         from vibearr_executor.contracts import Rejected
-        from vibearr_executor import PROTOCOL_VERSION, QUALIFICATION_VERSION
+        from vibearr_executor import SLOT_PROTOCOL_VERSION, SLOT_QUALIFICATION_VERSION
 
         selected = (
             policy
@@ -56,8 +56,9 @@ def validation_diagnostics(policy, client=None, profile=None, *, capabilities=No
         observed = capabilities or (client or Client.from_environment()).capabilities()
         if (
             observed.get("schema_version") != 1
-            or observed.get("protocol_version") != PROTOCOL_VERSION
-            or observed.get("qualification_version") != QUALIFICATION_VERSION
+            or observed.get("protocol_version") != SLOT_PROTOCOL_VERSION
+            or observed.get("qualification_version") != SLOT_QUALIFICATION_VERSION
+            or observed.get("runtime") != "compose-slot-v2"
         ):
             raise Rejected(
                 "The installed executor validation protocol or qualification version is unsupported."

@@ -3,11 +3,11 @@ name: Runner deployment boundary qualification
 on:
   workflow_dispatch:
     inputs:
-      executor_image:
-        description: 'Installed immutable task image ID (sha256:...) on the executor host'
+      project:
+        description: 'Existing Compose project whose current worker boots have been qualified'
         required: true
-      database_image:
-        description: 'Installed immutable PostgreSQL 17 image ID (sha256:...)'
+      tools_image:
+        description: 'Reviewed, installed Docker tools image ID (sha256:...)'
         required: true
 
 permissions:
@@ -16,25 +16,39 @@ permissions:
 jobs:
   boundary:
     runs-on: [self-hosted, runner-deployment-qualification]
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
-      - name: Check out trusted executor source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          persist-credentials: false
-      - name: Qualify actual installed OCI runtime on its host
+      - name: Verify deployed worker proof without changing the stack
+        shell: bash
         env:
-          EXECUTOR_IMAGE: ${{ inputs.executor_image }}
-          DATABASE_IMAGE: ${{ inputs.database_image }}
+          PROJECT: ${{ inputs.project }}
+          TOOLS_IMAGE: ${{ inputs.tools_image }}
         run: |
-          python3.12 -m vibearr_runner.verify --boundary \
-            --executor-image "$EXECUTOR_IMAGE" --database-image "$DATABASE_IMAGE" \
-            --executor-state "$RUNNER_TEMP/vibearr-oci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --evidence "$RUNNER_TEMP/runner-boundary.json"
-      - name: Upload actual deployment boundary evidence
+          set -euo pipefail
+          [[ "$PROJECT" =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]]
+          [[ "$TOOLS_IMAGE" =~ ^sha256:[a-f0-9]{64}$ ]]
+          docker volume inspect "${PROJECT}_runner-secrets" >/dev/null
+          docker network inspect "${PROJECT}_worker-control" >/dev/null
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+            --memory 512m --memory-swap 512m --pids-limit 64 --cpus 1 \
+            --tmpfs /tmp:rw,nosuid,nodev,size=32m --network "${PROJECT}_worker-control" \
+            --volume "${PROJECT}_runner-secrets:/run/vibearr/runner:ro" \
+            -e VIBEARR_RUNTIME_PROTOCOL=compose-slot-v2 \
+            -e VIBEARR_EXECUTOR_URL=http://worker-gateway:8791 \
+            -e VIBEARR_EXECUTOR_TOKEN_FILE=/run/vibearr/runner/control-token \
+            --entrypoint python "$TOOLS_IMAGE" -m vibearr_runner.verify --boundary \
+            > "$RUNNER_TEMP/runner-boundary.json"
+          mapfile -t ids < <(docker ps -q --filter "label=com.docker.compose.project=$PROJECT")
+          ((${#ids[@]}))
+          docker inspect "${ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true --entrypoint python "$TOOLS_IMAGE" \
+            -m deploy.docker.audit --inspect > "$RUNNER_TEMP/runtime-inspection.json"
+      - name: Upload actual deployment observations
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: runner-deployment-boundary
-          path: ${{ runner.temp }}/runner-boundary.json
+          path: |
+            ${{ runner.temp }}/runner-boundary.json
+            ${{ runner.temp }}/runtime-inspection.json
           if-no-files-found: error
           retention-days: 7

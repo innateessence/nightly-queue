@@ -177,16 +177,16 @@ class NativeCodexAdapter:
         self.client = client
 
     def selected_profile(self, policy: ExecutionPolicy, kind: str):
-        from vibearr_executor import QUALIFICATION_VERSION
+        from vibearr_executor import SLOT_QUALIFICATION_VERSION
         from vibearr_executor.contracts import Limits
 
         capabilities = self.client.capabilities()
         versions = {
             "schema_version": 1,
-            "protocol_version": 1,
-            "qualification_version": QUALIFICATION_VERSION,
+            "protocol_version": 2,
+            "qualification_version": SLOT_QUALIFICATION_VERSION,
         }
-        if capabilities.get("runtime") != "docker-oci-v1" or any(
+        if capabilities.get("runtime") != "compose-slot-v2" or any(
             type(capabilities.get(key)) is not int or capabilities[key] != expected
             for key, expected in versions.items()
         ):
@@ -224,7 +224,7 @@ class NativeCodexAdapter:
             )
             Limits.parse(asdict(desired))
             if any(
-                amount > asdict(profile.limits)[key]
+                amount != asdict(profile.limits)[key]
                 for key, amount in asdict(desired).items()
             ):
                 raise NativeSessionError(
@@ -330,7 +330,13 @@ class NativeCodexAdapter:
         )
         self.client.upload("source", source)
         self.client.upload("context", encoded)
-        self.client.prepare(manifest)
+        prepared = self.client.prepare(manifest)
+        session = NativeSession.from_data(
+            {
+                **session.to_data(),
+                "execution_identity": prepared.get("execution_identity"),
+            }
+        )
         self.client.supply_secret(operation_id, runtime_secret)
         return session
 
@@ -351,13 +357,15 @@ class NativeCodexAdapter:
         capabilities = self.client.capabilities()
         if (
             capabilities.get("qualified") is not True
-            or capabilities.get("accepting_work") is not True
             or capabilities.get("binding_digest") != session.runtime_binding_digest
         ):
             raise NativeSessionError(
                 "Runtime qualification changed before native start; reconcile existing execution."
             )
-        return self.client.start(self.bound(session))
+        operation = self.bound(session)
+        if capabilities.get("accepting_work") is not True and self.client.status(operation)["state"] == "not-started":
+            raise NativeSessionError("Runtime capacity blocks a new native start; reconcile the original operation.")
+        return self.client.start(operation)
 
     def prepare_auth_probe(self, **request) -> NativeSession:
         return self.prepare(**request, source=auth_source(), prompt=AUTH_PROMPT)

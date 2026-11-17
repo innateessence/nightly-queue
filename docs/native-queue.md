@@ -1,5 +1,12 @@
 # Unattended queue execution
 
+> **Docker-only runtime requirement:** Follow the [Docker-only runtime plan](docker-only-runtime-plan.md)
+> and [deployment contract](mvp-deployment.md). Every Python, Git, coding CLI,
+> packaging, test, qualification and browser command in this reference executes
+> inside its appropriate container, never on the host. Host-service/daemon-launcher
+> procedures and their old proofs are historical and cannot qualify the new worker
+> boundary. Missing container tools must be implemented in D1–D4; no host fallback.
+
 The supervisor claims an eligible task, freezes its source and checkout, and runs
 the selected native coding agent inside the qualified OCI runtime. It imports
 the agent's verified files, commits the candidate, and independently validates
