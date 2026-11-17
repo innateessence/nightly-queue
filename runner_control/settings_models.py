@@ -17,7 +17,15 @@ from .validators import (
 
 
 class RunnerSettings(models.Model):
-    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    id = models.BigAutoField(primary_key=True)
+    name = models.CharField(max_length=100, default="Default runner")
+    identity = models.OneToOneField(
+        "runner_control.RunnerIdentity",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="configuration",
+    )
     enabled = models.BooleanField(default=False)
     paused = models.BooleanField(default=False)
     execution_policy = models.JSONField(
@@ -134,8 +142,6 @@ class RunnerSettings(models.Model):
                 validator(value)
             except ValidationError as exc:
                 raise ValidationError({field: exc.messages}) from None
-        if self.pk != 1:
-            raise ValidationError("Only one runner settings record is allowed.")
         if self.schedule_mode == "windows" and not self.windows:
             raise ValidationError({"windows": "Add at least one processing window."})
         for stage in ("research", "implementation"):
@@ -161,10 +167,13 @@ class RunnerSettings(models.Model):
                 raise ValidationError({field: "Select a GitHub token credential."})
 
     def save(self, *args, **kwargs):
-        self.full_clean()
         with transaction.atomic():
             list(RunnerSettings.objects.select_for_update().filter(pk=1))
+            self.full_clean()
             return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name or "Default runner"
 
 
 class ProjectRunnerSettings(models.Model):

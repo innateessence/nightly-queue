@@ -8,7 +8,7 @@ from django.utils.crypto import constant_time_compare
 from .auth import token_digest
 from .models import ContextSnapshot, PlanVersion, Run, RunRetention
 from .services import RunConflict, lock_controller, owned_run
-from .settings_models import RunnerSettings
+from .configuration import runner_settings
 from vibearr_runner.native_contract import ARTIFACT_KINDS, digest
 
 PRESERVED_EVIDENCE = {
@@ -24,8 +24,8 @@ PRESERVED_EVIDENCE = {
 PRESERVED_EVIDENCE.update(ARTIFACT_KINDS)
 
 
-def policy():
-    settings, _ = RunnerSettings.objects.get_or_create(pk=1)
+def policy(runner=None):
+    settings = runner_settings(runner)
     return {
         "workspace_days": settings.workspace_retention_days,
         "document_days": settings.plan_retention_days,
@@ -89,7 +89,7 @@ def eligible_runs(runner):
 
 def purge_candidates(runner, now=None):
     now = now or timezone.now()
-    effective = policy()
+    effective = policy(runner)
     documents = models.Q(
         finished_at__lte=now - timedelta(days=effective["document_days"]),
         retention__documents_removed_at__isnull=True,
@@ -109,7 +109,7 @@ def purge_candidates(runner, now=None):
 
 def plan(runner, now=None):
     now = now or timezone.now()
-    effective = policy()
+    effective = policy(runner)
     cutoff = now - timedelta(days=effective["workspace_days"])
     candidates = (
         eligible_runs(runner)
@@ -139,7 +139,7 @@ def workspace_removed(runner, run_id, status, resource="workspace"):
     lock_controller(runner)
     run = owned_run(runner, run_id)
     cutoff = timezone.now() - timedelta(
-        days=policy()["workspace_days" if resource == "workspace" else "log_days"]
+        days=policy(runner)["workspace_days" if resource == "workspace" else "log_days"]
     )
     if not eligible(run) or run.finished_at > cutoff:
         raise RunConflict("Run remains protected from workspace retention.")
@@ -169,7 +169,7 @@ def purge_run(run_id, now=None):
             "Active, unacknowledged, or approval-pending runs cannot be purged."
         )
     now = now or timezone.now()
-    effective = policy()
+    effective = policy(run.runner)
     retention = RunRetention.objects.select_for_update().get(run=run)
     if run.finished_at <= now - timedelta(days=effective["document_days"]):
         if not run.approvals.exists() and retention.documents_removed_at is None:

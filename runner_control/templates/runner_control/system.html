@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% block title %}System · vibearr{% endblock %}
 {% block system_current %} aria-current="page"{% endblock %}
-{% block heading %}<section class="page-heading"><div><p class="eyebrow">OPERATIONS</p><h1>System</h1><p class="subtitle">Processing, connections and the latest runner health reports.</p></div><a class="button-filter" href="{% url 'api_settings' %}">Configure processing</a></section>{% endblock %}
+{% block heading %}<section class="page-heading"><div><p class="eyebrow">OPERATIONS</p><h1>System</h1><p class="subtitle">Processing, connections and the latest runner health reports.</p></div><a class="button-filter" href="{% url 'coding_runner_list' %}">Configure runners</a></section>{% endblock %}
 {% block content %}
 <div class="system-grid">
-  <section class="panel plan-section"><h2>Processing</h2>
+  <section class="panel plan-section"><h2>Default runner processing</h2>
     <p class="status-pill">{% if configuration.global.paused %}Paused{% elif not configuration.global.enabled %}Disabled{% elif not configuration.execution_ready %}Blocked{% else %}Configured{% endif %}</p>
     <p>{{ configuration.readiness_reason }}</p>
     <p class="field-hint">Docker-only worker qualification is required before execution can be enabled.</p>
     <p>Schedule: {{ configuration.global.schedule_mode|default:"Not configured" }} · {{ configuration.global.timezone|default:"UTC" }}</p>
     <p class="field-hint">Release readiness and the latest policy reports are separate. A saved setting does not prove a worker is running.</p>
-    <a href="{% url 'api_settings' %}#runner-title">Pause, scheduling and usage reserves →</a>
+    <a href="{% url 'coding_runner_edit' 1 %}#runner-title">Pause, scheduling and usage reserves →</a>
   </section>
   <section class="panel plan-section"><h2>Connections and discovery</h2>
     <p>{{ connection_count }} saved, unrevoked connection{{ connection_count|pluralize }}. Connectivity has not been tested by this page.</p>

@@ -192,7 +192,9 @@ def evidence_data(evidence):
     if evidence is None:
         return None
     safe, error = present_configuration_payload(
-        configuration_document(), evidence.report, run=report_run(evidence)
+        configuration_document(evidence.runner),
+        evidence.report,
+        run=report_run(evidence),
     )
     if error:
         raise ValidationError(error)

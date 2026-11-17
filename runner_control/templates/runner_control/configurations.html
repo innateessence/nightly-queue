@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Coding Runners · vibearr{% endblock %}
+{% block runners_current %} aria-current="page"{% endblock %}
+{% block heading %}
+<section class="page-heading" aria-labelledby="page-title"><div><h1 id="page-title">Coding Runners</h1><p class="subtitle">Named runners with independent schedules, backends and execution settings.</p></div><a class="button-primary" href="{% url 'coding_runner_add' %}">Add coding runner</a></section>
+{% endblock %}
+{% block content %}
+<section class="panel plan-section"><h2>Runner configurations</h2>
+  <p class="field-hint">Add as many configurations as you need, each with its own schedule. Assign each to a runner identity; identities without an assignment use the default configuration. Work runs one task at a time across the queue.</p>
+  <div class="table-scroll"><table class="data-table">
+    <thead><tr><th scope="col">Runner</th><th scope="col">Processing</th><th scope="col">Schedule</th><th scope="col">Identity</th><th scope="col">Actions</th></tr></thead>
+    <tbody>{% for runner in runners %}<tr>
+      <td><a href="{% url 'coding_runner_edit' runner.pk %}">{% if runner.metadata %}{{ runner.metadata.name }}{% else %}Runner{% endif %}</a>{% if runner.pk == 1 %} <span class="field-hint">Default</span>{% endif %}</td>
+      <td><span class="status-pill">{% if runner.paused %}Paused{% elif runner.enabled %}Enabled{% else %}Disabled{% endif %}</span></td>
+      {% if runner.error %}<td colspan="2">{{ runner.error }}</td>{% else %}<td>{{ runner.metadata.schedule }} · {{ runner.metadata.timezone }}{% for window in runner.metadata.windows %}<p class="field-hint">{{ window }}</p>{% endfor %}</td><td>{{ runner.metadata.identity }}</td>{% endif %}
+      <td><a href="{% url 'coding_runner_edit' runner.pk %}">Edit</a></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}

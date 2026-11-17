@@ -26,7 +26,7 @@
 {% endfor %}
 <details{% if runner_form.errors %} open{% endif %}>
   <summary>Coding runner stage overrides</summary>
-  <p class="field-hint">Inherit global uses the global value, including when the project input is blank. Use project value replaces it. Clear value explicitly removes it and may leave required configuration missing.</p>
+  <p class="field-hint">Inherit runner settings uses the assigned runner's value, including when the project input is blank. Use project value replaces it. Clear value explicitly removes it and may leave required configuration missing. The preview below uses the default runner.</p>
   {% include "runner_control/_claude_models.html" %}
   {{ runner_form.non_field_errors }}
   {% for field in runner_form %}

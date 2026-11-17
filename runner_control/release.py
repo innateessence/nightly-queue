@@ -132,7 +132,7 @@ def authorize(runner, repository_url, environment_digest, code_revision, note):
         raise ValidationError(
             "Record explicit authorization for the test repository and live backend calls."
         )
-    document = configuration_document()
+    document = configuration_document(runner)
     projects = [
         row for row in document["projects"] if row["repository_url"] == repository_url
     ]
@@ -156,15 +156,20 @@ def authorize(runner, repository_url, environment_digest, code_revision, note):
     )
 
 
-def observe_settings(before, after):
+def observe_settings(before, after, *, settings_id=1):
     changed = sorted(key for key in CONTROL_FIELDS if before.get(key) != after.get(key))
     if not changed:
         return
-    for entry in ReleaseQualification.objects.filter(
+    entries = ReleaseQualification.objects.filter(
         qualified_at__isnull=True,
         revoked_at__isnull=True,
         expires_at__gt=timezone.now(),
-    ):
+    )
+    if settings_id == 1:
+        entries = entries.exclude(runner__configuration__pk__gt=1)
+    else:
+        entries = entries.filter(runner__configuration__pk=settings_id)
+    for entry in entries:
         with transaction.atomic():
             entry = ReleaseQualification.objects.select_for_update().get(pk=entry.pk)
             events = entry.evidence.setdefault("ui_changes", [])
@@ -235,7 +240,7 @@ def complete(entry_id, runner, report):
     entry = ReleaseQualification.objects.select_for_update().get(
         pk=entry_id, runner=runner
     )
-    authorized(entry, runner, configuration_document())
+    authorized(entry, runner, configuration_document(runner))
     if not isinstance(report, dict):
         raise RunConflict("Release evidence must be an object.")
     if entry.qualified_at:
@@ -288,7 +293,7 @@ def complete(entry_id, runner, report):
     from .plan_presentation import present_configuration_payload
 
     safe, error = present_configuration_payload(
-        configuration_document(),
+        configuration_document(runner),
         report,
         runs=[success, failure],
         preserve_secret_versions=True,
@@ -340,7 +345,7 @@ def complete(entry_id, runner, report):
     if first.get("head_branch") != second.get("head_branch"):
         raise RunConflict("Restart changed the delivered branch.")
     verify_model_responses(
-        report.get("model_responses", []), accounts(configuration_document())
+        report.get("model_responses", []), accounts(configuration_document(runner))
     )
     fields = {
         field

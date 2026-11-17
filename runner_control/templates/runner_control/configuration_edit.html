@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Coding runner · vibearr{% endblock %}
+{% block runners_current %} aria-current="page"{% endblock %}
+{% block heading %}
+<section class="page-heading" aria-labelledby="page-title"><div><h1 id="page-title">{% if settings_id %}Edit coding runner{% else %}Add coding runner{% endif %}</h1><p class="subtitle">Execution scheduling is independent of issue discovery. Live execution remains release-gated.</p></div><a class="button-filter" href="{% url 'coding_runner_list' %}">All coding runners</a></section>
+{% endblock %}
+{% block content %}
+<div class="settings-layout">
+  <nav class="section-nav" aria-label="Runner settings sections"><a href="#runner-title">Runner & schedule</a><a href="#backends">Backend</a><a href="#execution">Execution & delivery</a><a href="#retention">Retention</a><a href="#diagnostics">Diagnostics</a></nav>
+  <div class="settings-content">
+    <section class="panel composer" aria-labelledby="runner-title">
+      <div class="section-heading"><div><h2 id="runner-title">Coding runner</h2><p>Choose this runner's identity, schedule and processing policy.</p></div></div>
+      {% if settings_id == 1 %}<p class="field-hint">This is the default configuration for identities without another assignment.</p>{% endif %}
+      {% if runner_form_unavailable %}<p role="status">{{ runner_form_unavailable }}</p>{% else %}
+      <form method="post" class="settings-fields">
+        {% csrf_token %}{{ runner_form.non_field_errors }}
+        <fieldset class="settings-group"><legend>Runner</legend>
+          {% include "runner_control/_field.html" with field=runner_form.name %}
+          {% include "runner_control/_field.html" with field=runner_form.identity %}
+        </fieldset>
+        {% include "runner_control/_settings_groups.html" %}
+        <div class="form-actions"><button class="button-primary" type="submit">Save coding runner settings</button></div>
+      </form>
+      {% include "runner_control/_claude_models.html" %}
+      {% endif %}
+    </section>
+    <section class="panel composer" aria-labelledby="project-configuration">
+      <h2 id="project-configuration">Project configuration</h2><p>Project overrides apply on top of this runner's settings. Backend, model and instruction edits apply to future tasks. Pause, schedule and reserve changes apply at the next gate.</p>
+      {% for project in runner_configuration.projects %}<p><a href="{% url 'edit_project' project.project_id %}">{{ project.project_name }}</a>: {{ project.structurally_valid|yesno:"Structurally valid,Missing configuration" }}</p>{% for error in project.errors %}<p class="field-error">{{ error.field }}: {{ error.message }}</p>{% endfor %}{% empty %}<p class="field-hint">Add a project to inspect effective configuration.</p>{% endfor %}
+    </section>
+    <section class="panel composer" id="diagnostics" aria-label="Runner diagnostics">
+      {% include "runner_control/_gates.html" %}<hr>{% include "runner_control/_release.html" %}
+    </section>
+    {% if settings_id and settings_id != 1 %}<section class="panel plan-section"><h2>Delete configuration</h2><p>Unassign the runner identity before deleting this configuration.</p><form method="post" action="{% url 'coding_runner_delete' settings_id %}">{% csrf_token %}<button class="button-danger" type="submit">Delete coding runner</button></form></section>{% endif %}
+  </div>
+</div>
+{% endblock %}

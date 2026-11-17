@@ -73,7 +73,7 @@ def authorize_release(request):
         )
     except (ValidationError, RunConflict) as exc:
         return HttpResponse(str(exc), status=400, content_type="text/plain")
-    return redirect("api_settings")
+    return redirect("coding_runner_list")
 
 
 @require_POST
@@ -84,4 +84,4 @@ def revoke_release(request, qualification_id):
     entry = get_object_or_404(ReleaseQualification, pk=qualification_id)
     entry.revoked_at = timezone.now()
     entry.save(update_fields=["revoked_at"])
-    return redirect("api_settings")
+    return redirect("coding_runner_list")

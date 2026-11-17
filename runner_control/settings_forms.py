@@ -14,12 +14,30 @@ class ConfigurationJSONField(forms.JSONField):
 
 
 class RunnerSettingsForm(forms.ModelForm):
+    def clean_identity(self):
+        from .models import Run
+
+        identity = self.cleaned_data.get("identity")
+        if self.instance.identity_id == getattr(identity, "pk", None):
+            return identity
+        affected = [self.instance.identity_id, getattr(identity, "pk", None)]
+        if Run.objects.filter(runner_id__in=affected, state=Run.State.ACTIVE).exists():
+            raise ValidationError(
+                "Finish or cancel active work before changing runner assignments."
+            )
+        return identity
+
     def clean_merge_profile(self):
         value = self.cleaned_data.get("merge_profile")
         return {} if value is None else value
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["name"].required = True
+        self.fields["identity"].help_text = (
+            "Assign a provisioned runner identity to use this configuration. "
+            "Unassigned identities use the default runner configuration."
+        )
         for stage in ("research", "implementation"):
             self.fields[f"{stage}_model"].widget.attrs["list"] = "runner-claude-models"
             self.fields[f"{stage}_model"].help_text = (
@@ -77,7 +95,7 @@ class ProjectRunnerSettingsForm(forms.Form):
             mode = forms.ChoiceField(
                 label=f"{label}: source",
                 choices=[
-                    ("inherit", "Inherit global"),
+                    ("inherit", "Inherit runner settings"),
                     ("replace", "Use project value"),
                     ("clear", "Clear value"),
                 ],

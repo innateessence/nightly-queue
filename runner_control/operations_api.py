@@ -72,7 +72,7 @@ def release_suite(request, qualification_id):
         )
 
     def response():
-        configuration = configuration_document()
+        configuration = configuration_document(request.runner_identity)
         authorized(entry, request.runner_identity, configuration)
         secrets = [
             request.headers.get("Authorization", "").split()[-1],
@@ -146,7 +146,7 @@ def release_claim(request, qualification_id):
                 pk=qualification_id,
                 runner=request.runner_identity,
             )
-            configuration = configuration_document()
+            configuration = configuration_document(request.runner_identity)
             authorized(entry, request.runner_identity, configuration)
             from .models import Run
 
@@ -218,7 +218,10 @@ def health(request):
         runner=request.runner_identity, state=Run.State.ACTIVE
     ).first()
     safe, error = present_configuration_payload(
-        configuration_document(), data, run=active, secrets=secrets
+        configuration_document(request.runner_identity),
+        data,
+        run=active,
+        secrets=secrets,
     )
     if error:
         raise ValidationError(error)

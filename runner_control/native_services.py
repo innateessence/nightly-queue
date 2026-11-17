@@ -99,7 +99,7 @@ def selected_account(run):
 
 
 def lock_scope(run, claim_token, *, reporting=False):
-    document = configuration_document()
+    document = configuration_document(run.runner)
     project_ids = {
         run.item.project_id,
         run.configuration_snapshot.get("project_id", run.item.project_id),
@@ -134,7 +134,11 @@ def authorize(run, document=None, *, completion=False):
     if completion and not run.evidence.filter(kind="native_merge").exists():
         raise RunConflict("Completion authority requires a provider-verified merge.")
     policy = native_policy(run)
-    document = document or configuration_document()
+    document = document or configuration_document(run.runner)
+    if run.configuration_snapshot.get("runner_configuration_id", 1) != document.get(
+        "runner_configuration_id", 1
+    ):
+        raise RunConflict("Runner configuration assignment changed; retry explicitly.")
     controls = document["global"]
     if not completion and (not controls["enabled"] or controls["paused"]):
         raise RunConflict("Native execution is disabled or paused.")
@@ -220,7 +224,7 @@ def authorize(run, document=None, *, completion=False):
 @transaction.atomic
 def candidates(runner):
     lock_controller(runner)
-    document = configuration_document()
+    document = configuration_document(runner)
     if not document["global"]["enabled"] or document["global"]["paused"]:
         return {
             "schema_version": 1,

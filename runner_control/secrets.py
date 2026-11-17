@@ -147,7 +147,7 @@ def secret_document(data, runner):
         lock_controller(runner)
         RunnerSettings.objects.get_or_create(pk=1)
         RunnerSettings.objects.select_for_update().get(pk=1)
-        document = configuration_document()
+        document = configuration_document(runner)
         reference, backend = selected_reference(data, runner, document)
         credential = Credential.objects.select_for_update().filter(pk=reference).first()
         if not credential or credential.revoked_at:

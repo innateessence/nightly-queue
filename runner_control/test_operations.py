@@ -836,7 +836,7 @@ class OperatorPresentationTests(TestCase):
 
     def test_settings_release_and_gate_sections_use_safe_presentation(self):
         self.qualification()
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assert_safe(response, global_values=True)
         self.assertContains(response, "Controlled release verification")
         self.assertContains(response, "[redacted]")
@@ -886,7 +886,7 @@ class OperatorPresentationTests(TestCase):
     def test_settings_form_withholds_secret_values_without_changing_configuration(self):
         self.settings.research_instructions = "previous-global-selection"
         self.settings.save()
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assert_safe(response, global_values=True)
         self.assertContains(response, "Selected credential content is withheld")
         self.assertNotContains(response, "Save coding runner settings")
@@ -943,7 +943,7 @@ class OperatorPresentationTests(TestCase):
     def test_selected_current_credential_name_cannot_leak_through_runner_choices(self):
         self.current.name = "Current label: current-global-selection"
         self.current.save(update_fields=["name"])
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assert_safe(response, global_values=True)
         self.assertContains(response, "Selected credential content is withheld")
         self.assertNotContains(response, "Save coding runner settings")
@@ -992,8 +992,9 @@ class OperatorPresentationTests(TestCase):
         response = self.client.get(reverse("api_settings"))
         self.assert_safe(response, global_values=True)
         self.assertContains(response, "Unselected safe label")
-        self.assertContains(response, "Save coding runner settings")
         self.assertContains(response, ">Save settings</button>", html=False)
+        runner_response = self.client.get(reverse("coding_runner_edit", args=[1]))
+        self.assertContains(runner_response, "Save coding runner settings")
 
     def escaped_selected_token(self):
         token = 'synthetic-quote-"-slash-\\-unicode-☃'
@@ -1016,7 +1017,7 @@ class OperatorPresentationTests(TestCase):
         commands = ["/usr/bin/echo " + token]
         self.settings.setup_commands = commands
         self.settings.save()
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assert_escaped_form_withheld(response, token)
         self.assertContains(response, "Selected credential content is withheld")
         self.settings.refresh_from_db()
@@ -1030,7 +1031,7 @@ class OperatorPresentationTests(TestCase):
         self.current.save()
         self.settings.setup_commands = ["/usr/bin/echo " + token]
         self.settings.save()
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assert_escaped_form_withheld(response, token)
         self.assertContains(response, "Selected credential content is withheld")
         self.settings.refresh_from_db()
@@ -1039,7 +1040,7 @@ class OperatorPresentationTests(TestCase):
     def test_bound_json_settings_inspect_decoded_selected_material(self):
         token = self.escaped_selected_token()
         response = self.client.post(
-            reverse("api_settings"),
+            reverse("coding_runner_edit", args=[1]),
             {
                 "section": "runner",
                 "runner-setup_commands": json.dumps(["/usr/bin/echo " + token]),
@@ -1054,7 +1055,7 @@ class OperatorPresentationTests(TestCase):
         token = self.escaped_selected_token()
         invalid = json.dumps(["/usr/bin/echo " + token])[:-1]
         response = self.client.post(
-            reverse("api_settings"),
+            reverse("coding_runner_edit", args=[1]),
             {"section": "runner", "runner-setup_commands": invalid},
         )
         self.assert_escaped_form_withheld(response, token)
@@ -1073,7 +1074,7 @@ class OperatorPresentationTests(TestCase):
         )
         self.settings.setup_commands = ['echo safe-quote-"-slash-\\-unicode-☃']
         self.settings.save()
-        response = self.client.get(reverse("api_settings"))
+        response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Save coding runner settings")
 

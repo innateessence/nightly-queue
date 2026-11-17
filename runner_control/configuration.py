@@ -23,6 +23,8 @@ SCHEMA_VERSION = 1
 def settings_values(saved):
     values = model_to_dict(saved)
     values.pop("id", None)
+    values.pop("name", None)
+    values.pop("identity", None)
     for field in ("research", "implementation", "issue", "repository"):
         values[f"{field}_credential_id"] = values.pop(f"{field}_credential")
     return values
@@ -194,10 +196,29 @@ def project_configuration(project, defaults, overrides, credentials):
     }
 
 
-def configuration_document():
+def runner_settings(runner=None):
+    if runner is not None:
+        saved = RunnerSettings.objects.filter(identity=runner).first()
+        if saved is not None:
+            return saved
+    saved, _ = RunnerSettings.objects.get_or_create(pk=1)
+    return saved
+
+
+def configuration_document(runner=None):
     with transaction.atomic():
         RunnerSettings.objects.get_or_create(pk=1)
-        saved = RunnerSettings.objects.select_for_update().get(pk=1)
+        RunnerSettings.objects.select_for_update().get(pk=1)
+        saved = runner_settings(runner)
+        return _configuration_document(saved)
+
+
+def configuration_for_settings(saved):
+    with transaction.atomic():
+        RunnerSettings.objects.select_for_update().get(pk=1)
+        saved = (
+            RunnerSettings.objects.get(pk=saved.pk) if saved.pk else RunnerSettings()
+        )
         return _configuration_document(saved)
 
 
@@ -261,6 +282,7 @@ def _configuration_document(saved):
             selected.add(defaults[field])
     document = {
         "schema_version": SCHEMA_VERSION,
+        "runner_configuration_id": saved.pk,
         "global": defaults,
         "projects": projects,
         "accounts": list(accounts.values()),
@@ -295,19 +317,19 @@ def _configuration_document(saved):
     return document
 
 
-def effective_project_configuration(project):
-    document = configuration_document()
+def effective_project_configuration(project, runner=None):
+    document = configuration_document(runner)
     return next(
         entry for entry in document["projects"] if entry["project_id"] == project.pk
     )
 
 
-def locked_configuration_snapshot(project, expected_revision):
+def locked_configuration_snapshot(project, expected_revision, runner=None):
     # The caller owns the claim transaction; configuration writers share this lock.
     RunnerSettings.objects.get_or_create(pk=1)
     list(RunnerSettings.objects.select_for_update().filter(pk=1))
     list(Credential.objects.select_for_update().values_list("pk", flat=True))
-    document = configuration_document()
+    document = configuration_document(runner)
     if expected_revision != document["revision"]:
         raise ValidationError(
             {
@@ -332,6 +354,7 @@ def locked_configuration_snapshot(project, expected_revision):
         ],
         "schema_version": SCHEMA_VERSION,
         "revision": document["revision"],
+        "runner_configuration_id": document["runner_configuration_id"],
         "global": document["global"],
         **effective,
     }

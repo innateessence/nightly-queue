@@ -64,11 +64,11 @@ def system(request):
     from credentials.models import APISettings, Credential
 
     configuration = configuration_document()
-    reports = present_gates(
-        RunnerGateEvidence.objects.select_related("runner"), configuration
-    )
+    reports = present_gates(RunnerGateEvidence.objects.select_related("runner"))
     health = [
-        present_global_record(entry, configuration, run=report_run(entry))
+        present_global_record(
+            entry, configuration_document(entry.runner), run=report_run(entry)
+        )
         for entry in RunnerHealth.objects.select_related("runner")
     ]
     response = render(
