@@ -204,9 +204,14 @@ def import_issue(
         priority = QueueItem.Priority.HIGH
     elif "vibearr:priority-low" in labels:
         priority = QueueItem.Priority.LOW
-    QueueItem.objects.filter(pk=item.pk, status=QueueItem.Status.QUEUED).update(
-        title=title[:200], instructions=body, priority=priority
-    )
+    if state == QueueItem.IssueState.OPEN:
+        QueueItem.objects.filter(pk=item.pk, status=QueueItem.Status.CLOSED).update(
+            status=QueueItem.Status.QUEUED, finished_at=None
+        )
+    queued = QueueItem.objects.filter(pk=item.pk, status=QueueItem.Status.QUEUED)
+    queued.update(title=title[:200], instructions=body, priority=priority)
+    if state == QueueItem.IssueState.CLOSED:
+        queued.update(status=QueueItem.Status.CLOSED, finished_at=timezone.now())
     if state == "closed" or {"vibearr:hold", "nq:hold"}.intersection(labels):
         from runner_control.models import Run
 

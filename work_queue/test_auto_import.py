@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from credentials.models import APISettings, Credential
@@ -246,7 +247,98 @@ class AutoImportTests(TestCase):
         self.assertEqual(item.title, "Updated title")
         self.assertEqual(item.instructions, "Updated context")
         self.assertEqual(item.issue_state, "closed")
+        self.assertEqual(item.status, QueueItem.Status.CLOSED)
         self.assertEqual(result["created"], 0)
+
+    @patch("work_queue.tasks.repository_issues")
+    def test_scheduled_sync_closes_queued_issue(self, fetch):
+        fetch.return_value = [issue()]
+        import_auto_issues()
+        fetch.return_value = [issue(state="closed")]
+        import_auto_issues(scheduled=True)
+        item = QueueItem.objects.get()
+        self.assertEqual(item.status, QueueItem.Status.CLOSED)
+        self.assertIsNotNone(item.finished_at)
+        self.assertIsNone(claim_next())
+
+    @patch("work_queue.tasks.repository_issues")
+    def test_initially_closed_issue_is_not_queued(self, fetch):
+        fetch.return_value = [issue(state="closed")]
+        import_auto_issues()
+        self.assertEqual(QueueItem.objects.get().status, QueueItem.Status.CLOSED)
+        self.assertFalse(
+            QueueItem.objects.filter(status=QueueItem.Status.QUEUED).exists()
+        )
+
+    @patch("work_queue.tasks.repository_issues")
+    def test_closed_issue_leaves_queued_filter_and_counts(self, fetch):
+        fetch.return_value = [issue(), issue(2)]
+        import_auto_issues()
+        fetch.return_value = [issue(state="closed"), issue(2)]
+        import_auto_issues()
+        response = self.client.get(reverse("index"), {"status": "queued"})
+        self.assertEqual([item.issue_number for item in response.context["items"]], [2])
+        self.assertEqual(response.context["queue_total"], 1)
+        self.assertEqual(response.context["queue_count"], 1)
+        closed = self.client.get(reverse("index"), {"status": "closed"})
+        self.assertEqual([item.issue_number for item in closed.context["items"]], [1])
+        self.assertContains(closed, "status-closed")
+
+    @patch("work_queue.tasks.repository_issues")
+    def test_reopening_unexecuted_issue_restores_same_queue_item(self, fetch):
+        fetch.return_value = [issue(state="closed")]
+        import_auto_issues()
+        original = QueueItem.objects.get()
+        fetch.return_value = [issue(title="Reopened", body="New context")]
+        result = import_auto_issues()
+        item = QueueItem.objects.get()
+        self.assertEqual(item.pk, original.pk)
+        self.assertEqual(item.status, QueueItem.Status.QUEUED)
+        self.assertIsNone(item.finished_at)
+        self.assertEqual(item.title, "Reopened")
+        self.assertEqual(item.instructions, "New context")
+        self.assertEqual(result["created"], 0)
+        self.assertEqual(claim_next().pk, item.pk)
+
+    @patch("work_queue.tasks.repository_issues")
+    def test_repeated_closed_sync_preserves_closure_time(self, fetch):
+        fetch.return_value = [issue(state="closed")]
+        import_auto_issues()
+        original = QueueItem.objects.get()
+        import_auto_issues()
+        self.assertEqual(QueueItem.objects.get().finished_at, original.finished_at)
+
+    @patch("work_queue.tasks.repository_issues")
+    def test_closure_and_reopening_preserve_execution_outcomes(self, fetch):
+        for status in [
+            QueueItem.Status.RUNNING,
+            QueueItem.Status.SUCCEEDED,
+            QueueItem.Status.FAILED,
+        ]:
+            with self.subTest(status=status):
+                fetch.return_value = [issue()]
+                import_auto_issues()
+                item = QueueItem.objects.get()
+                finished = (
+                    timezone.now() if status != QueueItem.Status.RUNNING else None
+                )
+                QueueItem.objects.filter(pk=item.pk).update(
+                    status=status,
+                    finished_at=finished,
+                    result_url="https://github.com/example/auto/pull/9",
+                )
+                fetch.return_value = [issue(state="closed")]
+                import_auto_issues()
+                item.refresh_from_db()
+                self.assertEqual(item.status, status)
+                self.assertEqual(item.finished_at, finished)
+                fetch.return_value = [issue()]
+                import_auto_issues()
+                item.refresh_from_db()
+                self.assertEqual(item.status, status)
+                self.assertEqual(
+                    item.result_url, "https://github.com/example/auto/pull/9"
+                )
 
     @patch("work_queue.tasks.repository_issues")
     def test_project_failure_does_not_stop_remaining_projects(self, fetch):

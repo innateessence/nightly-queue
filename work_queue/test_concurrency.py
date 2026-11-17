@@ -211,7 +211,7 @@ class SourceClaimConcurrencyTests(TransactionTestCase):
             self.assertEqual(claimed.result(timeout=10), "empty")
         self.item.refresh_from_db()
         self.assertEqual(self.item.issue_state, "closed")
-        self.assertEqual(self.item.status, "queued")
+        self.assertEqual(self.item.status, "closed")
 
     def test_refresh_racing_requeue_cannot_restore_stale_claim(self):
         from threading import Event
@@ -281,6 +281,29 @@ class SourceClaimConcurrencyTests(TransactionTestCase):
         run.item.refresh_from_db()
         self.assertIsNotNone(run.cancellation_requested_at)
         self.assertEqual(run.item.source_snapshot, snapshot)
+
+    def test_closure_requests_cancellation_and_preserves_running_attempt(self):
+        import uuid
+        from runner_control.configuration import configuration_document
+        from runner_control.services import claim_run
+
+        run = claim_run(
+            runner=self.runner,
+            run_id=uuid.uuid4(),
+            configuration_revision=configuration_document()["revision"],
+        )
+        original = run.item
+        import_issue(
+            project=self.project,
+            **source_issue(state="closed", body="Closed after launch"),
+        )
+        run.refresh_from_db()
+        run.item.refresh_from_db()
+        self.assertIsNotNone(run.cancellation_requested_at)
+        self.assertEqual(run.item.status, QueueItem.Status.RUNNING)
+        self.assertEqual(run.item.claim_token, original.claim_token)
+        self.assertEqual(run.item.instructions, original.instructions)
+        self.assertEqual(run.item.source_snapshot, original.source_snapshot)
 
     def test_prior_delivery_cannot_be_selected_as_new_execution(self):
         import uuid

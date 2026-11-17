@@ -81,6 +81,22 @@ class ManualSyncTests(TestCase):
         self.assertEqual(QueueItem.objects.count(), 1)
         self.assertContains(response, "New items: 0.")
 
+    def test_button_sync_removes_closed_issue_from_queued_work(self):
+        self.client.post(self.url)
+        self.fetch.return_value = [
+            {
+                "number": 1,
+                "title": "Imported issue",
+                "body": "Context",
+                "state": "closed",
+            }
+        ]
+        self.client.post(self.url)
+        response = self.client.get(reverse("index"), {"status": "queued"})
+        self.assertEqual(response.context["items"], [])
+        self.assertEqual(response.context["queue_total"], 0)
+        self.assertEqual(QueueItem.objects.get().status, QueueItem.Status.CLOSED)
+
     def test_button_syncs_immediately_during_scheduled_interval(self):
         last_sync = timezone.now()
         APISettings.objects.update(

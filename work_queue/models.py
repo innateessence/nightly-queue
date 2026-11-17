@@ -22,6 +22,7 @@ class QueueItem(models.Model):
         RUNNING = "running", "Running"
         SUCCEEDED = "succeeded", "Succeeded"
         FAILED = "failed", "Failed"
+        CLOSED = "closed", "Closed"
 
     project = models.ForeignKey(Project, on_delete=models.PROTECT, related_name="items")
     source = models.CharField(
