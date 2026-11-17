@@ -11,7 +11,10 @@ from vibearr_runner.policy import ExecutionPolicy
 from vibearr_runner.native_evidence import native_evidence_contract
 from vibearr_runner.merge_contract import merge_profile
 from vibearr_runner.native_contract import NativeContractError
-from vibearr_executor import QUALIFICATION_VERSION, PROTOCOL_VERSION
+from vibearr_executor import (
+    SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION,
+    SLOT_PROTOCOL_VERSION as PROTOCOL_VERSION,
+)
 
 from .settings_models import ProjectRunnerSettings, RunnerSettings
 from .validators import OVERRIDE_FIELDS, validate_backend_model
@@ -305,7 +308,7 @@ def _configuration_document(saved):
     }
     document["runtime_contract"] = {
         "schema_version": 1,
-        "runtime": "docker-oci-v1",
+        "runtime": "compose-slot-v2",
         "protocol_version": PROTOCOL_VERSION,
         "qualification_version": QUALIFICATION_VERSION,
         "qualification_source": "authenticated_executor_capabilities",

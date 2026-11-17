@@ -4,7 +4,6 @@ import argparse
 import json
 import io
 import contextlib
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -57,30 +56,37 @@ def main():
     parser.add_argument("--executor-state", type=Path)
     parser.add_argument("--profiles", type=Path)
     args = parser.parse_args()
+    if any(
+        (args.executor_image, args.database_image, args.executor_state, args.profiles)
+    ):
+        parser.error(
+            "Host executor flags are retired; qualify the Docker worker stack and configure its API client."
+        )
     if args.boundary:
-        if not args.executor_image or not args.database_image:
-            parser.error(
-                "OCI boundary verification requires installed --executor-image and --database-image sha256 IDs on the executor host."
-            )
-        from vibearr_executor.contracts import Profile, canonical
-        from vibearr_executor.qualify import qualify, smoke_profiles
+        from vibearr_executor.client import Client
+        from vibearr_executor.contracts import canonical
 
-        profiles = smoke_profiles(args.executor_image, args.database_image)
-        if args.profiles:
-            profiles.extend(
-                Profile.parse(value) for value in json.loads(args.profiles.read_bytes())
+        report = Client.from_environment().capabilities()
+        workers = report.get("workers", {})
+        if (
+            report.get("runtime") != "compose-slot-v2"
+            or report.get("protocol_version") != 2
+            or report.get("qualification_version") != 1
+            or report.get("qualified") is not True
+            or set(workers) != {"agent", "setup", "validation"}
+            or any(value.get("qualified") is not True for value in workers.values())
+        ):
+            raise RuntimeError(
+                "Qualify every current Docker worker boot before verifying readiness."
             )
-        with tempfile.TemporaryDirectory(prefix="vibearr-oci-") as temporary:
-            report = qualify(args.executor_state or Path(temporary), profiles)
         if args.evidence:
             args.evidence.write_bytes(canonical(report) + b"\n")
         print(
             json.dumps(
                 {
-                    "runtime": "docker-oci-v1",
+                    "runtime": "compose-slot-v2",
                     "qualified": True,
-                    "checks": report["checks"],
-                    "binding": report["binding"],
+                    "binding_digest": report["binding_digest"],
                     "native_agent_ready": False,
                 },
                 sort_keys=True,

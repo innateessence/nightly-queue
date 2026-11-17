@@ -1,0 +1,126 @@
+{
+  "kind": "disposable-validation-snapshot",
+  "source_digest": "02094c83154a1c6e5972282e1d41e3cb322a139a7f30f8c8b8009495c53f44a2",
+  "tree_sha": "cd9ad1cc872f2cfc7a89b0e4ae0c74d338091cc2",
+  "validation": {
+    "profile_id": "vibearr-python312-v1",
+    "profile_digest": "40871ce8ec6856191d152f970e3fe3282fff57a1eaa5f37009d1d3e0488b6b01",
+    "image_digest": "sha256:93a1a021e0588ab8c09a4ab03366e8a39ec29a46c4947039c6877ccb80b8a341",
+    "tree_sha": "cd9ad1cc872f2cfc7a89b0e4ae0c74d338091cc2",
+    "checks": [
+      {
+        "id": "black",
+        "operation_id": "1079fc7e-5497-50db-9ad2-32b968bde897",
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": "2026-11-17T03:33:59.004002+00:00",
+        "finished_at": "2026-11-17T03:34:07.859147+00:00",
+        "log_reference": "executor:1079fc7e-5497-50db-9ad2-32b968bde897:logs",
+        "log_digest": "eb8092b5b15ff14efabb1b60b1adf2363cbc2c65eae79e8c6254f16a54175df1"
+      },
+      {
+        "id": "ruff",
+        "operation_id": "2f251077-2207-567f-ae02-aa1ac04a4cca",
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": "2026-11-17T03:34:09.783704+00:00",
+        "finished_at": "2026-11-17T03:34:11.594994+00:00",
+        "log_reference": "executor:2f251077-2207-567f-ae02-aa1ac04a4cca:logs",
+        "log_digest": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      },
+      {
+        "id": "mypy",
+        "operation_id": "6ba6334b-34b2-5cdf-9240-8c8652538e0f",
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": "2026-11-17T03:34:12.725907+00:00",
+        "finished_at": "2026-11-17T03:34:20.687548+00:00",
+        "log_reference": "executor:6ba6334b-34b2-5cdf-9240-8c8652538e0f:logs",
+        "log_digest": "36d3fc2bfd3f185fcedcf439ebfef36f6ff42c144b94083411c4012d57d3402e"
+      },
+      {
+        "id": "migrations",
+        "operation_id": "b70b0f83-c0ad-55d3-b2b8-13ab3839eb31",
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": "2026-11-17T03:34:21.765199+00:00",
+        "finished_at": "2026-11-17T03:34:24.173625+00:00",
+        "log_reference": "executor:b70b0f83-c0ad-55d3-b2b8-13ab3839eb31:logs",
+        "log_digest": "52e65f01016b3602ca693206845f4c4f09073032fada5260cdd7172b1262dbb3"
+      },
+      {
+        "id": "system",
+        "operation_id": "9cf7ca9d-ba90-5769-b1d0-261fc291c9a9",
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": "2026-11-17T03:34:25.148280+00:00",
+        "finished_at": "2026-11-17T03:34:27.027869+00:00",
+        "log_reference": "executor:9cf7ca9d-ba90-5769-b1d0-261fc291c9a9:logs",
+        "log_digest": "1e3e63f221bde88816c4a4ef7367691607b20cc1d194028a02ec9ae0586cf9b1"
+      },
+      {
+        "id": "django",
+        "operation_id": "78b7dcfc-0719-5bd2-9b7f-0089b6171927",
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": "2026-11-17T03:34:28.134830+00:00",
+        "finished_at": "2026-11-17T03:35:58.228798+00:00",
+        "log_reference": "executor:78b7dcfc-0719-5bd2-9b7f-0089b6171927:logs",
+        "log_digest": "578c741f7dde4e1d8ef8d538511382940eb249c811b6b0fd29cca6e119513bd9"
+      },
+      {
+        "id": "cli",
+        "operation_id": "fd9dc6be-c9bf-51cf-8d72-653d77d966fd",
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": "2026-11-17T03:35:59.267489+00:00",
+        "finished_at": "2026-11-17T03:36:00.413630+00:00",
+        "log_reference": "executor:fd9dc6be-c9bf-51cf-8d72-653d77d966fd:logs",
+        "log_digest": "3bef51e198d041905eff0f827299b74928cd9c65b1bab917fb66128d778e2deb"
+      },
+      {
+        "id": "runner",
+        "operation_id": "346c5285-d0d8-5a42-8167-5bc34cb1bff2",
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": "2026-11-17T03:36:01.379421+00:00",
+        "finished_at": "2026-11-17T03:36:43.990328+00:00",
+        "log_reference": "executor:346c5285-d0d8-5a42-8167-5bc34cb1bff2:logs",
+        "log_digest": "bafc8d6fd599b9b26625bbb70eeec8d78d89543b2bc47142fdf4ea02591183d2"
+      },
+      {
+        "id": "git-acceptance",
+        "operation_id": "6a5cbae5-9a94-5667-97ca-19a4c526f883",
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": "2026-11-17T03:36:45.883744+00:00",
+        "finished_at": "2026-11-17T03:37:32.111692+00:00",
+        "log_reference": "executor:6a5cbae5-9a94-5667-97ca-19a4c526f883:logs",
+        "log_digest": "be4219ef507d235468af81d82385e8819daf458c8e84de27124e8e77f78b60c2"
+      }
+    ]
+  },
+  "dependency_provenance": {
+    "artifact": {
+      "bytes": 189808640,
+      "files": 9953,
+      "requirements_digest": "13aaeefd2d3495f05f3ff8a3301d5be75c765e84720789366559e47fc446a9ce",
+      "schema_version": 1,
+      "sha256": "b7ba75694ceb5ec83598244ac5161427075780a2d7bd42cc70974b646e6d45d8"
+    },
+    "build_id": "3850c233-e79e-4872-8c7e-1a863bb3f168",
+    "dependency_digest": "b7ba75694ceb5ec83598244ac5161427075780a2d7bd42cc70974b646e6d45d8",
+    "parent_image": "sha256:93a1a021e0588ab8c09a4ab03366e8a39ec29a46c4947039c6877ccb80b8a341",
+    "parent_profile_digest": "5ed5896ade1cea0c9771edfce82f5e6b859062f78d24944f9cfe542c3089dad4",
+    "parent_runtime_binding": "98a7343688ec0947eb93affe8129dc892e73de069c96dc2e12822b9e87cff4fd",
+    "requirements_digest": "13aaeefd2d3495f05f3ff8a3301d5be75c765e84720789366559e47fc446a9ce",
+    "run_id": "aa3126c0-8cfc-4c70-ba2d-8b52345297d8",
+    "schema_version": 2,
+    "setup_instance_id": "e2962086-0733-48eb-b268-71a04440a6a9",
+    "setup_log_digest": "040e3e07c1241300b332310881fa982c07dd9521816890b635ca1089afeba4b6",
+    "setup_operation_id": "3850c233-e79e-4872-8c7e-1a863bb3f168",
+    "setup_worker_boot": "aced3b83-42c4-4765-89e0-905ca9f0d3a4",
+    "source_digest": "02094c83154a1c6e5972282e1d41e3cb322a139a7f30f8c8b8009495c53f44a2",
+    "validation_profile_digest": "40871ce8ec6856191d152f970e3fe3282fff57a1eaa5f37009d1d3e0488b6b01"
+  }
+}

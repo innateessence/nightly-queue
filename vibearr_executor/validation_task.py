@@ -70,7 +70,7 @@ def main() -> int:
         != hashlib.sha256(installed.read_bytes()).digest()
     ):
         raise RuntimeError(
-            "Candidate requirements require a new isolated dependency image."
+            "Candidate requirements require a verified dependency artifact."
         )
     mypy_main: Any = None
     if check == "mypy":
