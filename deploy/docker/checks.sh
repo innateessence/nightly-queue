@@ -167,7 +167,20 @@ if [[ $mode == full || $mode == boundary || $mode == candidate ]]; then
   compose up -d --wait agent-worker setup-worker validation-worker worker-gateway >> "$output/restart.log" 2>&1
   compose run --rm --no-deps qualification finish > "$output/qualification.log" 2>&1
   compose run --rm --no-deps --entrypoint cat qualification /run/vibearr/runner/docker-qualification.json > "$output/qualification.json"
-  compose run --rm --no-deps resource-check > "$output/resource-check.log" 2>&1
+  resource_container=$project-resource-check
+  if docker container inspect "$resource_container" >/dev/null 2>&1; then
+    echo 'The resource check container name already exists; select a new project.' >&2
+    exit 2
+  fi
+  resource_status=0
+  compose run --no-deps --name "$resource_container" resource-check > "$output/resource-check.log" 2>&1 || resource_status=$?
+  if [[ $(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$resource_container") != "$project" ]]; then
+    echo 'Resource observation does not belong to this check project.' >&2
+    exit 2
+  fi
+  docker inspect --format '{"container_id":"{{.Id}}","image":"{{.Image}}","oom_killed":{{.State.OOMKilled}},"exit_code":{{.State.ExitCode}},"running":{{.State.Running}},"memory_bytes":{{.HostConfig.Memory}},"memory_swap_bytes":{{.HostConfig.MemorySwap}},"nano_cpus":{{.HostConfig.NanoCpus}},"pids":{{.HostConfig.PidsLimit}}}' "$resource_container" > "$output/resource-observation.json"
+  docker rm "$resource_container" > "$output/resource-cleanup.log"
+  if ((resource_status)); then exit "$resource_status"; fi
   ids=$(compose ps -q)
   # shellcheck disable=SC2086
   docker inspect $ids | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit --inspect > "$output/runtime-inspection.json"
@@ -195,7 +208,24 @@ if [[ $mode == full || $mode == operations ]]; then
   compose run --rm --no-deps tools python -m vibearr_runner.drain wait --timeout 60 > "$output/drain-ack.log" 2>&1
   compose stop vibearr-runner > "$output/drain-stop.log" 2>&1
   compose run --rm --no-deps -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 tools python -m deploy.docker.recovery_fixture seed > "$output/seed.log" 2>&1
-  compose run --rm --no-deps browser > "$output/browser.log" 2>&1
+  browser_arguments=()
+  if [[ -n $candidate ]]; then
+    application_container=$(compose ps -q vibearr)
+    application_image=$(docker inspect --format '{{.Image}}' "$application_container")
+    if [[ $application_image != "$(docker image inspect "$VIBEARR_APP_IMAGE" --format '{{.Id}}')" ]]; then
+      echo 'The browser target differs from the exact candidate application image.' >&2
+      exit 1
+    fi
+    browser_image=$(docker image inspect "$VIBEARR_BROWSER_IMAGE" --format '{{.Id}}')
+    docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.browser_binding --application-image "$application_image" --browser-image "$browser_image" < "$output/implementation-source.json" > "$output/browser-binding.json"
+    browser_binding=$(cat "$output/browser-binding.json")
+    browser_arguments+=(-e "VIBEARR_BROWSER_SOURCE_BINDING=$browser_binding")
+  fi
+  compose run --rm --no-deps "${browser_arguments[@]}" browser > "$output/browser.log" 2>&1
+  if [[ -n $candidate ]]; then
+    browser_report=$(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.records report_path < "$output/browser.log")
+    compose run --rm --no-deps --entrypoint python qualification -m vibearr_runner.browser_receipts --report "$browser_report" --run-id 11111111-1111-4111-8111-111111111111 --state /artifacts/browser-acceptance > "$output/browser-receipt-check.log" 2>&1
+  fi
   compose stop vibearr celery-worker celery-beat agent-worker setup-worker validation-worker worker-gateway valkey > "$output/quiesce.log" 2>&1
   compose run --rm --no-deps backup backup --quiesced > "$output/backup.log" 2>&1
   backup_id=$(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.records backup_id < "$output/backup.log")

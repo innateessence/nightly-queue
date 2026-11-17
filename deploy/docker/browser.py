@@ -2,26 +2,50 @@
 
 import asyncio
 import json
+import os
 from pathlib import Path
+from uuid import uuid4
 
 from playwright.async_api import async_playwright
+from vibearr_runner.browser_receipts import capture_receipt, png_bytes, validate_binding
 
 
 ROOT = Path("/artifacts")
 BASE = "http://vibearr:8000"
 
 
+def image_record(path, *, binding, url, viewport, theme):
+    if binding is None:
+        return {"path": path.name, "bytes": len(png_bytes(path))}
+    return capture_receipt(
+        binding,
+        path,
+        receipt_path=Path("/screenshots") / path.relative_to(ROOT),
+        url=url,
+        viewport=viewport,
+        theme=theme,
+    )
+
+
 async def main():
+    os.umask(0o077)
     ROOT.mkdir(mode=0o700, exist_ok=True)
+    raw_binding = os.environ.get("VIBEARR_BROWSER_SOURCE_BINDING", "")
+    if len(raw_binding) > 8192:
+        raise ValueError("Browser source binding exceeds its byte limit.")
+    binding = validate_binding(json.loads(raw_binding)) if raw_binding else None
+    capture = ROOT
+    if binding is not None:
+        capture = ROOT / ("capture-" + uuid4().hex)
+        capture.mkdir(mode=0o700)
     errors, requests, images = [], [], []
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
             args=["--no-sandbox", "--disable-dev-shm-usage"]
         )
         for name, width, height in (("desktop", 1440, 1000), ("mobile", 390, 844)):
-            context = await browser.new_context(
-                viewport={"width": width, "height": height}, color_scheme="light"
-            )
+            viewport = {"width": width, "height": height}
+            context = await browser.new_context(viewport=viewport, color_scheme="light")
             page = await context.new_page()
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.on("requestfailed", lambda request: requests.append(request.url))
@@ -41,19 +65,26 @@ async def main():
                 raise RuntimeError(
                     "Released static styles are missing from the application image."
                 )
-            light = ROOT / ("queue-" + name + "-light.png")
+            light = capture / ("queue-" + name + "-light.png")
             await page.screenshot(path=str(light), full_page=True)
+            images.append(
+                image_record(
+                    light,
+                    binding=binding,
+                    url=page.url,
+                    viewport=viewport,
+                    theme="light",
+                )
+            )
             await page.get_by_role("button", name="Switch to dark theme").click()
             await page.get_by_role("button", name="Switch to light theme").wait_for()
-            dark = ROOT / ("queue-" + name + "-dark.png")
+            dark = capture / ("queue-" + name + "-dark.png")
             await page.screenshot(path=str(dark), full_page=True)
-            for path in (light, dark):
-                if (
-                    not path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-                    or path.stat().st_size < 10000
-                ):
-                    raise RuntimeError("The browser did not produce a substantive PNG.")
-                images.append({"path": path.name, "bytes": path.stat().st_size})
+            images.append(
+                image_record(
+                    dark, binding=binding, url=page.url, viewport=viewport, theme="dark"
+                )
+            )
             await context.close()
         await browser.close()
     if errors or requests:
@@ -62,14 +93,19 @@ async def main():
             + json.dumps({"errors": errors, "requests": requests})
         )
     report = {
-        "schema_version": 1,
-        "kind": "docker-browser-smoke",
+        "schema_version": 2 if binding else 1,
+        "kind": "docker-browser-acceptance" if binding else "docker-browser-smoke",
         "browser": "chromium",
         "screenshots": images,
         "page_errors": errors,
         "failed_requests": requests,
     }
-    (ROOT / "browser.json").write_text(json.dumps(report, indent=2) + "\n")
+    if binding:
+        report["source_binding"] = binding
+        report["report_path"] = str(
+            Path("/screenshots") / capture.relative_to(ROOT) / "browser.json"
+        )
+    (capture / "browser.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report), flush=True)
 
 

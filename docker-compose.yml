@@ -321,6 +321,7 @@ services:
       - setup-secrets:/run/slots/setup:ro
       - validation-secrets:/run/slots/validation:ro
       - check-artifacts:/artifacts
+      - browser-artifacts:/screenshots:ro
 
   resource-check:
     <<: *slot
@@ -365,6 +366,7 @@ services:
       - backup-data:/var/lib/vibearr-backups
       - runner-data:/var/lib/vibearr
       - check-artifacts:/artifacts
+      - browser-artifacts:/screenshots:ro
     depends_on:
       vibearr: {condition: service_healthy}
 
@@ -447,6 +449,7 @@ services:
     volumes:
       - runner-data:/var/lib/vibearr
       - runner-secrets:/run/vibearr/runner:ro
+      - browser-artifacts:/screenshots:ro
     networks: [queue-control, worker-control, runner-egress]
     depends_on:
       vibearr: {condition: service_healthy}

@@ -20,11 +20,11 @@ for deployment and recovery.
 
 ## Image and profiles
 
-Build the agent image from the repository root:
+Build the Docker fleet's agent image from the reviewed repository root:
 
 ```sh
-docker build -f vibearr_executor/Codex.Dockerfile -t vibearr-codex:0.169.0 .
-docker image inspect vibearr-codex:0.169.0 --format '{{.Id}}'
+docker compose --profile runner build agent-worker
+docker image inspect vibearr-agent:local --format '{{.Id}}'
 ```
 
 The recipe pins Python 3.12.12, Git, and Codex **0.169.0**, including its separate
@@ -32,29 +32,28 @@ The recipe pins Python 3.12.12, Git, and Codex **0.169.0**, including its separa
 extracting each executable. Linux x86-64 and ARM64 archives have separate pins.
 Deploy the resulting immutable `sha256:` image ID, rather than a mutable tag.
 
-That image contains the CLI, Git, and Python; it does not contain this
-application's requirements. For repository work, bootstrap must register a
-separately reviewed image derived from that immutable Codex image with the
-repository's common requirements installed. Build it once without model or
-GitHub credentials, using a trusted recipe and reviewed requirements. Qualify its
-new image ID and select that ID in the agent profile. Do not select the bare
-fixture image for Django application work or let candidate Dockerfiles choose
-the agent image. Later candidate dependency changes are resolved and checked by
+Compose uses `Slot.Dockerfile`'s agent target, which adds this application's
+reviewed baseline requirements to the pinned Codex image. If
+`VIBEARR_AGENT_IMAGE` overrides the default tag, inspect that selected image
+instead. Bind its actual immutable ID as `VIBEARR_AGENT_IMAGE_ID` before starting
+the workers. Build images without model or GitHub credentials; candidate
+Dockerfiles cannot choose the installed agent image.
+Later candidate dependency changes are resolved and checked by
 the independent, credential-free validation builder; the model phase retains
 only its model endpoint allowlist.
 
-Use `vibearr_runner.native_codex.codex_profile(image, kind)` to construct the
-registered profile. Its default IDs are `codex-token-v1` and `codex-session-v1`.
-The helper fixes the launch recipe and selected-secret slot. Profile limits are
-operator ceilings; each session manifest uses the project's smaller configured
-limits. The adapter checks the complete recipe digest against executor
-capabilities before preparing work.
+The image-owned Docker registry installs the API-key profile `native-default`.
+Its fixed limits are two CPUs, 4096 MiB memory, 128 PIDs and a 2048 MiB task
+workspace. Project policy must match those enforced ceilings; smaller limits
+require a separately reviewed matching slot rather than an unenforced manifest.
+The adapter checks the complete launch recipe digest against capabilities before
+preparing work. The generic profile helper retains earlier token/session IDs for
+protocol compatibility; they are not installed profiles in this fleet.
 
-Register the agent profile alongside the project's trusted validation profile.
-Set `execution_policy.runtime_profile` to its ID and
-`execution_policy.validation_profile` to the validation profile's ID. Qualify the
-installed images, profiles, executor code, and host using
-[the runtime verifier](isolated-executor.md). A native account probe can run
+Set `execution_policy.runtime_profile` to `native-default` and
+`execution_policy.validation_profile` to the generated validation profile's ID.
+Qualify the current installed worker boots using
+[Docker worker readiness](docker-operations.md#worker-readiness). A native account probe can run
 before any production claim; historical proposal release evidence is unrelated.
 
 ## Authentication
@@ -64,8 +63,13 @@ the adapter supplies it only to this task's CLI as `CODEX_API_KEY`. Its agent
 profile permits `api.openai.com`. Dependency installation belongs to a separate
 credential-free setup phase, and validation has no external network.
 
-An explicitly selected Codex session credential is an additional supported path.
-It accepts the pinned CLI's `auth.json` format, including the optional
+The adapter also understands an explicitly selected Codex session credential,
+but the supplied Docker fleet does not register a session profile or its egress
+proxy. Session credentials fail readiness on this fleet. Supporting them requires
+a separately reviewed image-owned profile and matching restricted proxy, followed
+by boundary and live account qualification; changing a task manifest is insufficient.
+
+The session parser accepts the pinned CLI's `auth.json` format, including the optional
 `login_owner_id` and `oauth_provenance` metadata. These fields do not select an
 issuer, endpoint, permission, or refresh mechanism. The supervisor removes the
 refresh token and metadata before delivery. The wrapper uses the pinned CLI's
@@ -79,8 +83,8 @@ The adapter never discovers a host login automatically. A copied session must be
 selected deliberately and kept outside source control. API keys remain preferable
 for unattended public-repository work; OpenAI's
 [automation authentication guidance](https://developers.openai.com/codex/noninteractive/)
-describes the account-session limitations. This implementation's session smoke
-uses only a hand-authored disposable fixture.
+describes the account-session limitations. Earlier session smoke evidence used
+only a hand-authored disposable fixture and cannot qualify this Docker fleet.
 
 The CLI and its tools can access the selected API key or access-token material.
 That exposure is contained to the task, not isolated from its own tools. They
@@ -190,24 +194,28 @@ rereading a retained operation cannot renew it.
 
 ## Real acceptance
 
-The acceptance command creates only run-owned disposable resources and needs a
-private credential file. Use a dedicated state directory rather than an active
-executor's state:
+Drain and stop the supervisor, then qualify idle Docker workers as described in
+[Docker operations](docker-operations.md). Provision an explicitly selected,
+dedicated credential in the private runner secret volume. This command makes
+real model calls and requires `--execute`; ordinary qualification does not run it.
+Choose new state and evidence paths so previous operations remain available for
+reconciliation. Never import the operator's home or agent login.
 
 ```sh
-python -m vibearr_runner.codex_acceptance \
-  --image sha256:<codex-image-id> \
-  --database-image sha256:<postgres-image-id> \
-  --state /var/lib/vibearr/codex-acceptance \
-  --credential-file /run/secrets/codex-key \
+docker compose --profile checks run --rm --no-deps --entrypoint python qualification \
+  -m vibearr_runner.codex_acceptance --execute \
+  --state /artifacts/native-fixture-<new-run-name> \
+  --credential-file /run/vibearr/runner/acceptance-key \
   --kind token --model <configured-model-id> \
-  --evidence /var/lib/vibearr/codex-acceptance.json
+  --evidence /artifacts/native-fixture-<new-run-name>.json
 ```
 
-It runs the real boundary qualification, asks Codex to edit a fixture and run its
-test, restarts the executor during the session, retries the same start, verifies
-the exported changes with an independent offline test, cancels a second session,
-and exercises the bounded authentication-probe interface. The candidate project
+It uses the existing qualified fleet, asks Codex to edit a fixture and run its
+test, observes the same running worker operation from an independent controller
+process, reloads its saved session, and retries the same start. The registered
+offline runner check independently validates the export. It then cancels a
+second real foreground tool session and runs the bounded authentication probe.
+It does not restart workers or replace their boot qualification. The candidate project
 configuration contains an MCP marker that must remain unexecuted. These are real
 native calls; the command does not substitute fixture events for provider access.
 

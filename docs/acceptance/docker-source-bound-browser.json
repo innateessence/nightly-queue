@@ -1,0 +1,98 @@
+{
+  "schema_version": 2,
+  "kind": "docker-browser-acceptance",
+  "browser": "chromium",
+  "screenshots": [
+    {
+      "schema_version": 2,
+      "revision": "88e3a641ea520e99bc71ae58bc3c20b9352ec6ab",
+      "tree_sha": "fe03d42226ee2f241df4af897a45f3f2d0578eb6",
+      "source_digest": "57f1544b0f30ae68d712767db8f3e71844ce1511cd932d7eac33839dfe52b68c",
+      "application_image": "sha256:46f3783f6d75070c3299ec529b393d8d117df6d30ec6ae20a94ca5f1fd87767b",
+      "browser_image": "sha256:4873b3a1fa7975bcb5ab7857a5c29b99574f104a093bff43fd409cb29ed54234",
+      "runtime": "docker-browser-v1",
+      "browser": "playwright-chromium",
+      "url": "http://vibearr:8000/?theme=light",
+      "path": "/screenshots/capture-6c3e8120d8604ff6b637fd5911f14dc0/queue-desktop-light.png",
+      "sha256": "636aafd875ae5ba38b7fe0676d9bb02c76b666516d0960fab9cad1079ffe9236",
+      "bytes": 131833,
+      "captured_at": "2026-11-17T08:36:21.517064+00:00",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "light"
+    },
+    {
+      "schema_version": 2,
+      "revision": "88e3a641ea520e99bc71ae58bc3c20b9352ec6ab",
+      "tree_sha": "fe03d42226ee2f241df4af897a45f3f2d0578eb6",
+      "source_digest": "57f1544b0f30ae68d712767db8f3e71844ce1511cd932d7eac33839dfe52b68c",
+      "application_image": "sha256:46f3783f6d75070c3299ec529b393d8d117df6d30ec6ae20a94ca5f1fd87767b",
+      "browser_image": "sha256:4873b3a1fa7975bcb5ab7857a5c29b99574f104a093bff43fd409cb29ed54234",
+      "runtime": "docker-browser-v1",
+      "browser": "playwright-chromium",
+      "url": "http://vibearr:8000/?theme=light",
+      "path": "/screenshots/capture-6c3e8120d8604ff6b637fd5911f14dc0/queue-desktop-dark.png",
+      "sha256": "e925b8d967064eb845b82f0403f12fd4370e4ec1196ba2c7543fb8c1015ad559",
+      "bytes": 130369,
+      "captured_at": "2026-11-17T08:36:21.609661+00:00",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark"
+    },
+    {
+      "schema_version": 2,
+      "revision": "88e3a641ea520e99bc71ae58bc3c20b9352ec6ab",
+      "tree_sha": "fe03d42226ee2f241df4af897a45f3f2d0578eb6",
+      "source_digest": "57f1544b0f30ae68d712767db8f3e71844ce1511cd932d7eac33839dfe52b68c",
+      "application_image": "sha256:46f3783f6d75070c3299ec529b393d8d117df6d30ec6ae20a94ca5f1fd87767b",
+      "browser_image": "sha256:4873b3a1fa7975bcb5ab7857a5c29b99574f104a093bff43fd409cb29ed54234",
+      "runtime": "docker-browser-v1",
+      "browser": "playwright-chromium",
+      "url": "http://vibearr:8000/?theme=light",
+      "path": "/screenshots/capture-6c3e8120d8604ff6b637fd5911f14dc0/queue-mobile-light.png",
+      "sha256": "6e32e2f20518868ab55ff9e0e0e09bd807b5deac260ffec14a1f2503d0dffe32",
+      "bytes": 127687,
+      "captured_at": "2026-11-17T08:36:22.220693+00:00",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme": "light"
+    },
+    {
+      "schema_version": 2,
+      "revision": "88e3a641ea520e99bc71ae58bc3c20b9352ec6ab",
+      "tree_sha": "fe03d42226ee2f241df4af897a45f3f2d0578eb6",
+      "source_digest": "57f1544b0f30ae68d712767db8f3e71844ce1511cd932d7eac33839dfe52b68c",
+      "application_image": "sha256:46f3783f6d75070c3299ec529b393d8d117df6d30ec6ae20a94ca5f1fd87767b",
+      "browser_image": "sha256:4873b3a1fa7975bcb5ab7857a5c29b99574f104a093bff43fd409cb29ed54234",
+      "runtime": "docker-browser-v1",
+      "browser": "playwright-chromium",
+      "url": "http://vibearr:8000/?theme=light",
+      "path": "/screenshots/capture-6c3e8120d8604ff6b637fd5911f14dc0/queue-mobile-dark.png",
+      "sha256": "bdfadb2487ad9b605529fd52723822e3aff3fffeb4f2b8bdfc295aaa501f8eed",
+      "bytes": 126803,
+      "captured_at": "2026-11-17T08:36:22.303081+00:00",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme": "dark"
+    }
+  ],
+  "page_errors": [],
+  "failed_requests": [],
+  "source_binding": {
+    "schema_version": 1,
+    "revision": "88e3a641ea520e99bc71ae58bc3c20b9352ec6ab",
+    "tree_sha": "fe03d42226ee2f241df4af897a45f3f2d0578eb6",
+    "source_digest": "57f1544b0f30ae68d712767db8f3e71844ce1511cd932d7eac33839dfe52b68c",
+    "application_image": "sha256:46f3783f6d75070c3299ec529b393d8d117df6d30ec6ae20a94ca5f1fd87767b",
+    "browser_image": "sha256:4873b3a1fa7975bcb5ab7857a5c29b99574f104a093bff43fd409cb29ed54234"
+  },
+  "report_path": "/screenshots/capture-6c3e8120d8604ff6b637fd5911f14dc0/browser.json"
+}
