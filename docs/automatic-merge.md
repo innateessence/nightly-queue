@@ -58,6 +58,13 @@ the accepted base's workflow files.
       "workflow_id": 420002541,
       "workflow_path": ".github/workflows/native-codex.yml",
       "workflow_digest": "<SHA256 of accepted native-codex.yml>"
+    },
+    {
+      "name": "Docker operations",
+      "app_id": 15368,
+      "workflow_id": 420998639,
+      "workflow_path": ".github/workflows/docker-operations.yml",
+      "workflow_digest": "<SHA256 of accepted docker-operations.yml>"
     }
   ],
   "reviews": []
@@ -66,7 +73,7 @@ the accepted base's workflow files.
 
 AI review gates are optional and disabled for the MVP (`reviews: []`). They are
 not needed to claim, validate, merge, or complete a task. For this repository, all
-four current CI workflows are configured requirements; passing only the plan's
+five current CI workflows are configured requirements; passing only the plan's
 two minimum workflows cannot excuse a failure in another required workflow.
 
 The provider gate requires effective active branch rules with no bypass actors,
@@ -91,12 +98,13 @@ control. The tool never discovers host credentials. The default command performs
 provider reads and prints the exact current and proposed ruleset documents:
 
 ```sh
-python -m vibearr_runner.merge_setup --profile /private/merge-profile.json \
-  --token-file /private/github-selected.json --base main --ruleset-id 26003400
+docker compose --profile runner run --rm --no-deps --entrypoint python vibearr-runner \
+  -m vibearr_runner.merge_setup --profile /run/vibearr/runner/merge-profile.json \
+  --token-file /run/vibearr/runner/github-selected.json --base main --ruleset-id 26003400
 ```
 
 Review that concrete preview against the current effective policy before using
-`--apply --checkpoint /private/merge-setup.json`. Apply updates only the selected
+`--apply --checkpoint /var/lib/vibearr/merge-setup.json`. Apply updates only the selected
 existing repository ruleset, preserving its other rules, requiring the configured
 checks and removing its bypass actors. It does not
 enable execution, change saved credentials, toggle GitHub native auto-merge, or
@@ -165,15 +173,28 @@ their optional branch cleanup is left to normal repository policy.
 ## MVP acceptance
 
 Feature06's ordinary-controller driver is extended for merge mode. Use
-`python -m vibearr_runner.self_acceptance --scenario merge --execute` with the
-same selected state/project and both finite issue IDs; `merge_acceptance` also
+the following command with the selected state/project and both finite issue IDs;
+`merge_acceptance` also
 provides the dedicated entrypoint. Resume the same journal and receipt files
 after interruptions. Supply `--screenshots` only after the trusted operator has
-rendered each exact validated candidate in an owned app with installed Chrome;
+rendered each exact validated candidate with the pinned Docker browser job;
 the native agent must not download a browser or fabricate screenshots. Use the
 [source-bound Docker browser workflow](docker-operations.md#source-bound-browser-acceptance)
 to capture/import the exact tested trees and collect their private receipt map.
 The retired host Chrome helper cannot qualify Docker-only acceptance.
+
+```sh
+docker compose --profile runner run --rm --no-deps --entrypoint python vibearr-runner \
+  -m vibearr_runner.self_acceptance --scenario merge --execute \
+  --state /var/lib/vibearr --project-id <selected-project-id> \
+  --first-issue <issue-a> --second-issue <dependent-issue-b> \
+  --evidence /var/lib/vibearr/merge-acceptance.json
+```
+
+Stop the ordinary supervisor first. Resume that command with
+`--screenshots /var/lib/vibearr/browser-acceptance.json` after collecting the
+four source-bound frames for each run. This command makes real model calls and
+publishes and merges the two selected issues; select their scope explicitly.
 
 Reserve two
 distinct finite UI source tasks: A adds queue status filtering with every status
