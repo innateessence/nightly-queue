@@ -135,6 +135,39 @@ class NativeExecutorContractTests(unittest.TestCase):
         self.assertEqual(summary["receipt_digest"], digest(observed["result"]))
         self.assertNotIn("files", repr(summary))
 
+    def test_docker_slot_receipt_passes_without_inventing_a_container_id(self):
+        _, _, observed = observed_operation()
+        identity = {
+            "runtime": "compose-slot-v2",
+            "protocol_version": 2,
+            "instance_id": str(uuid4()),
+            "worker_boot": str(uuid4()),
+            "binding_digest": "d" * 64,
+        }
+        observed.pop("container_id")
+        observed.update(
+            execution_identity=identity, worker_boot=identity["worker_boot"]
+        )
+        observed["result"]["execution_identity"] = identity
+        receipt = receipt_summary(observed)
+        self.assertTrue(receipt_passed(receipt))
+        self.assertEqual(receipt["schema_version"], 2)
+        self.assertNotIn("container_id", receipt)
+
+    def test_docker_result_cannot_be_relabelled_as_another_worker_boot(self):
+        _, _, observed = observed_operation()
+        identity = {
+            "runtime": "compose-slot-v2",
+            "protocol_version": 2,
+            "instance_id": str(uuid4()),
+            "worker_boot": str(uuid4()),
+            "binding_digest": "d" * 64,
+        }
+        observed.update(execution_identity=identity, worker_boot=str(uuid4()))
+        observed["result"]["execution_identity"] = identity
+        with self.assertRaisesRegex(NativeContractError, "observed worker boot"):
+            receipt_summary(observed)
+
     def test_agent_result_accepts_generic_session_and_usage(self):
         original, changed, observed = observed_operation()
         session = NativeSession(

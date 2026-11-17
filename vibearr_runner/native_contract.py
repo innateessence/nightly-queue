@@ -730,6 +730,26 @@ def intent_operations(value):
 
 
 @checked
+def validate_execution_identity(value):
+    fields(
+        value,
+        {"runtime", "protocol_version", "instance_id", "worker_boot", "binding_digest"},
+    )
+    if (
+        value["runtime"] != "compose-slot-v2"
+        or type(value["protocol_version"]) is not int
+        or value["protocol_version"] != 2
+    ):
+        raise NativeContractError(
+            "Native execution identity requires the Docker worker protocol."
+        )
+    identifier(value["instance_id"])
+    identifier(value["worker_boot"])
+    sha(value["binding_digest"])
+    return value
+
+
+@checked
 def receipt_summary(observed):
     if (
         observed.get("state") != "exited"
@@ -765,12 +785,26 @@ def receipt_summary(observed):
         "inventory_digest": digest(artifact) if artifact else "",
         "error": bool(result.get("error") or result.get("export_error")),
     }
+    if "execution_identity" in observed or "execution_identity" in result:
+        identity = validate_execution_identity(observed.get("execution_identity"))
+        if identity != result.get("execution_identity") or identity[
+            "worker_boot"
+        ] != observed.get("worker_boot"):
+            raise NativeContractError(
+                "Protected result differs from the observed worker boot."
+            )
+        value.pop("container_id")
+        value.update(schema_version=2, execution_identity=identity)
     validate_receipt(value)
     return value
 
 
 @checked
 def validate_receipt(value):
+    identity_fields = {"container_id"}
+    if value.get("schema_version") == 2 and type(value["schema_version"]) is int:
+        identity_fields = {"schema_version", "execution_identity"}
+        validate_execution_identity(value["execution_identity"])
     fields(
         value,
         {
@@ -778,7 +812,6 @@ def validate_receipt(value):
             "run_id",
             "state",
             "descendants_terminated",
-            "container_id",
             "receipt_digest",
             "exit_code",
             "timed_out",
@@ -791,13 +824,15 @@ def validate_receipt(value):
             "export_digest",
             "inventory_digest",
             "error",
-        },
+        }
+        | identity_fields,
     )
     identifier(value["operation_id"])
     identifier(value["run_id"])
     if value["state"] != "exited" or value["descendants_terminated"] is not True:
         raise NativeContractError("Native receipt is not terminal.")
-    sha(value["container_id"], empty=True)
+    if "container_id" in value:
+        sha(value["container_id"], empty=True)
     sha(value["receipt_digest"])
     for key in ("log_digest", "source_digest", "export_digest", "inventory_digest"):
         sha(value[key], empty=True)
@@ -840,9 +875,9 @@ def receipt_passed(value):
                 "source_digest",
                 "export_digest",
                 "inventory_digest",
-                "container_id",
             )
         )
+        and bool(value.get("execution_identity") or value.get("container_id"))
     )
 
 
@@ -868,9 +903,18 @@ def agent_result(*, intent_id, session, outcome, observed=None):
             "Agent outcome differs from its terminal container status."
         )
     receipt = receipt_summary(observed)
-    if outcome["successful"] and not receipt["container_id"]:
+    if (
+        selected.get("execution_identity") is not None
+        and receipt.get("execution_identity") != selected["execution_identity"]
+    ):
         raise NativeContractError(
-            "Agent success requires its original container identity."
+            "Agent result differs from its prepared worker identity."
+        )
+    if outcome["successful"] and not (
+        receipt.get("execution_identity") or receipt.get("container_id")
+    ):
+        raise NativeContractError(
+            "Agent success requires its original protected execution identity."
         )
     artifact = outcome["artifact"]
     if canonical(artifact) != canonical(result.get("artifact")):

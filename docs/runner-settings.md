@@ -19,7 +19,8 @@ saved runner settings to matching schedule records. Existing continuous UTC
 settings use Always on; customized windows retain a schedule named for their
 runner. The schedule migration also supports restoring the original runner fields
 when rolled back. **Default runner** remains the fallback runner configuration.
-Provision machine identities with `python manage.py provision_runner <name>`,
+Provision machine identities with the Docker tools service:
+`docker compose --profile tools run --rm tools python manage.py provision_runner <name>`,
 using a dedicated token supplied through `VIBEARR_RUNNER_API_TOKEN`, then select
 the identity in the runner configuration form. An identity can be assigned to one
 configuration. Identities without an assignment continue to use Default runner.
@@ -74,5 +75,6 @@ execution rejects a changed configuration assignment. Configuration/project save
 share the default settings row lock. Direct SQL/bulk updates must coordinate this
 lock. Credential delivery validates the selected runner's references and grants.
 
-Apply `python manage.py migrate` before serving the new pages. Existing machine
+Apply `docker compose --profile tools run --rm tools python manage.py migrate`
+before serving the new pages. Existing machine
 identities and supervisors continue using the preserved default configuration.

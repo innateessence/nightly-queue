@@ -1,7 +1,8 @@
 # vibearr
 
-For repeatable self-development setup and finite issue-to-PR acceptance, see
-[the bootstrap guide](docs/self-development-bootstrap.md).
+For Docker setup, qualification, backup and recovery, see
+[Docker operations](docs/docker-operations.md). D4 CI and final release acceptance
+are still in progress; keep autonomous execution disabled.
 
 A self-hosted *arr app for vibe coding with Codex, Claude Code, and OpenCode.
 
@@ -86,7 +87,11 @@ to preserve database, volume, and runner identities while adopting the new names
 
 ## Run with Docker Compose
 
-You'll need Docker with Compose. The web app uses port **7777** by default.
+Docker Engine and Compose are the only runtime prerequisites. The web app uses
+port **7777** by default. Every service, worker, test, browser and operational tool
+runs in a container. The [Docker-only runtime plan](docs/docker-only-runtime-plan.md)
+defines the complete worker stack and its qualification gates. Autonomous execution
+stays disabled until that container boundary is implemented and verified.
 
 Copy the environment file and build the images:
 
@@ -95,24 +100,22 @@ cp .env.example .env
 docker compose build
 ```
 
-Generate a credential encryption key:
-
-```sh
-docker compose run --rm --no-deps vibearr python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
-```
-
-Set these values in `.env` before starting:
+Fresh installations leave secret values empty: initialization generates them
+once in private named volumes. Existing PostgreSQL installations must supply
+their original values before initialization; missing credentials or conflicts
+stop startup. Preserve the original database/user and volume settings on upgrade.
 
 | Variable | Purpose |
 | --- | --- |
-| `VIBEARR_API_TOKEN` | A random token for the queue API and `vibearr` CLI |
-| `VIBEARR_POSTGRES_PASSWORD` | The application database password |
-| `VIBEARR_CREDENTIAL_KEY` | The generated key for encrypting saved credentials |
+| `VIBEARR_API_TOKEN` | Original queue API token on upgrade; generated for a fresh install |
+| `VIBEARR_POSTGRES_PASSWORD` | Original database password on upgrade; generated for a fresh install |
+| `VIBEARR_CREDENTIAL_KEY` | Original encryption key on upgrade; generated for a fresh install |
+| `DJANGO_SECRET_KEY` | Original Django key on upgrade; generated for a fresh install |
 
 Start the app:
 
 ```sh
-./run.sh --build
+docker compose up -d --wait
 ```
 
 Open [localhost:7777](http://127.0.0.1:7777/), add a project with its HTTPS GitHub
@@ -135,7 +138,7 @@ requirements. Starting the web app alone does not start a coding agent.
 For Django admin access, create an account:
 
 ```sh
-docker compose exec vibearr python manage.py createsuperuser
+docker compose --profile tools run --rm tools python manage.py createsuperuser
 ```
 
 This is a single-user app for a private network. The browser UI has no login
@@ -145,21 +148,18 @@ credentials over a network.
 
 ## Submit work from the terminal
 
-`vibearr` is a small HTTP client with no Django dependency. It needs Python 3.10 or newer.
+Run the HTTP CLI in the tools container, whose entrypoint loads the private queue
+token. No host Python or CLI installation is required.
 
 ```sh
-python -m pip install .
-export VIBEARR_URL='http://127.0.0.1:7777'
-export VIBEARR_API_TOKEN='your-queue-api-token'
-
-vibearr projects
-vibearr add --project 12 "Add CSV export" \
-  --instructions "Include the active filters and column headings." \
-  --priority normal
+docker compose --profile tools run --rm -e VIBEARR_URL=http://vibearr:8000 tools python -m vibearr projects
+docker compose --profile tools run --rm -e VIBEARR_URL=http://vibearr:8000 tools python -m vibearr add \
+  --project 12 "Add CSV export" \
+  --instructions "Include the active filters and column headings." --priority normal
 ```
 
-Use a project ID from `vibearr projects`. Successful submissions print the new item ID;
-errors exit nonzero. You can also run it with `python -m vibearr` from the repository.
+Use a project ID from `projects`. Successful submissions print the item ID;
+errors exit nonzero. The compatibility `nq` module is also available in the image.
 
 ## How it fits together
 
@@ -168,10 +168,10 @@ discover GitHub issues. The independent runner claims work over HTTP and owns
 agent processes, task workspaces, validation, and Git delivery. PostgreSQL stores
 application data; Valkey supports the background task services.
 
-The runner has its own image and persistent state volume. It does not need direct
-database access or a mount of the running application's source. Agents work in
-task environments, with supervisor credentials and production data kept outside
-their reach. GitHub issue text and repository content describe the task; they
+The Docker-only target gives the runner its own image and state volume. It calls
+authenticated preprovisioned worker slots, with no Docker daemon access. Released
+images contain source; workspaces and artifacts stay in named volumes and bounded
+tmpfs. Agents cannot access host paths, controller journals or production data. GitHub issue text and repository content describe the task; they
 cannot grant new permissions.
 
 | Directory | Responsibility |
@@ -186,65 +186,35 @@ cannot grant new permissions.
 
 ## Development
 
-Use Python **3.12** for the application. Implement each feature on its own branch
-and include tests and migrations with the code that needs them. The
-[development plan](docs/autonomous-ai-queue-plan.md) defines branch dependencies
-and acceptance criteria for the autonomous workflow.
+Use Python **3.12** in container images. Implement each feature on its own branch,
+with tests and migrations where needed. The [development plan](docs/autonomous-ai-queue-plan.md)
+and [Docker-only correction branches](docs/docker-only-runtime-plan.md) define
+merge order, the runtime boundary and acceptance gates.
 
-Install dependencies for native development:
-
-```sh
-python -m pip install -r requirements.txt
-```
-
-Configure a reachable PostgreSQL server with `VIBEARR_POSTGRES_DB`, `VIBEARR_POSTGRES_USER`,
-`VIBEARR_POSTGRES_PASSWORD`, `VIBEARR_POSTGRES_HOST`, and `VIBEARR_POSTGRES_PORT`, then run:
+Run application checks in Docker:
 
 ```sh
-python manage.py migrate
-python manage.py runserver
+bash test.sh
+bash test.sh work_queue.test_api
+docker compose --profile tools run --rm tools python manage.py makemigrations --check --dry-run
+docker compose --profile tools run --rm tools python manage.py check
+docker compose --profile tools run --rm tools black --check .
+docker compose --profile tools run --rm tools ruff check .
+docker compose --profile tools run --rm tools mypy . --config-file mypy.ini
 ```
 
-Run checks locally, or prefix application commands with
-`docker compose exec vibearr` to use the app container:
+The [Docker checks](docs/docker-operations.md#development-and-ci) use disposable
+projects for Git acceptance, distribution builds, qualification, browser captures
+and backup/restore. CI uses the same container images and profiles. Missing
+container tooling does not permit host
+Python, pip, Git task execution, browsers, services or package installation.
 
-```sh
-python manage.py test
-python -m unittest nq.test_cli
-python manage.py makemigrations --check --dry-run
-python manage.py check
-black --check .
-ruff check .
-mypy . --config-file mypy.ini
-```
-
-`bash test.sh` builds the Compose services and runs the Docker checks used by CI.
-Native Codex sessions use a pinned CLI image and scoped per-task authentication.
-See [native Codex setup and diagnostics](docs/native-codex.md) for agent profiles
-and authentication. [Unattended queue execution](docs/native-queue.md) covers
-dispatch, validation, publication, cancellation and recovery.
-
-The independent runner has its own verification entry point:
-
-```sh
-python -m vibearr_runner.verify
-python -m vibearr_runner.verify --boundary --executor-image sha256:<id> --database-image sha256:<id>
-```
-
-Boundary checks must pass on the intended execution host. Portable tests alone
-do not establish that an agent environment works in deployment. The independent
-[OCI executor](docs/isolated-executor.md) owns engine access, registered immutable
-profiles, and automated host qualification; the supervisor uses its authenticated
-control API. Runtime readiness is separate from native coding-agent readiness.
-
-The [isolated validation profile](docs/isolated-validation.md) tests exact committed
-trees in fresh containers and disposable databases. It keeps required commands
-outside candidate control and builds dependency changes without touching the live
-installation.
-
-The [automatic merge guide](docs/automatic-merge.md) describes exact-head CI,
-explicit no-bypass repository setup, and recovery through issue
-completion. PR-only delivery remains the default until those gates qualify.
+Native agent integrations use pinned CLI images and explicitly selected connections.
+[Native Codex](docs/native-codex.md), [unattended execution](docs/native-queue.md),
+[validation](docs/isolated-validation.md) and [automatic merge](docs/automatic-merge.md)
+describe the retained contracts. Their host-launcher implementation references
+cannot qualify Docker-only execution. D1–D4 must pass the actual worker boundary
+and dependent two-issue scenario before enabling claims.
 
 ## Keeping your data
 
@@ -252,11 +222,9 @@ PostgreSQL data lives in the `postgres-data` volume. `docker compose down` keeps
 it; adding `--volumes` removes it. Runner state lives in `runner-data` and must be
 preserved to recover unfinished work.
 
-Back up the database:
-
-```sh
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > backup.sql
-```
+The Docker-only backup job writes database and runner backups into a dedicated
+backup volume and tests restoration in a disposable Compose project. Host export
+is an explicit operator-selected Docker copy, not an application background write.
 
 Keep `.env` and tokens out of Git. Back up `VIBEARR_CREDENTIAL_KEY` separately from the
 database: losing the key makes saved credentials unreadable. Stop the runner

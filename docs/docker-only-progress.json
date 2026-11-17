@@ -1,0 +1,63 @@
+{
+  "branch": "feat/docker-runtime-finalization",
+  "status": "final-review-in-progress",
+  "pull_request": "https://github.com/innateessence/nightly-queue/pull/135",
+  "autonomous_execution_qualified": false,
+  "runtime_constraints": {
+    "agent": "Pinned Codex with a dedicated API key; session, Claude and OpenCode profiles are not installed",
+    "worker_model": "Reusable preprovisioned slots with a separate task UID and per-boot qualification",
+    "project_limits": "Must match the actual registered slot; smaller requested ceilings are rejected"
+  },
+  "completed_foundations": [
+    "Immutable application/tools/worker/supervisor images",
+    "Private named-volume credentials with restart preservation and conflict rejection",
+    "Read-only Compose application, broker, database, importer and migration startup",
+    "Preprovisioned worker slots, proxies, isolated database slots and authenticated gateway",
+    "Fixed slot resource matching and rejection of host-executor qualification",
+    "Task UID/capability dropping, descendant control and writable-store/IPC reset",
+    "Boot-bound worker qualification with authenticated control and forced-restart reconciliation",
+    "Run-scoped sealed dependency artifacts transferred from setup to validation without image builds",
+    "All nine fixed validation checks connected to exact disposable source snapshots",
+    "Docker identity bootstrap with explicit credential grants and no implicit token rotation",
+    "PostgreSQL 17 backup and empty-target restoration with retired controller authority",
+    "Pinned Chromium browser job with actual desktop/mobile light/dark PNGs",
+    "Container-only CI with protected Docker recipes and exact candidate Git input",
+    "Persistent generation-bound controller drain and archived authority after restore",
+    "Schema-2 native receipts bound to the original worker instance and boot",
+    "Container-native fixture recovery and cancellation acceptance tooling",
+    "Source-bound Docker browser receipts, private run collection and explicit artifact import"
+  ],
+  "verified": [
+    "Isolated Compose application and three worker services started",
+    "Rendered Compose audit rejected no boundary violations",
+    "Ten real Docker foundation probes passed (see acceptance/docker-foundation.json)",
+    "122 focused regression tests passed",
+    "966 application tests passed against the isolated PostgreSQL stack",
+    "All eleven qualification checks passed on each of the three worker phases",
+    "Actual kernel OOM and subsequent slot reuse passed in a disposable 384 MiB slot",
+    "All nine checks passed through worker APIs, including the complete 2018-test Django discovery",
+    "All nine checks passed again after building and transferring a changed-dependency artifact",
+    "199 executor tests, four offline distribution tests and 31 review regression tests passed",
+    "Operator inspection of actual running containers found no declared boundary violations",
+    "976 application tests and 19 focused initialization/filesystem/environment tests passed",
+    "Docker CLI authenticated using the private token volume",
+    "Disposable backup/restore preserved 32 table fingerprints, credential decryption, queue and run history",
+    "Restored API rejected the retired token and accepted a new identity with processing disabled",
+    "Broker restart and graceful shutdown passed after correcting scoped entrypoint capabilities",
+    "Four real Chromium PNGs passed desktop/mobile and theme checks without page errors or failed requests",
+    "Black, Ruff and mypy passed in the immutable tools container",
+    "Disposable controller drain and backup/restore passed with the old journal archived",
+    "All nine checks and changed-dependency validation passed in the a9 disposable worker run",
+    "All five GitHub CI jobs passed at candidate 32b2b9e9788c0fe57a8fe627ef0efa7cd3e8c134 using introduction 39adbf4b12b7614ab37f0e97b583ba62a14b3132",
+    "Exact candidate 88e3a641ea520e99bc71ae58bc3c20b9352ec6ab passed disposable browser, drain, backup and fenced restoration",
+    "Four schema-2 screenshots passed source/image/hash collection using a synthetic run UUID; desktop light and mobile dark were visually inspected",
+    "The documented Docker-copy import and private collection roundtrip passed in a separate disposable volume",
+    "68 focused browser, queue, bootstrap and native fixture tests passed with Black, Ruff, mypy, ShellCheck and Actionlint after review hardening"
+  ],
+  "remaining": [
+    "Pass exact-candidate CI with the trusted recipe updated to include the final hardening fixes",
+    "Run the explicit native fixture on the selected deployment and model account before claiming native task acceptance",
+    "Run real dependent two-issue acceptance and qualification on the actual deployment before enabling claims",
+    "Complete the final P2-or-higher review/fix loop"
+  ]
+}

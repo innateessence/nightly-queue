@@ -2,10 +2,12 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from uuid import uuid4
 from unittest.mock import Mock, patch
 
 from vibearr_runner.journal import Journal
 from vibearr_runner import queue_acceptance
+from vibearr_runner.self_acceptance import restart_evidence
 
 
 class QueueAcceptanceTests(unittest.TestCase):
@@ -155,3 +157,76 @@ class QueueAcceptanceTests(unittest.TestCase):
         self.assertEqual(result["project_id"], 2)
         self.assertEqual(result["issue_number"], 9)
         self.assertEqual(result["waypoint"], "pr-verified")
+
+
+class SlotRestartEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.identity = {
+            "runtime": "compose-slot-v2",
+            "protocol_version": 2,
+            "instance_id": str(uuid4()),
+            "worker_boot": str(uuid4()),
+            "binding_digest": "b" * 64,
+        }
+        self.agent, self.validation, self.run = (str(uuid4()) for _ in range(3))
+        self.record = {
+            "run_id": self.run,
+            "agent": {
+                "receipt": {
+                    "operation_id": self.agent,
+                    "execution_identity": self.identity,
+                }
+            },
+            "validation": {
+                "checks": [
+                    {
+                        "receipt": {
+                            "operation_id": self.validation,
+                            "execution_identity": self.identity,
+                        }
+                    }
+                ]
+            },
+        }
+        observations = {}
+        for operation, phase in (
+            (self.agent, "agent"),
+            (self.validation, "validation"),
+        ):
+            observations[operation] = [
+                {
+                    "pid": pid,
+                    "run_id": self.run,
+                    "state": "running",
+                    "phase": phase,
+                    "operation_id": operation,
+                    "execution_identity": self.identity,
+                }
+                for pid in (10, 20)
+            ]
+        self.receipt = {
+            "executor_observations": observations,
+            "reporting_acknowledged": True,
+            "restarts": {},
+        }
+
+    def test_independent_supervisors_observe_the_same_actual_worker_boot(self):
+        self.assertIn(
+            "executor_observations", restart_evidence(self.record, self.receipt)
+        )
+
+    def test_validation_on_a_different_boot_cannot_satisfy_restart_acceptance(self):
+        observations = self.receipt["executor_observations"][self.validation]
+        observations[1]["execution_identity"] = {
+            **self.identity,
+            "worker_boot": str(uuid4()),
+        }
+        with self.assertRaisesRegex(ValueError, "same worker boot"):
+            restart_evidence(self.record, self.receipt)
+
+    def test_missing_worker_identity_cannot_be_accepted_as_two_matching_null_values(
+        self,
+    ):
+        self.record["agent"]["receipt"].pop("execution_identity")
+        with self.assertRaises(ValueError):
+            restart_evidence(self.record, self.receipt)

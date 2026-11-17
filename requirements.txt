@@ -6,3 +6,5 @@ black==25.1.0
 mypy==1.13.0
 django-stubs==4.2.0
 ruff==0.5.5
+gunicorn==27.0.1
+whitenoise==6.12.0

@@ -12,7 +12,7 @@ from vibearr_runner.policy import default_execution_policy
 
 EXECUTOR_INSTALLED = importlib.util.find_spec("vibearr_executor") is not None
 if EXECUTOR_INSTALLED:
-    from vibearr_executor import QUALIFICATION_VERSION
+    from vibearr_executor import SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION
     from vibearr_executor.artifacts import pack, result_manifest
     from vibearr_executor.contracts import Conflict
 
@@ -37,19 +37,20 @@ class ExecutorFixture:
         self.state = "not-started"
         self.receipt = None
         self.qualified = True
+        self.accepting_work = True
         self.qualification_version = QUALIFICATION_VERSION
         self.binding_digest = "b" * 64
         self.export_unchanged = False
 
     def capabilities(self):
         return {
-            "runtime": "docker-oci-v1",
+            "runtime": "compose-slot-v2",
             "schema_version": 1,
-            "protocol_version": 1,
+            "protocol_version": 2,
             "qualification_version": self.qualification_version,
             "binding_digest": self.binding_digest,
             "qualified": self.qualified,
-            "accepting_work": True,
+            "accepting_work": self.accepting_work,
             "profiles": [
                 {**self.profile.data(), "profile_digest": self.profile.digest}
             ],
@@ -158,13 +159,11 @@ class NativeCodexTests(unittest.TestCase):
         )
         self.assertNotIn(TOKEN, json.dumps(session.to_data()))
 
-    def test_manifest_uses_policy_limits_below_operator_ceiling(self):
+    def test_smaller_policy_limits_require_a_matching_fixed_worker_slot(self):
         self.policy.update(cpu_limit=1, memory_mb=1024, pids_limit=32, workspace_mb=256)
-        session = self.prepare()
-        self.assertEqual(
-            session.manifest["limits"],
-            {"cpu": 1, "memory_mb": 1024, "pids": 32, "workspace_mb": 256},
-        )
+        with self.assertRaises(NativeSessionError):
+            self.prepare()
+        self.assertFalse(self.client.prepared)
 
     def test_unqualified_runtime_cannot_prepare_native_work(self):
         self.client.qualified = False
@@ -219,6 +218,20 @@ class NativeCodexTests(unittest.TestCase):
         second = self.adapter.start(session)
         self.assertEqual(first["container_id"], second["container_id"])
         self.assertEqual(self.client.starts, 1)
+
+    def test_retry_of_running_work_is_allowed_when_the_fleet_has_no_new_capacity(self):
+        session = self.prepare()
+        self.adapter.start(session)
+        self.client.accepting_work = False
+        self.assertEqual(self.adapter.start(session)["state"], "running")
+        self.assertEqual(self.client.starts, 1)
+
+    def test_busy_fleet_cannot_start_an_unstarted_operation(self):
+        session = self.prepare()
+        self.client.accepting_work = False
+        with self.assertRaisesRegex(NativeSessionError, "capacity"):
+            self.adapter.start(session)
+        self.assertEqual(self.client.starts, 0)
 
     def test_recovery_round_trip_reconciles_same_operation(self):
         session = self.prepare()

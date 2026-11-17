@@ -7,6 +7,17 @@ owns it so an implementation issue can be written without inventing new policy.
 
 ## What counts as an MVP
 
+The [Docker-only runtime contract](docker-only-runtime-plan.md) is mandatory.
+Every service, coding CLI, test, migration, qualification, browser, backup and
+recovery tool runs in Docker. No host-installed runtime/tools, systemd/cron,
+lingering, host configuration changes, host socket/API credentials, privileged
+containers, host namespaces or arbitrary host path mounts. Compose owns service
+lifecycle and named volumes. This supersedes previous host-executor signoffs.
+
+The current deployment code needs correction branches D1–D4 before native work
+can qualify. Keep claims disabled; a plan change is not permission to resume
+paid execution or deploy an incomplete replacement.
+
 An owner creates two small development issues in this repository. The second
 depends on the first. With the services running, vibearr discovers the issues,
 implements the first, independently validates it, creates a PR, waits for required
@@ -27,10 +38,13 @@ upgrade. The MVP must be capable of implementing feature 12 through its own queu
 
 ## Build order and ownership
 
+Docker corrections D1–D4 are release-blocking; the table retains original feature
+ownership, not permission to accept a host-based implementation.
+
 | Order | Feature | Required result before moving on |
 | --- | --- | --- |
 | 1 | 01 — execution policy | Native-run configuration and evidence contracts; old approval waits cannot execute |
-| 2 | 02 — isolated runtime | Real task launch, status, logs, stop, restart reconciliation, and isolation on the intended Linux host |
+| 2 | 02 — isolated runtime | Real task launch, status, logs, stop, restart reconciliation, and isolation in the Docker-only worker stack |
 | 3a | 03 — native Codex | One genuine noninteractive editing session with usable auth and a recorded outcome |
 | 3b | 15 — isolated validation | A disposable PostgreSQL-backed test profile usable without an agent or Docker socket inside the task |
 | 3c | 05 — issue selection | Only permitted, ready, dependency-satisfied work can be claimed |
@@ -39,7 +53,7 @@ upgrade. The MVP must be capable of implementing feature 12 through its own queu
 | 6 | 07 — merge | Exact-head checks and merge reconciliation complete the two-issue scenario |
 
 Features 03 and 15 depend on 02; 05 depends on 01. They are separate branches.
-Features 01–07 plus 15 are the MVP, with no requirement to land the full rename
+Features 01–07 plus 15 and Docker corrections D1–D4 are the MVP, with no requirement to land the full rename
 first. Product branding is vibearr now; feature 00 completes executable, package,
 and deployment naming after the execution path is stable. Bootstrap uses actual
 configured names and stable IDs rather than assuming the repository was renamed.
@@ -86,70 +100,43 @@ bypass; using an owner's token must not silently turn that into the merge policy
 Startup diagnostics verify the chosen actor and required rules, not just that a
 token has write access.
 
-## Task environment: choose one supported deployment
+## Task environment: Docker-only worker slots
 
-Feature 02 implements an OCI task container launched through a trusted executor
-using the existing Docker tooling on a designated Linux runner host. Do not spend
-the MVP trying to nest bubblewrap inside the current hardened runner container.
-The old namespace implementation can remain for historical tests, but it is not
-the native execution path and cannot accidentally determine its readiness.
+Compose preprovisions a fixed agent slot, a separate credential-free setup slot,
+a validation slot, private proxies and separate test PostgreSQL slots. The
+supervisor calls authenticated worker APIs. No runtime component controls the
+host daemon or launches containers, and no service gets a Docker socket or
+privileged Docker-in-Docker capability.
 
-The executor is a small, authenticated service on the supervisor's control
-network. It is the only component allowed to access the container engine. It
-accepts registered image/profile IDs and run-owned workspace handles, not arbitrary
-Docker arguments, host paths, mounts, or shell commands. It derives paths under
-its private state root and journals container IDs before returning launch results.
-Its engine access makes it a trusted host component; deploy it on a dedicated
-runner host and keep its API and engine socket outside every task environment.
+Trusted worker PID 1 validates registered recipes, imports bounded verified
+source/context, runs task code under a different unprivileged UID, seals receipts
+and confirms all descendants stopped. Reset all workspace, Git metadata, HOME,
+caches, credentials and test data before the next job. Slot reuse is not a fresh
+container; actual cross-job isolation and boot/operation reconciliation must pass.
+Unknown stop or lost result retains the fence and cannot become success.
 
-Use a read-only image root, an unprivileged task user, bounded writable workspace,
-temporary HOME, CPU/memory/PID/storage limits, and no host namespaces, privileges,
-production mounts, engine socket, or control-plane credentials. Each run gets its
-own network and disposable test database. The supervisor prepares a private Git
-checkout; the agent gets a separate copy and its own disposable Git metadata.
-After the agent stops, import verified file changes into the supervisor checkout.
-Do not trust agent-controlled hooks, Git config, refs, archives, or filesystem
-links when committing or publishing. Include additions, deletions, modes, and
-symlink/path rejection in change-import tests.
+Use read-only pinned images, named volumes, bounded tmpfs and actual Compose
+resource ceilings. A requested limit the slot cannot enforce requires a matching
+slot or rejection. Restrict task networking to its registered public proxy and
+its own test DB; deny host/LAN/metadata, production and control-plane destinations.
+No task capabilities, privilege escalation, host namespaces, devices or host paths.
 
-Agent traffic leaves through an executor-managed egress proxy with an explicit
-model/package endpoint allowlist. Deny direct egress and host, LAN, metadata,
-control-plane, production DB, and broker addresses, including DNS rebinding and
-IPv6 paths. Permit only that run's disposable test DB when needed. The validation
-phase has no model credential and no external network. Prebuild its dependencies
-in a pinned image; feature 15 defines how dependency changes create a replacement
-image in the same isolated build boundary. No task gets to start containers.
+The supervisor's Git checkout and journal stay private to its volume. Agents get
+verified source copies and disposable Git metadata. Git publication stays with
+trusted supervisor code. Never import task-controlled hooks/config/refs or unsafe
+archive paths. Credentials come from explicitly saved connections, not host homes
+or inherited agent logins. Model credentials may be visible to their own CLI tools;
+record that residual exposure without passing control-plane secrets to the task.
 
-A native CLI may expose its backend credential to its own tools. For the first
-release, use a dedicated backend account/key with provider-side spending limits
-where available, redact known credential values, and record this residual exposure.
-Do not claim isolation of the key from tool code unless a real credential broker
-provides it. Local time/attempt limits cannot guarantee a dollar cap.
+Retain retry-stable prepare/start/status/logs/stop/export, operation identity,
+deadlines, immutable context, verified change import and protected termination
+receipts. Version the changed runtime and worker-boot evidence. Qualification code
+runs in containers and can execute before a production claim or paid model call.
+Old direct-host launcher reports cannot qualify this architecture.
 
-The executor contract is retry-stable `start(run_id, operation_id, profile_id)`,
-`status(operation_id)`, bounded log reads, and idempotent `stop(operation_id)`.
-Status distinguishes not-started, running, exited with code, and unknown. A lost
-launch response is resolved by lookup, not by starting another container. Stop
-must establish that the complete task container and descendants are gone. Add
-this path to `coding_runner.verify --boundary` with a versioned runtime/profile
-report. Qualification is an automated deployment check, not an approval screen.
-
-Before start, a retry-stable prepare operation registers a versioned job manifest:
-run/operation identity, base/source artifact digest, immutable image/profile IDs,
-context/prompt artifact digest, phase, resource limits, and deadline. A bounded
-upload stores source bytes under an executor-generated handle. Reject archive
-traversal, external links, device files, and agent Git metadata. Supervisor policy
-selects the phase's fixed launch recipe; the request cannot replace its executable
-or mounts. Reusing an operation ID with a different manifest is a conflict.
-
-Deliver only the selected backend secret through the authenticated control channel
-to a private per-run secret file, never a logged manifest or shared environment.
-Delete it when the agent container stops. Validation/build manifests cannot select
-backend credentials. Result readback includes exit/termination evidence, bounded
-event/log artifacts, and an export of changed source files with a digest manifest.
-The supervisor verifies that export before importing it; it never extracts an
-unvalidated archive into its checkout. This supplies code, prompts, credentials,
-and results without requiring an agent-visible shared control directory.
+The [Docker-only plan](docker-only-runtime-plan.md) specifies D1–D4, dependency
+artifacts, database resets, operator tools and release gates. No host-runner,
+engine-socket or manual-approval fallback is supported.
 
 ## Work selection and context
 
@@ -208,9 +195,8 @@ or the agent's statement that it finished. A plan may be a short saved artifact;
 a second research model call is not mandatory.
 
 Feature 01 defines and 04 implements a version 2 native delivery contract. The
-current `runner_control/delivery.py` requires a plan handoff and consumed human
-approval records for each validation command. That validator cannot be reused
-unchanged. Keep version 1 historical readback; do not forge approvals or route
+original proposal validator required a plan handoff and consumed human approval
+records for every command. It cannot qualify native or Docker-only execution. Keep version 1 historical readback; do not forge approvals or route
 native evidence through proposal-only validation. Reject mixed-version writes.
 
 The trusted supervisor's version 2 evidence binds:
@@ -234,12 +220,12 @@ Feature 15 supplies the trusted validation profile before 04 integrates it. The
 profile is selected from configured immutable manifests outside the candidate
 checkout. For this repository it includes Black, Ruff, mypy, migration/system
 checks, Django tests with a fresh PostgreSQL DB, CLI tests, portable runner tests,
-and Git acceptance. Deployment boundary checks run through the executor on the
-designated host, never as nested Docker calls inside the agent. Record checks
+and Git acceptance. Boundary checks run in qualification containers against the
+actual worker stack, with no host Python or nested daemon inside an agent. Record checks
 that are inapplicable with an explicit profile rule; do not accept arbitrary skips.
 
 Run validation in a fresh environment without backend/GitHub credentials. Use
-throwaway DB credentials and ports/volumes unique to the run. Execute against the
+throwaway DB credentials and databases/roles unique to the run on isolated test slots. Execute against the
 candidate source, but select commands and required check IDs from the trusted
 profile. Candidate edits to `test.sh`, workflows, or validation manifests do not
 silently weaken the running profile. Qualify a changed profile separately before
@@ -285,7 +271,7 @@ slot and let independent work proceed.
 
 | Event | Required behavior |
 | --- | --- |
-| Pause/schedule closes | Stop new launches, checkpoint/stop the current container, preserve workspace and ownership; resume only after confirmed termination |
+| Pause/schedule closes | Stop new launches, checkpoint/stop the task process tree, preserve workspace and ownership; resume only after confirmed termination |
 | Cancel/issue closes/hold | Terminate descendants, preserve evidence, finish without delivery; cancellation racing with a completed merge reports the actual merge |
 | Failed validation | Feed diagnostics to the same task within the shared repair budget, then fail with useful logs |
 | No diff or no meaningful change | Fail with a no-change reason; no fabricated commit, PR, or issue closure in the MVP |
@@ -366,7 +352,7 @@ below. Do not publish tasks or make paid calls while merely editing this plan.
 | --- | --- |
 | Normal two-issue loop | Issue IDs, discovery timestamps, distinct runs/branches/PRs, real sessions, validation manifests, check SHAs, merge SHAs, and B's base containing A |
 | No human gates | No approval records consumed, no ready-label transition, and no manual command/plan/merge decisions during the run |
-| Isolation | Actual host tests deny task access to engine/control-plane/production resources and verify descendant termination and egress policy |
+| Isolation | Actual containerized probes deny host/engine/control-plane/production access and verify descendant termination, cross-job reset and egress policy |
 | Validation failure | A real nonzero test exit prevents delivery/merge, repairs are bounded, and the next independent task can run |
 | Interrupted execution | Restart after launch response loss and during agent/validation work; the same operation is reconciled, with no duplicate active process |
 | Interrupted delivery | Restart after push, PR creation, merge, and completion reporting; exactly one PR/merge and accurate issue state remain |
@@ -393,4 +379,4 @@ implementation acceptance work, not unresolved product-policy decisions.
 - [GitHub pull request merge API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)
   documents the expected-head-SHA guard and merge outcomes.
 - [Docker Engine security](https://docs.docker.com/engine/security/)
-  explains why engine access belongs to a trusted host component.
+  explains daemon authority and why runtime services must not receive the host socket.
