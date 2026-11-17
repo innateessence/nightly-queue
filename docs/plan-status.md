@@ -1,7 +1,8 @@
 # vibearr plan status
 
 Snapshot: 2026-11-16. This is a point-in-time overview, not a live status page.
-UI work branch: `feat/mvp-operations-ui`. No merges or runtime changes are part of this branch.
+UI work branch: `feat/mvp-operations-ui`, pushed for review in [PR #134](https://github.com/innateessence/nightly-queue/pull/134).
+No merges or runtime changes are part of this branch.
 
 The core automation code is merged. The remaining MVP work is making the entire
 loop Docker-only and proving it works end to end.
