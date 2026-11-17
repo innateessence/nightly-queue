@@ -1,168 +1,469 @@
 name: "${COMPOSE_PROJECT_NAME:-nightly-queue}"
 
-x-database-environment: &database-environment
-  VIBEARR_POSTGRES_DB: "${VIBEARR_POSTGRES_DB-${POSTGRES_DB-nightly_queue}}"
-  POSTGRES_DB: "${POSTGRES_DB-${VIBEARR_POSTGRES_DB-nightly_queue}}"
-  VIBEARR_POSTGRES_USER: "${VIBEARR_POSTGRES_USER-${POSTGRES_USER-nightly_queue}}"
-  POSTGRES_USER: "${POSTGRES_USER-${VIBEARR_POSTGRES_USER-nightly_queue}}"
-  VIBEARR_POSTGRES_PASSWORD: "${VIBEARR_POSTGRES_PASSWORD-${POSTGRES_PASSWORD-nightly_queue}}"
-  POSTGRES_PASSWORD: "${POSTGRES_PASSWORD-${VIBEARR_POSTGRES_PASSWORD-nightly_queue}}"
-  POSTGRES_HOST: postgres
-  POSTGRES_PORT: "5432"
+x-security: &security
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 128
+  tmpfs: ["/tmp:rw,nosuid,nodev,size=128m"]
+  restart: unless-stopped
+
+x-application: &application
+  <<: *security
+  build: {context: ., target: application}
+  image: "${VIBEARR_APP_IMAGE:-vibearr-app:local}"
+  environment: &app-environment
+    DJANGO_DEBUG: "False"
+    DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-*}"
+    VIBEARR_POSTGRES_DB: "${VIBEARR_POSTGRES_DB-${POSTGRES_DB-nightly_queue}}"
+    VIBEARR_POSTGRES_USER: "${VIBEARR_POSTGRES_USER-${POSTGRES_USER-nightly_queue}}"
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    CELERY_BROKER_URL: redis://valkey:6379/0
+    CELERY_RESULT_BACKEND: redis://valkey:6379/1
+  volumes:
+    - application-secrets:/run/vibearr/application:ro
+    - database-secrets:/run/vibearr/database:ro
+  networks: [application]
+
+x-slot: &slot
+  <<: *security
+  profiles: [runner]
+  build: {context: ., dockerfile: vibearr_executor/Slot.Dockerfile, target: worker}
+  image: "${VIBEARR_WORKER_IMAGE:-vibearr-worker:local}"
+  user: "0:0"
+  cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETUID, SETGID, SETPCAP, NET_ADMIN]
+  cpus: 2
+  mem_limit: 4096m
+  memswap_limit: 4096m
+  stop_grace_period: 30s
+  tmpfs:
+    - "/work:rw,nosuid,nodev,exec,size=2048m,uid=1000,gid=1000,mode=0700"
+    - "/home/task:rw,nosuid,nodev,exec,size=32m,uid=1000,gid=1000,mode=0700"
+    - "/tmp:rw,nosuid,nodev,exec,size=64m,mode=1777"
+    - "/input:rw,nosuid,nodev,noexec,size=40m,mode=0711"
+    - "/secrets:rw,nosuid,nodev,noexec,size=64k,mode=0711"
+    - "/opt/candidate:rw,nosuid,nodev,exec,size=512m,mode=0755"
+  healthcheck:
+    test: [CMD, python, -I, -m, vibearr_executor.slot_health]
+    interval: 10s
+    timeout: 5s
+    retries: 12
+
+x-test-database: &test-database
+  <<: *security
+  profiles: [runner]
+  image: postgres:17@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
+  cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
+  mem_limit: 512m
+  memswap_limit: 512m
+  cpus: 1
+  environment:
+    POSTGRES_PASSWORD_FILE: /run/database/password
+  tmpfs:
+    - "/var/lib/postgresql/data:rw,nosuid,nodev,size=1024m,uid=999,gid=999,mode=0700"
+    - "/var/run/postgresql:rw,nosuid,nodev,size=16m"
+    - "/tmp:rw,nosuid,nodev,size=32m"
+  depends_on:
+    initialize: {condition: service_completed_successfully}
+  healthcheck:
+    test: [CMD, pg_isready, -h, 127.0.0.1, -U, postgres]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+
+x-backup: &backup
+  <<: *security
+  profiles: [operations]
+  build: {context: ., dockerfile: deploy/docker/Backup.Dockerfile}
+  image: "${VIBEARR_BACKUP_IMAGE:-vibearr-backup:local}"
+  user: "0:0"
+  cap_add: [DAC_OVERRIDE, CHOWN, FOWNER]
+  restart: "no"
+  mem_limit: 1024m
+  memswap_limit: 1024m
+  cpus: 1
+  tmpfs:
+    - "/tmp:rw,nosuid,nodev,size=64m"
+    - "/var/lib/postgresql/data:rw,nosuid,nodev,noexec,size=1m"
+  environment:
+    VIBEARR_POSTGRES_DB: "${VIBEARR_POSTGRES_DB-${POSTGRES_DB-nightly_queue}}"
+    VIBEARR_POSTGRES_USER: "${VIBEARR_POSTGRES_USER-${POSTGRES_USER-nightly_queue}}"
+  networks: [application]
 
 services:
-
-  vibearr:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: vibearr-app
-    ports:
-      - "${PORT:-7777}:8000"
+  initialize:
+    <<: *security
+    build: {context: ., target: tools}
+    image: "${VIBEARR_TOOLS_IMAGE:-vibearr-tools:local}"
+    user: "0:0"
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
+    restart: "no"
+    entrypoint: [python, -m, deploy.docker.initialize]
     environment:
-      <<: *database-environment
-      DJANGO_ALLOWED_HOSTS: "*"
+      VIBEARR_POSTGRES_PASSWORD: "${VIBEARR_POSTGRES_PASSWORD-${POSTGRES_PASSWORD-}}"
       VIBEARR_API_TOKEN: "${VIBEARR_API_TOKEN-${NQ_API_TOKEN-}}"
-      NQ_API_TOKEN: "${NQ_API_TOKEN-${VIBEARR_API_TOKEN-}}"
       VIBEARR_CREDENTIAL_KEY: "${VIBEARR_CREDENTIAL_KEY-${NQ_CREDENTIAL_KEY-}}"
-      NQ_CREDENTIAL_KEY: "${NQ_CREDENTIAL_KEY-${VIBEARR_CREDENTIAL_KEY-}}"
-      CELERY_BROKER_URL: "redis://valkey:6379/0"
-      CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      valkey:
-        condition: service_healthy
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY-}"
     volumes:
-      - ./:/app
-    networks:
-      default:
-      runner-api:
-        aliases: [nightly-queue]
+      - application-secrets:/run/vibearr/application
+      - database-secrets:/run/vibearr/database
+      - runner-secrets:/run/vibearr/runner
+      - agent-secrets:/run/vibearr/agent
+      - setup-secrets:/run/vibearr/setup
+      - validation-secrets:/run/vibearr/validation
+      - agent-database-secrets:/run/vibearr/agent-database
+      - validation-database-secrets:/run/vibearr/validation-database
+      - runner-data:/var/lib/vibearr
+      - backup-data:/var/lib/vibearr-backups
+      - gateway-data:/var/lib/gateway
+      - postgres-data:/var/lib/existing-postgres:ro
+      - browser-artifacts:/var/lib/vibearr-browser
+      - check-artifacts:/var/lib/vibearr-checks
+    network_mode: none
 
   postgres:
-    image: postgres:17
+    <<: *security
+    image: postgres:17@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
     environment:
       POSTGRES_DB: "${VIBEARR_POSTGRES_DB-${POSTGRES_DB-nightly_queue}}"
       POSTGRES_USER: "${VIBEARR_POSTGRES_USER-${POSTGRES_USER-nightly_queue}}"
-      POSTGRES_PASSWORD: "${VIBEARR_POSTGRES_PASSWORD-${POSTGRES_PASSWORD-nightly_queue}}"
+      POSTGRES_PASSWORD_FILE: /run/vibearr/database/password
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - database-secrets:/run/vibearr/database:ro
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=64m", "/var/run/postgresql:rw,nosuid,nodev,size=16m"]
+    networks: [application]
+    depends_on:
+      initialize: {condition: service_completed_successfully}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
 
   valkey:
-    image: valkey/valkey:8-alpine
-    command: ["valkey-server", "--appendonly", "yes"]
-    volumes:
-      - valkey-data:/data
+    <<: *security
+    image: valkey/valkey:8-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a
+    cap_add: [CHOWN, DAC_OVERRIDE, KILL, SETUID, SETGID]
+    command: [valkey-server, --appendonly, "yes"]
+    volumes: [valkey-data:/data]
+    networks: [application]
     healthcheck:
-      test: ["CMD", "valkey-cli", "PING"]
+      test: [CMD, valkey-cli, ping]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
+
+  migrate:
+    <<: *application
+    restart: "no"
+    command: [python, manage.py, migrate, --noinput]
+    depends_on:
+      postgres: {condition: service_healthy}
+      valkey: {condition: service_healthy}
+
+  vibearr:
+    <<: *application
+    ports: ["${VIBEARR_BIND:-127.0.0.1}:${PORT:-7777}:8000"]
+    networks: [application, queue-control]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -m, deploy.docker.health]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
 
   celery-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: vibearr-app
-    command: ["celery", "-A", "vibearr_app", "worker", "--loglevel=INFO", "-n", "worker@%h"]
-    environment:
-      <<: *database-environment
-      DJANGO_SETTINGS_MODULE: "vibearr_app.settings"
-      VIBEARR_CREDENTIAL_KEY: "${VIBEARR_CREDENTIAL_KEY-${NQ_CREDENTIAL_KEY-}}"
-      NQ_CREDENTIAL_KEY: "${NQ_CREDENTIAL_KEY-${VIBEARR_CREDENTIAL_KEY-}}"
-      CELERY_BROKER_URL: "redis://valkey:6379/0"
-      CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
+    <<: *application
+    command: [celery, -A, vibearr_app, worker, --loglevel=INFO, --concurrency=2, -n, worker@%h]
     depends_on:
-      postgres:
-        condition: service_healthy
-      valkey:
-        condition: service_healthy
+      vibearr: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, 'celery -A vibearr_app inspect ping --destination "worker@$${HOSTNAME}" --timeout 3 | grep -q pong']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  agent-database:
+    <<: *test-database
+    volumes: [agent-database-secrets:/run/database:ro]
+    networks: [agent-jobs]
+
+  validation-database:
+    <<: *test-database
+    volumes: [validation-database-secrets:/run/database:ro]
+    networks: [validation-jobs]
+
+  agent-worker:
+    <<: *slot
+    build: {context: ., dockerfile: vibearr_executor/Slot.Dockerfile, target: agent}
+    image: "${VIBEARR_AGENT_IMAGE:-vibearr-agent:local}"
+    environment:
+      VIBEARR_SLOT_PHASE: agent
+      VIBEARR_SLOT_IMAGE_ID: "${VIBEARR_AGENT_IMAGE_ID:-}"
+      VIBEARR_TEST_DATABASE_IMAGE_ID: "${VIBEARR_DATABASE_IMAGE_ID:-}"
+      VIBEARR_TEST_DATABASE: agent-database
     volumes:
-      - ./:/app
+      - agent-control:/control
+      - agent-secrets:/run/vibearr:ro
+      - agent-database-secrets:/run/database:ro
+    networks: [worker-control, agent-jobs]
+    depends_on:
+      agent-database: {condition: service_healthy}
+      model-proxy: {condition: service_started}
+
+  setup-worker:
+    <<: *slot
+    environment:
+      VIBEARR_SLOT_PHASE: setup
+      VIBEARR_SLOT_IMAGE_ID: "${VIBEARR_WORKER_IMAGE_ID:-}"
+      VIBEARR_TEST_DATABASE_IMAGE_ID: "${VIBEARR_DATABASE_IMAGE_ID:-}"
+    volumes:
+      - setup-control:/control
+      - setup-secrets:/run/vibearr:ro
+    networks: [worker-control, setup-jobs]
+    depends_on:
+      initialize: {condition: service_completed_successfully}
+      package-proxy: {condition: service_started}
+
+  validation-worker:
+    <<: *slot
+    environment:
+      VIBEARR_SLOT_PHASE: validation
+      VIBEARR_SLOT_IMAGE_ID: "${VIBEARR_WORKER_IMAGE_ID:-}"
+      VIBEARR_TEST_DATABASE_IMAGE_ID: "${VIBEARR_DATABASE_IMAGE_ID:-}"
+      VIBEARR_TEST_DATABASE: validation-database
+    volumes:
+      - validation-control:/control
+      - validation-secrets:/run/vibearr:ro
+      - validation-database-secrets:/run/database:ro
+    networks: [worker-control, validation-jobs]
+    depends_on:
+      validation-database: {condition: service_healthy}
+
+  worker-gateway:
+    <<: *security
+    profiles: [runner]
+    build: {context: ., dockerfile: vibearr_runner/Dockerfile}
+    image: "${VIBEARR_RUNNER_IMAGE:-vibearr-runner:local}"
+    entrypoint: [python, -m, vibearr_executor.slot_gateway]
+    environment:
+      VIBEARR_RUNTIME_PROTOCOL: compose-slot-v2
+      VIBEARR_EXECUTOR_TOKEN_FILE: /run/vibearr/runner/control-token
+    volumes:
+      - gateway-data:/var/lib/gateway
+      - runner-secrets:/run/vibearr/runner:ro
+      - agent-secrets:/run/slots/agent:ro
+      - setup-secrets:/run/slots/setup:ro
+      - validation-secrets:/run/slots/validation:ro
+    networks: [worker-control]
+    depends_on:
+      agent-worker: {condition: service_healthy}
+      setup-worker: {condition: service_healthy}
+      validation-worker: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -m, vibearr_executor.slot_health]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  model-proxy:
+    <<: *security
+    profiles: [runner]
+    image: "${VIBEARR_WORKER_IMAGE:-vibearr-worker:local}"
+    entrypoint: [python, -I, -m, vibearr_executor.slot_proxy]
+    user: "10001:10001"
+    environment: {VIBEARR_PROXY_PHASE: agent}
+    networks: [agent-jobs, proxy-egress]
+
+  package-proxy:
+    <<: *security
+    profiles: [runner]
+    image: "${VIBEARR_WORKER_IMAGE:-vibearr-worker:local}"
+    entrypoint: [python, -I, -m, vibearr_executor.slot_proxy]
+    user: "10001:10001"
+    environment: {VIBEARR_PROXY_PHASE: setup}
+    networks: [setup-jobs, proxy-egress]
+
+  foundation-check:
+    <<: *slot
+    profiles: [checks]
+    restart: "no"
+    entrypoint: [python, -I, -m, vibearr_executor.slot_acceptance]
+    environment:
+      VIBEARR_SLOT_IMAGE_ID: "${VIBEARR_WORKER_IMAGE_ID:-}"
+    network_mode: none
+    volumes: [foundation-control:/control]
+
+  qualification:
+    <<: *security
+    profiles: [checks]
+    restart: "no"
+    mem_limit: 2048m
+    memswap_limit: 2048m
+    cpus: 2
+    build: {context: ., target: tools}
+    image: "${VIBEARR_TOOLS_IMAGE:-vibearr-tools:local}"
+    entrypoint: [python, -m, deploy.docker.qualify]
+    command: [finish]
+    environment:
+      VIBEARR_RUNTIME_PROTOCOL: compose-slot-v2
+      VIBEARR_EXECUTOR_URL: http://worker-gateway:8791
+      VIBEARR_EXECUTOR_TOKEN_FILE: /run/vibearr/runner/control-token
+    networks: [worker-control]
+    volumes:
+      - runner-secrets:/run/vibearr/runner
+      - agent-secrets:/run/slots/agent:ro
+      - setup-secrets:/run/slots/setup:ro
+      - validation-secrets:/run/slots/validation:ro
+      - check-artifacts:/artifacts
+      - browser-artifacts:/screenshots:ro
+
+  resource-check:
+    <<: *slot
+    profiles: [checks]
+    restart: "no"
+    mem_limit: 384m
+    memswap_limit: 384m
+    entrypoint: [python, -I, -m, vibearr_executor.slot_resources]
+    environment:
+      VIBEARR_SLOT_IMAGE_ID: "${VIBEARR_WORKER_IMAGE_ID:-}"
+    network_mode: none
+    tmpfs:
+      - "/work:rw,nosuid,nodev,exec,size=32m,uid=1000,gid=1000,mode=0700"
+      - "/home/task:rw,nosuid,nodev,exec,size=4m,uid=1000,gid=1000,mode=0700"
+      - "/tmp:rw,nosuid,nodev,exec,size=16m,mode=1777"
+      - "/input:rw,nosuid,nodev,noexec,size=4m,mode=0711"
+      - "/secrets:rw,nosuid,nodev,noexec,size=64k,mode=0711"
+      - "/control:rw,nosuid,nodev,noexec,size=16m,mode=0700"
+      - "/opt/candidate:rw,nosuid,nodev,exec,size=4m,mode=0755"
 
   celery-beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: vibearr-app
-    command: ["celery", "-A", "vibearr_app", "beat", "--loglevel=INFO", "--schedule", "/tmp/celerybeat-schedule"]
-    environment:
-      <<: *database-environment
-      DJANGO_SETTINGS_MODULE: "vibearr_app.settings"
-      DJANGO_DEBUG: "False"
-      CELERY_BROKER_URL: "redis://valkey:6379/0"
-      CELERY_RESULT_BACKEND: "redis://valkey:6379/1"
+    <<: *application
+    command: [celery, -A, vibearr_app, beat, --loglevel=INFO, --schedule, /tmp/celerybeat-schedule]
     depends_on:
-      postgres:
-        condition: service_healthy
-      valkey:
-        condition: service_healthy
+      vibearr: {condition: service_healthy}
+
+  tools:
+    <<: *application
+    profiles: [tools]
+    restart: "no"
+    build: {context: ., target: tools}
+    image: "${VIBEARR_TOOLS_IMAGE:-vibearr-tools:local}"
+    mem_limit: 2048m
+    memswap_limit: 2048m
+    cpus: 2
+    tmpfs: ["/tmp:rw,nosuid,nodev,exec,size=1024m"]
+    command: [python, manage.py, check]
     volumes:
-      - ./:/app
+      - application-secrets:/run/vibearr/application:ro
+      - database-secrets:/run/vibearr/database:ro
+      - runner-secrets:/run/vibearr/runner
+      - backup-data:/var/lib/vibearr-backups
+      - runner-data:/var/lib/vibearr
+      - check-artifacts:/artifacts
+      - browser-artifacts:/screenshots:ro
+    depends_on:
+      vibearr: {condition: service_healthy}
+
+  backup:
+    <<: *backup
+    command: [backup]
+    volumes:
+      - backup-data:/var/lib/vibearr-backups
+      - application-secrets:/snapshot/application-secrets:ro
+      - database-secrets:/snapshot/database-secrets:ro
+      - runner-secrets:/snapshot/runner-secrets:ro
+      - runner-data:/snapshot/runner-data:ro
+      - agent-secrets:/snapshot/agent-secrets:ro
+      - setup-secrets:/snapshot/setup-secrets:ro
+      - validation-secrets:/snapshot/validation-secrets:ro
+      - agent-database-secrets:/snapshot/agent-database-secrets:ro
+      - validation-database-secrets:/snapshot/validation-database-secrets:ro
+      - agent-control:/snapshot/agent-control:ro
+      - setup-control:/snapshot/setup-control:ro
+      - validation-control:/snapshot/validation-control:ro
+      - gateway-data:/snapshot/gateway-data:ro
+      - valkey-data:/snapshot/valkey-data:ro
+
+  browser:
+    <<: *security
+    profiles: [checks]
+    build: {context: ., dockerfile: deploy/docker/Browser.Dockerfile}
+    image: "${VIBEARR_BROWSER_IMAGE:-vibearr-browser:local}"
+    restart: "no"
+    mem_limit: 1024m
+    memswap_limit: 1024m
+    cpus: 1
+    tmpfs: ["/tmp:rw,nosuid,nodev,exec,size=256m"]
+    networks: [application]
+    volumes: [browser-artifacts:/artifacts]
+
+  restore-files:
+    <<: *backup
+    networks: []
+    network_mode: none
+    command: [restore-files]
+    volumes:
+      - backup-source:/backup-source:ro
+      - postgres-data:/restore-database:ro
+      - application-secrets:/restore/application-secrets
+      - database-secrets:/restore/database-secrets
+      - runner-secrets:/restore/runner-secrets
+      - runner-data:/restore/runner-data
+      - agent-secrets:/restore/agent-secrets
+      - setup-secrets:/restore/setup-secrets
+      - validation-secrets:/restore/validation-secrets
+      - agent-database-secrets:/restore/agent-database-secrets
+      - validation-database-secrets:/restore/validation-database-secrets
+      - agent-control:/restore/agent-control
+      - setup-control:/restore/setup-control
+      - validation-control:/restore/validation-control
+      - gateway-data:/restore/gateway-data
+      - valkey-data:/restore/valkey-data
+
+  restore-database:
+    <<: *backup
+    command: [restore-database]
+    volumes:
+      - backup-source:/backup-source:ro
+      - database-secrets:/restore/database-secrets:ro
 
   vibearr-runner:
-    profiles: ["runner"]
-    build:
-      context: .
-      dockerfile: vibearr_runner/Dockerfile
-    image: vibearr-runner
+    <<: *security
+    profiles: [runner]
+    build: {context: ., dockerfile: vibearr_runner/Dockerfile}
+    image: "${VIBEARR_RUNNER_IMAGE:-vibearr-runner:local}"
     environment:
-      VIBEARR_URL: "${VIBEARR_URL-${NQ_URL-http://vibearr:8000}}"
-      VIBEARR_RUNNER_STATE_DIR: "${VIBEARR_RUNNER_STATE_DIR-${NQ_RUNNER_STATE_DIR-/var/lib/coding-runner}}"
-      VIBEARR_RUNNER_API_TOKEN: "${VIBEARR_RUNNER_API_TOKEN-${NQ_RUNNER_API_TOKEN-}}"
-      NQ_RUNNER_API_TOKEN: "${NQ_RUNNER_API_TOKEN-${VIBEARR_RUNNER_API_TOKEN-}}"
+      VIBEARR_URL: http://vibearr:8000
+      VIBEARR_RUNNER_STATE_DIR: /var/lib/vibearr
+      VIBEARR_RUNNER_API_TOKEN_FILE: /run/vibearr/runner/api-token
+      VIBEARR_EXECUTOR_URL: http://worker-gateway:8791
+      VIBEARR_EXECUTOR_TOKEN_FILE: /run/vibearr/runner/control-token
+      VIBEARR_RUNTIME_PROTOCOL: compose-slot-v2
+      VIBEARR_VALIDATION_PROFILE_FILE: /run/vibearr/runner/validation-profile.json
     volumes:
-      - runner-data:${VIBEARR_RUNNER_STATE_DIR-${NQ_RUNNER_STATE_DIR-/var/lib/coding-runner}}
-    networks:
-      - runner-api
-      - runner-egress
-      - runner-inference
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
-    cap_drop: ["ALL"]
-    security_opt: ["no-new-privileges:true"]
-    pids_limit: 128
-    stop_grace_period: 30s
-    restart: unless-stopped
-
-  runner-ollama:
-    profiles: ["ollama"]
-    build:
-      context: .
-      dockerfile: vibearr_runner/Dockerfile.ollama
-    image: vibearr-ollama:0.40.16
-    environment:
-      OLLAMA_HOST: "0.0.0.0:11434"
-      OLLAMA_MODELS: "/models"
-      OLLAMA_NO_CLOUD: "1"
-      HOME: "/tmp"
-    volumes:
-      - runner-ollama-models:/models
-    networks:
-      - runner-inference
-      - runner-egress
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
-    cap_drop: ["ALL"]
-    security_opt: ["no-new-privileges:true"]
-    pids_limit: 128
-    stop_grace_period: 30s
-    restart: unless-stopped
+      - runner-data:/var/lib/vibearr
+      - runner-secrets:/run/vibearr/runner:ro
+      - browser-artifacts:/screenshots:ro
+    networks: [queue-control, worker-control, runner-egress]
+    depends_on:
+      vibearr: {condition: service_healthy}
+      worker-gateway: {condition: service_started}
 
 networks:
-  runner-api:
-    internal: true
-  runner-inference:
-    internal: true
+  application:
+  queue-control: {internal: true}
+  worker-control: {internal: true}
   runner-egress:
+  agent-jobs: {internal: true}
+  setup-jobs: {internal: true}
+  validation-jobs: {internal: true}
+  proxy-egress:
 
 volumes:
   postgres-data:
@@ -171,5 +472,23 @@ volumes:
     name: "${VIBEARR_DATA_PROJECT:-${COMPOSE_PROJECT_NAME:-nightly-queue}}_valkey-data"
   runner-data:
     name: "${VIBEARR_DATA_PROJECT:-${COMPOSE_PROJECT_NAME:-nightly-queue}}_runner-data"
-  runner-ollama-models:
-    name: "${VIBEARR_DATA_PROJECT:-${COMPOSE_PROJECT_NAME:-nightly-queue}}_runner-ollama-models"
+  application-secrets:
+  database-secrets:
+  runner-secrets:
+  agent-secrets:
+  setup-secrets:
+  validation-secrets:
+  backup-data:
+    name: "${VIBEARR_BACKUP_VOLUME:-${COMPOSE_PROJECT_NAME:-nightly-queue}_backup-data}"
+  backup-source:
+    external: true
+    name: "${VIBEARR_RESTORE_BACKUP_VOLUME:-${COMPOSE_PROJECT_NAME:-nightly-queue}_backup-data}"
+  browser-artifacts:
+  check-artifacts:
+  agent-database-secrets:
+  validation-database-secrets:
+  agent-control:
+  setup-control:
+  validation-control:
+  gateway-data:
+  foundation-control:

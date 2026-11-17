@@ -1,18 +1,14 @@
 """Actual merge-loop evidence; missing provider or runtime proof fails closed."""
 
 import argparse
-from datetime import datetime, timezone
-import hashlib
 import json
 from pathlib import Path
 import re
-import subprocess
-from urllib.parse import urlsplit
 
 from .merge_contract import merge_profile, merge_receipt
 from .merge_github import MergeGitHub, merged_observation
 from .native_workspace import atomic_bytes
-from .workspaces import git
+from .browser_receipts import validate_capture_receipts
 
 
 MERGE_WAYPOINTS = {
@@ -45,94 +41,28 @@ def capture_page(
     url,
     output,
     browser_profile,
-    browser="/opt/google/chrome/chrome",
+    browser=None,
 ):
-    target = urlsplit(url)
-    if (
-        target.scheme != "http"
-        or target.hostname != "127.0.0.1"
-        or not target.port
-        or target.username
-        or target.password
-        or target.fragment
-    ):
-        raise ValueError(
-            "Acceptance screenshots require the explicitly owned loopback app URL."
-        )
-    if git(["rev-parse", "HEAD"], Path(source_checkout)) != revision:
-        raise ValueError(
-            "Rendered checkout differs from the selected accepted candidate revision."
-        )
-    output = Path(output)
-    if output.exists() or output.is_symlink() or output.suffix != ".png":
-        raise ValueError(
-            "Capture a new owned PNG; existing screenshots cannot substitute."
-        )
-    profile = Path(browser_profile)
-    profile.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if profile.is_symlink() or profile.stat().st_mode & 0o077:
-        raise ValueError(
-            "Acceptance browser profile must be a private owned directory."
-        )
-    result = subprocess.run(
-        [
-            browser,
-            "--headless",
-            "--disable-gpu",
-            "--no-sandbox",
-            "--user-data-dir=" + str(profile),
-            "--window-size=1440,1100",
-            "--screenshot=" + str(output),
-            url,
-        ],
-        capture_output=True,
-        timeout=45,
-        check=False,
+    raise RuntimeError(
+        "Host browser capture is retired; use the Docker browser job and source-bound receipts."
     )
-    if result.returncode or not output.is_file():
-        raise RuntimeError(
-            "Actual browser capture failed; preserve its private diagnostic."
-        )
-    data = output.read_bytes()
-    if not data.startswith(b"\x89PNG\r\n\x1a\n") or len(data) < 1024:
-        raise RuntimeError("Browser did not produce a rendered PNG screenshot.")
-    return {
-        "schema_version": 1,
-        "revision": revision,
-        "tree_sha": git(["rev-parse", "HEAD^{tree}"], Path(source_checkout)),
-        "url": url,
-        "path": str(output),
-        "sha256": hashlib.sha256(data).hexdigest(),
-        "browser": browser,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
-    }
 
 
 def screenshot_receipts(
-    values, expected_revision, *, alternate_revision=None, expected_tree=None
+    values,
+    expected_revision,
+    *,
+    alternate_revision=None,
+    expected_tree=None,
+    artifact_root=Path("/screenshots"),
 ):
-    if not isinstance(values, list) or not values:
-        raise ValueError("UI acceptance requires actual rendered browser screenshots.")
-    for value in values:
-        if (
-            value.get("revision") not in {expected_revision, alternate_revision}
-            or value.get("browser") != "/opt/google/chrome/chrome"
-        ):
-            raise ValueError(
-                "Screenshot does not identify the actual accepted UI revision/browser."
-            )
-        if expected_tree is not None and value.get("tree_sha") != expected_tree:
-            raise ValueError(
-                "Screenshot was not rendered from the exact validated UI tree."
-            )
-        data = Path(value["path"]).read_bytes()
-        if not data.startswith(b"\x89PNG\r\n\x1a\n") or hashlib.sha256(
-            data
-        ).hexdigest() != value.get("sha256"):
-            raise ValueError(
-                "Screenshot artifact differs from its actual browser receipt."
-            )
-    return values
+    return validate_capture_receipts(
+        values,
+        expected_revision,
+        alternate_revision=alternate_revision,
+        expected_tree=expected_tree,
+        artifact_root=artifact_root,
+    )
 
 
 def collect_merge_run(queue, github, *, run_id, project_id, issue_number, screenshots):

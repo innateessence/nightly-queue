@@ -11,6 +11,9 @@ correction branches and release gates. It replaces the withdrawn host-service
 procedure. The current Compose file does not yet provide the complete replacement;
 keep autonomous execution disabled until D1–D4 are implemented and qualified.
 
+Implemented operator commands and their current limits are in
+[Docker operations](docker-operations.md).
+
 ## Runtime layout
 
 Compose owns services, health checks, restart policies, private networks, named

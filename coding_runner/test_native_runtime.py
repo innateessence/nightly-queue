@@ -8,7 +8,7 @@ from vibearr_runner.native_runtime import runtime_diagnostics
 from vibearr_runner.policy import default_execution_policy
 
 if importlib.util.find_spec("vibearr_executor"):
-    from vibearr_executor import QUALIFICATION_VERSION
+    from vibearr_executor import SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION
 else:
     QUALIFICATION_VERSION = 0
 
@@ -34,9 +34,9 @@ class ExecutorFixture:
         }
         self.document = {
             "schema_version": 1,
-            "protocol_version": 1,
+            "protocol_version": 2,
             "qualification_version": QUALIFICATION_VERSION,
-            "runtime": "docker-oci-v1",
+            "runtime": "compose-slot-v2",
             "qualified": True,
             "accepting_work": True,
             "binding_digest": "c" * 64,
@@ -80,7 +80,7 @@ class NativeRuntimeTests(unittest.TestCase):
 
     def test_previous_qualification_version_blocks_readiness(self):
         client = ExecutorFixture()
-        client.document["qualification_version"] = 1
+        client.document["qualification_version"] = QUALIFICATION_VERSION - 1
         self.assertFalse(
             runtime_diagnostics(default_execution_policy(), client)["runtime_ready"]
         )
@@ -88,6 +88,14 @@ class NativeRuntimeTests(unittest.TestCase):
     def test_missing_selected_profile_blocks_readiness(self):
         client = ExecutorFixture()
         client.document["profiles"].pop()
+        self.assertFalse(
+            runtime_diagnostics(default_execution_policy(), client)["runtime_ready"]
+        )
+
+    def test_host_executor_proof_cannot_qualify_a_docker_worker(self):
+        client = ExecutorFixture()
+        client.document["runtime"] = "docker-oci-v1"
+        client.document["protocol_version"] = 1
         self.assertFalse(
             runtime_diagnostics(default_execution_policy(), client)["runtime_ready"]
         )

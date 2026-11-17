@@ -162,6 +162,14 @@ def validate_dependency_provenance(
     parent: ValidationProfile | None = None,
     run_id: str | None = None,
 ) -> dict:
+    if (
+        isinstance(value, dict)
+        and type(value.get("schema_version")) is int
+        and value["schema_version"] == 2
+    ):
+        from .slot_provenance import validate
+
+        return validate(value, profile, parent=parent, run_id=run_id)
     from .contracts import identifier, sha256
     from .qualification import REQUIRED_CHECKS
 

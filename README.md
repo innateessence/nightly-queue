@@ -1,7 +1,8 @@
 # vibearr
 
-For repeatable self-development setup and finite issue-to-PR acceptance, see
-[the bootstrap guide](docs/self-development-bootstrap.md).
+For Docker setup, qualification, backup and recovery, see
+[Docker operations](docs/docker-operations.md). D4 CI and final release acceptance
+are still in progress; keep autonomous execution disabled.
 
 A self-hosted *arr app for vibe coding with Codex, Claude Code, and OpenCode.
 
@@ -99,24 +100,22 @@ cp .env.example .env
 docker compose build
 ```
 
-Generate a credential encryption key:
-
-```sh
-docker compose run --rm --no-deps vibearr python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
-```
-
-Set these values in `.env` before starting:
+Fresh installations leave secret values empty: initialization generates them
+once in private named volumes. Existing PostgreSQL installations must supply
+their original values before initialization; missing credentials or conflicts
+stop startup. Preserve the original database/user and volume settings on upgrade.
 
 | Variable | Purpose |
 | --- | --- |
-| `VIBEARR_API_TOKEN` | A random token for the queue API and `vibearr` CLI |
-| `VIBEARR_POSTGRES_PASSWORD` | The application database password |
-| `VIBEARR_CREDENTIAL_KEY` | The generated key for encrypting saved credentials |
+| `VIBEARR_API_TOKEN` | Original queue API token on upgrade; generated for a fresh install |
+| `VIBEARR_POSTGRES_PASSWORD` | Original database password on upgrade; generated for a fresh install |
+| `VIBEARR_CREDENTIAL_KEY` | Original encryption key on upgrade; generated for a fresh install |
+| `DJANGO_SECRET_KEY` | Original Django key on upgrade; generated for a fresh install |
 
 Start the app:
 
 ```sh
-docker compose up -d --build
+docker compose up -d --wait
 ```
 
 Open [localhost:7777](http://127.0.0.1:7777/), add a project with its HTTPS GitHub
@@ -132,7 +131,7 @@ requirements. Starting the web app alone does not start a coding agent.
 For Django admin access, create an account:
 
 ```sh
-docker compose exec vibearr python manage.py createsuperuser
+docker compose --profile tools run --rm tools python manage.py createsuperuser
 ```
 
 This is a single-user app for a private network. The browser UI has no login
@@ -142,12 +141,12 @@ credentials over a network.
 
 ## Submit work from the terminal
 
-Run the HTTP CLI inside the application container. It uses the configured queue
-API token; no host Python or CLI installation is required.
+Run the HTTP CLI in the tools container, whose entrypoint loads the private queue
+token. No host Python or CLI installation is required.
 
 ```sh
-docker compose exec -e VIBEARR_URL=http://vibearr:8000 vibearr python -m vibearr projects
-docker compose exec -e VIBEARR_URL=http://vibearr:8000 vibearr python -m vibearr add \
+docker compose --profile tools run --rm -e VIBEARR_URL=http://vibearr:8000 tools python -m vibearr projects
+docker compose --profile tools run --rm -e VIBEARR_URL=http://vibearr:8000 tools python -m vibearr add \
   --project 12 "Add CSV export" \
   --instructions "Include the active filters and column headings." --priority normal
 ```
@@ -188,18 +187,19 @@ merge order, the runtime boundary and acceptance gates.
 Run application checks in Docker:
 
 ```sh
-docker compose exec vibearr python manage.py test
-docker compose exec vibearr python -m unittest nq.test_cli
-docker compose exec vibearr python manage.py makemigrations --check --dry-run
-docker compose exec vibearr python manage.py check
-docker compose exec vibearr black --check .
-docker compose exec vibearr ruff check .
-docker compose exec vibearr mypy . --config-file mypy.ini
+bash test.sh
+bash test.sh work_queue.test_api
+docker compose --profile tools run --rm tools python manage.py makemigrations --check --dry-run
+docker compose --profile tools run --rm tools python manage.py check
+docker compose --profile tools run --rm tools black --check .
+docker compose --profile tools run --rm tools ruff check .
+docker compose --profile tools run --rm tools mypy . --config-file mypy.ini
 ```
 
-The Docker-only operations branch supplies tools containers for Git acceptance,
-distribution builds, qualification and browser screenshots. CI must use the same
-container images and profiles. Missing container tooling does not permit host
+The [Docker checks](docs/docker-operations.md#development-and-ci) use disposable
+projects for Git acceptance, distribution builds, qualification, browser captures
+and backup/restore. CI uses the same container images and profiles. Missing
+container tooling does not permit host
 Python, pip, Git task execution, browsers, services or package installation.
 
 Native agent integrations use pinned CLI images and explicitly selected connections.

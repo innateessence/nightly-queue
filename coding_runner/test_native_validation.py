@@ -101,10 +101,14 @@ class ClientFixture:
         self.source = b""
 
     def capabilities(self):
-        from vibearr_executor import PROTOCOL_VERSION, QUALIFICATION_VERSION
+        from vibearr_executor import (
+            SLOT_PROTOCOL_VERSION as PROTOCOL_VERSION,
+            SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION,
+        )
 
         return {
             "schema_version": 1,
+            "runtime": "compose-slot-v2",
             "protocol_version": PROTOCOL_VERSION,
             "qualification_version": QUALIFICATION_VERSION,
             "qualified": True,

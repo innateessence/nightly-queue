@@ -20,12 +20,15 @@ class NativeSession:
     image_digest: str
     runtime_binding_digest: str
     manifest: dict
+    execution_identity: dict | None = None
 
     def to_data(self) -> dict:
         return json.loads(json.dumps(asdict(self)))
 
     @classmethod
     def from_data(cls, value: dict) -> "NativeSession":
+        if isinstance(value, dict) and "execution_identity" not in value:
+            value = {**value, "execution_identity": None}
         if not isinstance(value, dict) or set(value) != set(cls.__dataclass_fields__):
             raise NativeSessionError("Invalid native session record.")
         manifest = value.get("manifest")
@@ -58,6 +61,10 @@ class NativeSession:
                     raise ValueError
             if value["auth_kind"] not in {"token", "session", "connection"}:
                 raise ValueError
+            if value["execution_identity"] is not None:
+                from .native_contract import validate_execution_identity
+
+                validate_execution_identity(value["execution_identity"])
         except (KeyError, TypeError, ValueError, AttributeError):
             raise NativeSessionError("Invalid native session binding.") from None
         return cls(**json.loads(json.dumps(value)))
