@@ -21,5 +21,6 @@
       {% include "projects/_form.html" with submit_label="Save changes" %}
       <p class="form-footnote"><a href="{% url 'project_list' %}">Cancel</a></p>
     </form>
+    <p class="form-footnote"><a class="button-remove" href="{% url 'delete_project' project.pk %}">Delete project</a></p>
   </section>
 {% endblock %}

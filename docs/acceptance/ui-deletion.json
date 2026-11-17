@@ -1,0 +1,33 @@
+{
+  "browser": "chromium",
+  "checks": [
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000,
+      "deleted": [
+        "schedule",
+        "coding runner",
+        "work item",
+        "credential",
+        "project"
+      ],
+      "cancel_preserved_item": true,
+      "page_errors": []
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "deleted": [
+        "schedule",
+        "coding runner",
+        "work item",
+        "credential",
+        "project"
+      ],
+      "cancel_preserved_item": true,
+      "page_errors": []
+    }
+  ]
+}

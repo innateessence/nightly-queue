@@ -31,7 +31,7 @@
     <section class="panel composer" id="diagnostics" aria-label="Runner diagnostics">
       {% include "runner_control/_gates.html" %}<hr>{% include "runner_control/_release.html" %}
     </section>
-    {% if settings_id and settings_id != 1 %}<section class="panel plan-section"><h2>Delete configuration</h2><p>Unassign the runner identity before deleting this configuration.</p><form method="post" action="{% url 'coding_runner_delete' settings_id %}">{% csrf_token %}<button class="button-danger" type="submit">Delete coding runner</button></form></section>{% endif %}
+    {% if settings_id and settings_id != 1 %}<section class="panel plan-section"><h2>Delete configuration</h2><p>Review the affected machine identity before confirming.</p><a class="button-danger" href="{% url 'coding_runner_delete' settings_id %}">Delete coding runner</a></section>{% endif %}
   </div>
 </div>
 {% endblock %}

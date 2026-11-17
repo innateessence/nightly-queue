@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Delete {{ kind }} · vibearr{% endblock %}
+{% block heading %}
+<section class="page-heading" aria-labelledby="page-title"><div><h1 id="page-title">Delete {{ kind }}</h1><p class="subtitle">Review this deletion before confirming.</p></div></section>
+{% endblock %}
+{% block content %}
+<section class="panel composer delete-confirmation" aria-labelledby="delete-target">
+  <h2 id="delete-target">{{ object_name }}</h2>
+  <p>{{ description }}</p>
+  {% if blocker %}<p class="notice notice-warning" role="alert">{{ blocker }}</p><a class="button-filter" href="{{ cancel_url }}">Cancel</a>{% else %}
+  <form method="post" class="settings-fields">
+    {% csrf_token %}
+    {% if form %}{{ form.non_field_errors }}{% for field in form %}{% include "runner_control/_field.html" with field=field %}{% endfor %}{% endif %}
+    <div class="form-actions"><button class="button-danger" type="submit">Delete {{ kind }}</button><a class="button-filter" href="{{ cancel_url }}">Cancel</a></div>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,9 +1,8 @@
 from django.contrib import messages
 from django.db import transaction
-from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_GET, require_http_methods, require_POST
+from django.views.decorators.http import require_GET, require_http_methods
 
 from .configuration import configuration_for_settings, runner_settings, settings_values
 from .gate_models import RunnerGateEvidence
@@ -126,19 +125,3 @@ def edit(request, settings_id=None):
     response = render(request, "runner_control/configuration_edit.html", context)
     response["Cache-Control"] = "no-store"
     return response
-
-
-@never_cache
-@require_POST
-@transaction.atomic
-def delete(request, settings_id):
-    lock_controller()
-    saved = get_object_or_404(RunnerSettings, pk=settings_id)
-    if saved.pk == 1 or saved.identity_id:
-        return HttpResponse(
-            "Keep the default configuration. Unassign other configurations before deleting them.",
-            status=409,
-        )
-    saved.delete()
-    messages.success(request, "Coding runner deleted.")
-    return redirect("coding_runner_list")

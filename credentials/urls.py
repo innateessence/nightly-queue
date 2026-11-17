@@ -1,8 +1,14 @@
 from django.urls import path
 
 from . import views
+from runner_control import deletion_views
 
 urlpatterns = [
+    path(
+        "credentials/<int:credential_id>/delete/",
+        deletion_views.credential,
+        name="credential_delete",
+    ),
     path(
         "credentials/<int:credential_id>/edit/",
         views.credential_edit,

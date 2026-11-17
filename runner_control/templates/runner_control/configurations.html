@@ -13,7 +13,7 @@
       <td><a href="{% url 'coding_runner_edit' runner.pk %}">{% if runner.metadata %}{{ runner.metadata.name }}{% else %}Runner{% endif %}</a>{% if runner.pk == 1 %} <span class="field-hint">Default</span>{% endif %}</td>
       <td><span class="status-pill">{% if runner.paused %}Paused{% elif runner.enabled %}Enabled{% else %}Disabled{% endif %}</span></td>
       {% if runner.error %}<td colspan="2">{{ runner.error }}</td>{% else %}<td><a href="{% url 'runner_schedule_edit' runner.schedule_id %}">{{ runner.metadata.schedule }}</a> · {{ runner.metadata.timezone }}{% for window in runner.metadata.windows %}<p class="field-hint">{{ window }}</p>{% endfor %}</td><td>{{ runner.metadata.identity }}</td>{% endif %}
-      <td><a href="{% url 'coding_runner_edit' runner.pk %}">Edit</a></td>
+      <td class="row-actions"><a href="{% url 'coding_runner_edit' runner.pk %}">Edit</a>{% if runner.pk != 1 %}<a class="button-remove" href="{% url 'coding_runner_delete' runner.pk %}">Delete</a>{% else %}<span class="field-hint">Required default</span>{% endif %}</td>
     </tr>{% endfor %}</tbody>
   </table></div>
 </section>

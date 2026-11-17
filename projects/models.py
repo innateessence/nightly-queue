@@ -2,10 +2,17 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 
+from vibearr_app.managers import ActiveManager
+
 from .validators import normalize_repository_url, validate_branch
 
 
 class Project(models.Model):
+    objects = ActiveManager()
+    all_objects = models.Manager()
+    deleted_at = models.DateTimeField(
+        null=True, blank=True, editable=False, db_index=True
+    )
     name = models.CharField(max_length=200)
     repository_url = models.URLField(max_length=500)
     base_branch = models.CharField(
@@ -38,6 +45,8 @@ class Project(models.Model):
 
     class Meta:
         ordering = ["name", "pk"]
+        base_manager_name = "all_objects"
+        default_manager_name = "objects"
 
     @classmethod
     def from_db(cls, db, field_names, values):
@@ -53,6 +62,13 @@ class Project(models.Model):
 
     def clean(self):
         super().clean()
+        from credentials.models import Credential
+
+        if (
+            self.credential_id
+            and not Credential.objects.filter(pk=self.credential_id).exists()
+        ):
+            raise ValidationError({"credential": "Select an available credential."})
         if not self.name or not self.name.strip():
             raise ValidationError({"name": "Enter a project name."})
         self.name = self.name.strip()
@@ -85,7 +101,11 @@ class Project(models.Model):
         with transaction.atomic():
             RunnerSettings.objects.get_or_create(pk=1)
             RunnerSettings.objects.select_for_update().get(pk=1)
-            previous = Project.objects.select_for_update().filter(pk=self.pk).first()
+            previous = (
+                Project.all_objects.select_for_update().filter(pk=self.pk).first()
+            )
+            if previous and previous.deleted_at:
+                raise ValidationError("This project was deleted.")
             if previous:
                 unchanged_url = self.repository_url == getattr(
                     self, "_loaded_repository_url", None

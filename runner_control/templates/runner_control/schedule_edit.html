@@ -19,6 +19,6 @@
     {% for runner in assigned_runners %}<p><a href="{% url 'coding_runner_edit' runner.pk %}">{{ runner.name }}</a></p>{% empty %}<p class="field-hint">No coding runners use this schedule yet. Choose it on a runner's configuration page.</p>{% endfor %}
     <a href="{% url 'coding_runner_list' %}">Manage coding runners</a>
   </section>
-  {% if schedule_id and schedule_id != 1 %}<section class="panel plan-section"><h2>Delete schedule</h2><p>Assign its coding runners to another schedule before deleting it.</p><form method="post" action="{% url 'runner_schedule_delete' schedule_id %}">{% csrf_token %}<button class="button-danger" type="submit">Delete schedule</button></form></section>{% endif %}
+  {% if schedule_id and schedule_id != 1 %}<section class="panel plan-section"><h2>Delete schedule</h2><p>Choose a replacement for assigned runners on the confirmation page.</p><a class="button-danger" href="{% url 'runner_schedule_delete' schedule_id %}">Delete schedule</a></section>{% endif %}
 </div></div>
 {% endblock %}

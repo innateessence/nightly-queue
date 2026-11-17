@@ -14,7 +14,7 @@
       <td><a href="{% url 'runner_schedule_edit' schedule.pk %}">{{ schedule.metadata.name }}</a>{% if schedule.pk == 1 %}<p class="field-hint">Default</p>{% endif %}</td>
       <td>{{ schedule.metadata.mode }} · {{ schedule.metadata.timezone }}{% for window in schedule.metadata.windows %}<p class="field-hint">{{ window }}</p>{% endfor %}</td>
       <td>{% for runner in schedule.metadata.runners %}<p><a href="{% url 'coding_runner_edit' runner.pk %}">{{ runner.name }}</a></p>{% empty %}<span class="field-hint">Unassigned</span>{% endfor %}</td>
-      {% endif %}<td><a href="{% url 'runner_schedule_edit' schedule.pk %}">Edit</a></td>
+      {% endif %}<td class="row-actions"><a href="{% url 'runner_schedule_edit' schedule.pk %}">Edit</a>{% if schedule.pk != 1 %}<a class="button-remove" href="{% url 'runner_schedule_delete' schedule.pk %}">Delete</a>{% else %}<span class="field-hint">Required default</span>{% endif %}</td>
     </tr>{% endfor %}</tbody>
   </table></div>
 </section>

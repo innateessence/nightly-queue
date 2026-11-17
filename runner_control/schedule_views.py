@@ -1,10 +1,8 @@
 from django.contrib import messages
 from django.db import transaction
-from django.db.models.deletion import ProtectedError
-from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_GET, require_http_methods, require_POST
+from django.views.decorators.http import require_GET, require_http_methods
 
 from .configuration import configuration_document, settings_values
 from .configuration_views import window_labels
@@ -87,27 +85,3 @@ def edit(request, schedule_id=None):
         "assigned_error": error,
     }
     return render(request, "runner_control/schedule_edit.html", context)
-
-
-@never_cache
-@require_POST
-@transaction.atomic
-def delete(request, schedule_id):
-    lock_controller()
-    list(
-        RunnerSettings.objects.select_for_update()
-        .filter(pk=1)
-        .values_list("pk", flat=True)
-    )
-    saved = get_object_or_404(RunnerSchedule, pk=schedule_id)
-    if saved.pk == 1:
-        return HttpResponse("The default schedule cannot be deleted.", status=409)
-    try:
-        saved.delete()
-    except ProtectedError:
-        return HttpResponse(
-            "Assign the coding runners to another schedule before deleting this schedule.",
-            status=409,
-        )
-    messages.success(request, "Schedule deleted.")
-    return redirect("runner_schedule_list")
