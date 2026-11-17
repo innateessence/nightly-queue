@@ -100,6 +100,12 @@ personal configuration. Protection does not remove arbitrary encodings or set a
 provider-side spending limit. Offline synthetic refresh tests do not establish
 real account routing, model access or deployment qualification.
 
+The [account fixture checkpoint](acceptance/docker-codex-account.json) records a
+real session-backed edit, independent validation, controller recovery and
+foreground cancellation on the qualified disposable Docker stack. Provider
+renewal returned HTTP 401 and remains unqualified pending fresh device sign-in.
+This checkpoint does not qualify production or the dependent two-issue workflow.
+
 ## Fixed CLI configuration
 
 The image wrapper reads a bounded, supervisor-produced context containing only

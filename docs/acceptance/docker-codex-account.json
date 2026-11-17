@@ -1,0 +1,75 @@
+{
+  "account_renewal": {
+    "fresh_device_login_completed": false,
+    "private_auth_cache_changed": false,
+    "provider_http_status": 401,
+    "qualified": false,
+    "remaining": "Complete account sign-in, then verify CLI-managed provider refresh, durable rotation and reuse after account-service restart."
+  },
+  "account_service_correction_commit": "2a99e598d9ad6b1b71dbc862f4c1d64683095f75",
+  "account_service_image": "sha256:5e011f7c88aaeb627a5dbaf28c0e796aa4418ef974774a5f91b8a87ba267c34c",
+  "cleanup": {
+    "operations": [
+      "2ba09308-fa61-4a67-84b1-2f29ba5b2677",
+      "da7a23e4-0aa7-46da-baa0-077c3390f0d8",
+      "00fb26bf-a61c-4262-b4dc-e48edd95dfc0",
+      "2b238780-f54e-4563-ba12-77185115c9a5"
+    ],
+    "unconfirmed": []
+  },
+  "fixture": {
+    "adapter": "codex",
+    "agent_version": "0.169.0",
+    "auth_kind": "session",
+    "cancellation": {
+      "descendants_terminated": true,
+      "exit_code": -9,
+      "foreground_command_started": true,
+      "operation_id": "00fb26bf-a61c-4262-b4dc-e48edd95dfc0",
+      "session_id": "01a1eba4-c9f3-71d2-8ea2-84479874def1"
+    },
+    "candidate_mcp_disabled": true,
+    "controller_reload_same_worker": true,
+    "credential_source_written": false,
+    "duplicate_start_same_worker": true,
+    "execution_identity": {
+      "binding_digest": "cda900e2b197d4217f7e61a57bc25832a3830894e993225969a776799b29ee17",
+      "instance_id": "467ea74c-1680-4f04-93ef-ef1988f2cbb6",
+      "protocol_version": 2,
+      "runtime": "compose-slot-v2",
+      "worker_boot": "3c6d5fdd-6ed2-4a8c-95e9-52294272719e"
+    },
+    "image_digest": "sha256:d2e708117369ba91d5d5504bf187a92763b2dc79c554be9609474e79e7660ac5",
+    "independent_validation": {
+      "exit_code": 0,
+      "log_digest": "fb184ea57734512b1f088f9181209901b9cd46df3eb7eaa2500ea9e48dde20b5",
+      "operation_id": "da7a23e4-0aa7-46da-baa0-077c3390f0d8"
+    },
+    "log_digest": "152b88513680a916323be288b89e63607b59d6097614ddf41297282b86f308a5",
+    "model": "gpt-6.1-sol",
+    "native_task_acceptance": true,
+    "operation_id": "2ba09308-fa61-4a67-84b1-2f29ba5b2677",
+    "profile_digest": "1495558d1cc3702e4426346a95b5eb396f19f770ac6360ae5d0a901c3ac07fbe",
+    "refresh_token_supplied_to_task": false,
+    "result_digest": "391fc3fec69dd1b9688aea060048b980236d3d8902228c5ab446dd5c91dd0c94",
+    "runtime": "compose-slot-v2",
+    "runtime_binding_digest": "7558304238edbbfc5373ebf5f4a131f34216c169cc915b74c8175c67e7459dd5",
+    "source_digest": "4a85942302de68e9a1730de787f3d382ebec4061b5d8206f231c9a3470eb7460",
+    "usage": {
+      "cached_input_tokens": 47616,
+      "input_tokens": 55042,
+      "output_tokens": 293,
+      "reasoning_output_tokens": 0
+    },
+    "worker_bindings": {
+      "agent": "cda900e2b197d4217f7e61a57bc25832a3830894e993225969a776799b29ee17",
+      "setup": "666d3b5c87a03cb27d96894cac67c557ba8f4b3a66dcb9cf88d658c36af8dc4a",
+      "validation": "e9f70277254c949db26bf8e455c6c334b0083d1197681e7c95d8dd59351aaf0e"
+    }
+  },
+  "observed_at": "2026-11-17T22:33:38.498858+00:00",
+  "runtime_commit": "29d386dcda0affbcbf2a41e722ad7fdf818b6da0",
+  "saved_session_read_after_account_service_restart": true,
+  "schema_version": 1,
+  "scope": "Bounded native account fixture on a disposable qualified Docker stack; production processing remains disabled. This is not dependent two-issue delivery or production qualification."
+}
