@@ -279,6 +279,22 @@ class WorkSelectionTests(TestCase):
         self.issue(state="open")
         self.assertIsNone(claim_next())
 
+    def test_stale_closure_does_not_remove_newer_open_issue_from_queue(self):
+        now = timezone.now()
+        item = self.issue(updated_at=now.isoformat())
+        self.issue(state="closed", updated_at=(now - timedelta(seconds=1)).isoformat())
+        item.refresh_from_db()
+        self.assertEqual(item.status, QueueItem.Status.QUEUED)
+        self.assertEqual(item.issue_state, QueueItem.IssueState.OPEN)
+
+    def test_stale_reopening_does_not_restore_closed_issue_to_queue(self):
+        now = timezone.now()
+        item = self.issue(state="closed", updated_at=now.isoformat())
+        self.issue(updated_at=(now - timedelta(seconds=1)).isoformat())
+        item.refresh_from_db()
+        self.assertEqual(item.status, QueueItem.Status.CLOSED)
+        self.assertEqual(item.issue_state, QueueItem.IssueState.CLOSED)
+
     def test_expired_sync_lease_cannot_mutate_source(self):
         import uuid
 

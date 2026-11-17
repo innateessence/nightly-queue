@@ -47,6 +47,15 @@ set a minimum one-minute retry delay. Failed requests never advance success.
 Manual synchronization bypasses the normal interval but respects project leases
 and provider backoff.
 
+Both scheduled and manual synchronization move queued issues to Closed when
+GitHub reports them closed. They remain in All work and the Closed filter, but
+leave the queued count and filter. Issues first discovered closed use the same
+status. Reopening these unexecuted issues queues them again; running, succeeded,
+and failed work keep their execution status and history. Closure never supplies
+merge evidence. Apply work_queue migration `0006_queueitem_closed` after the
+existing soft-deletion migration to reconcile existing closed
+issues still marked queued, including those served from the conditional cache.
+
 Repository and author identities are numeric GitHub IDs. Known repositories are
 resolved by ID, so renames refresh canonical URLs without duplicating work. Legacy
 rows are bound to that ID on their first authoritative sync. Once synchronized,
@@ -64,7 +73,7 @@ project lock. Stale claims cannot win a changed eligibility check.
 `QueueItem.source_metadata` holds current upstream metadata. `source_snapshot`
 holds claim-time title/body, repository/issue identity, revision, and metadata.
 Title/body and the snapshot remain unchanged while running. Closed/held syncs
-request cancellation on active runs; reopening never requeues terminal work.
+request cancellation on active runs; reopening never requeues succeeded or failed work.
 Explicit retries retain branch/repository/base identity and capture the latest
 saved source instructions in a new attempt.
 

@@ -30,7 +30,9 @@ class QueueStatusUITests(TestCase):
         for status in ["unknown", "RUNNING", "queued,running", "<script>", " " * 20]:
             with self.subTest(status=status):
                 response = self.client.get(reverse("index"), {"status": status})
-                self.assertEqual(len(response.context["items"]), 4)
+                self.assertEqual(
+                    len(response.context["items"]), len(QueueItem.Status.values)
+                )
                 self.assertEqual(response.context["status"], "")
                 self.assertFalse(response.context["filtered"])
 
@@ -88,5 +90,13 @@ class QueueStatusUITests(TestCase):
             tab["value"]: tab["count"] for tab in response.context["status_links"]
         }
         self.assertEqual(
-            counts, {"": 5, "queued": 2, "running": 1, "succeeded": 1, "failed": 1}
+            counts,
+            {
+                "": 6,
+                "queued": 2,
+                "running": 1,
+                "succeeded": 1,
+                "failed": 1,
+                "closed": 1,
+            },
         )
