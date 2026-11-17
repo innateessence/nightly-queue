@@ -3,6 +3,7 @@
 import os
 import stat
 import warnings
+from pathlib import Path
 
 
 def canonical_name(legacy):
@@ -16,6 +17,13 @@ def getenv(legacy, default=""):
     previous = os.environ.get(legacy)
     filename = os.environ.get(canonical + "_FILE")
     if filename:
+        if (
+            canonical == "VIBEARR_RUNNER_API_TOKEN"
+            and (Path(filename).parent / "restore-required.json").exists()
+        ):
+            raise ValueError(
+                "Restored state requires a fresh Docker runner identity before startup."
+            )
         if current is not None or previous is not None:
             raise ValueError(
                 "Select an environment credential or a credential file, not both."

@@ -1,5 +1,8 @@
 # Runner operations and release verification
 
+Use [Docker operations](docker-operations.md) for current container commands,
+identity bootstrap, qualification, backup and empty-target restoration.
+
 > **Docker-only runtime requirement:** Follow the [Docker-only runtime plan](docker-only-runtime-plan.md)
 > and [deployment contract](mvp-deployment.md). Every Python, Git, coding CLI,
 > packaging, test, qualification and browser command in this reference executes

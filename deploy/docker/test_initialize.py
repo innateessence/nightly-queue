@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from .environment import load
-from .initialize import write_once
+from .initialize import require_existing_credentials, write_once
 
 
 class CredentialInitializationTests(unittest.TestCase):
@@ -34,6 +34,23 @@ class CredentialInitializationTests(unittest.TestCase):
         self.path.chmod(0o644)
         with self.assertRaisesRegex(RuntimeError, "unsafe"):
             write_once(self.path, "")
+
+    def test_existing_database_cannot_receive_implicit_replacement_credentials(self):
+        database = self.path.parent / "database"
+        database.mkdir()
+        (database / "PG_VERSION").write_text("17")
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "original credentials"):
+                require_existing_credentials(self.path.parent, database)
+
+    def test_failed_credential_publication_leaves_no_partial_secret(self):
+        with patch(
+            "deploy.docker.initialize.os.fsync", side_effect=OSError("disk failure")
+        ):
+            with self.assertRaises(OSError):
+                write_once(self.path, "new private value")
+        self.assertFalse(self.path.exists())
+        self.assertEqual(list(self.path.parent.iterdir()), [])
 
     def test_loader_rejects_symlink_to_a_credential(self):
         directory = self.path.parent / "application"

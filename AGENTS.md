@@ -35,16 +35,18 @@ Use Python 3.12 inside images. All commands below execute in Docker.
 
 ```sh
 docker compose build
-docker compose up -d
-docker compose exec vibearr python manage.py migrate
-docker compose exec vibearr python manage.py createsuperuser
-docker compose exec vibearr python manage.py test
-docker compose exec vibearr python manage.py test work_queue.test_api
-docker compose exec vibearr python -m vibearr projects
+docker compose up -d --wait
+docker compose --profile tools run --rm tools python manage.py migrate
+docker compose --profile tools run --rm tools python manage.py createsuperuser
+docker compose --profile tools run --rm tools python manage.py test
+docker compose --profile tools run --rm tools python manage.py test work_queue.test_api
+docker compose --profile tools run --rm -e VIBEARR_URL=http://vibearr:8000 tools python -m vibearr projects
 ```
 
-The Docker-only operations branch supplies dedicated tools, qualification and
-browser containers. Do not run old host test/qualification scripts as a substitute.
+Use the tools entrypoint so private credential files load into each process.
+Bare `docker compose exec` does not inherit the web process's loaded secrets.
+See `docs/docker-operations.md` for qualification, browser, backup and recovery
+jobs. Do not run old host test/qualification scripts as a substitute.
 
 For existing SQLite data, follow the README's export/import procedure before switching databases.
 
@@ -59,11 +61,11 @@ For existing SQLite data, follow the README's export/import procedure before swi
 Use four-space indentation, `snake_case` functions/modules, and `PascalCase` classes. Format Python with Black; Ruff's configured line-length limit is 120. Run:
 
 ```sh
-docker compose exec vibearr black --check .
-docker compose exec vibearr ruff check .
-docker compose exec vibearr mypy . --config-file mypy.ini
-docker compose exec vibearr python manage.py makemigrations --check --dry-run
-docker compose exec vibearr python manage.py check
+docker compose --profile tools run --rm tools black --check .
+docker compose --profile tools run --rm tools ruff check .
+docker compose --profile tools run --rm tools mypy . --config-file mypy.ini
+docker compose --profile tools run --rm tools python manage.py makemigrations --check --dry-run
+docker compose --profile tools run --rm tools python manage.py check
 ```
 
 Keep queue operations in `work_queue/services.py` so submission paths share validation. Include migrations with model changes.

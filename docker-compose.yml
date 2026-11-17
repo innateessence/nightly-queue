@@ -72,6 +72,25 @@ x-test-database: &test-database
     timeout: 3s
     retries: 20
 
+x-backup: &backup
+  <<: *security
+  profiles: [operations]
+  build: {context: ., dockerfile: deploy/docker/Backup.Dockerfile}
+  image: "${VIBEARR_BACKUP_IMAGE:-vibearr-backup:local}"
+  user: "0:0"
+  cap_add: [DAC_OVERRIDE, CHOWN, FOWNER]
+  restart: "no"
+  mem_limit: 1024m
+  memswap_limit: 1024m
+  cpus: 1
+  tmpfs:
+    - "/tmp:rw,nosuid,nodev,size=64m"
+    - "/var/lib/postgresql/data:rw,nosuid,nodev,noexec,size=1m"
+  environment:
+    VIBEARR_POSTGRES_DB: "${VIBEARR_POSTGRES_DB-${POSTGRES_DB-nightly_queue}}"
+    VIBEARR_POSTGRES_USER: "${VIBEARR_POSTGRES_USER-${POSTGRES_USER-nightly_queue}}"
+  networks: [application]
+
 services:
   initialize:
     <<: *security
@@ -98,6 +117,8 @@ services:
       - runner-data:/var/lib/vibearr
       - backup-data:/var/lib/vibearr-backups
       - gateway-data:/var/lib/gateway
+      - postgres-data:/var/lib/existing-postgres:ro
+      - browser-artifacts:/var/lib/vibearr-browser
     network_mode: none
 
   postgres:
@@ -124,7 +145,7 @@ services:
   valkey:
     <<: *security
     image: valkey/valkey:8-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a
-    cap_add: [CHOWN, SETUID, SETGID]
+    cap_add: [CHOWN, DAC_OVERRIDE, KILL, SETUID, SETGID]
     command: [valkey-server, --appendonly, "yes"]
     volumes: [valkey-data:/data]
     networks: [application]
@@ -331,8 +352,72 @@ services:
       - database-secrets:/run/vibearr/database:ro
       - runner-secrets:/run/vibearr/runner
       - backup-data:/var/lib/vibearr-backups
+      - runner-data:/var/lib/vibearr
     depends_on:
       vibearr: {condition: service_healthy}
+
+  backup:
+    <<: *backup
+    command: [backup]
+    volumes:
+      - backup-data:/var/lib/vibearr-backups
+      - application-secrets:/snapshot/application-secrets:ro
+      - database-secrets:/snapshot/database-secrets:ro
+      - runner-secrets:/snapshot/runner-secrets:ro
+      - runner-data:/snapshot/runner-data:ro
+      - agent-secrets:/snapshot/agent-secrets:ro
+      - setup-secrets:/snapshot/setup-secrets:ro
+      - validation-secrets:/snapshot/validation-secrets:ro
+      - agent-database-secrets:/snapshot/agent-database-secrets:ro
+      - validation-database-secrets:/snapshot/validation-database-secrets:ro
+      - agent-control:/snapshot/agent-control:ro
+      - setup-control:/snapshot/setup-control:ro
+      - validation-control:/snapshot/validation-control:ro
+      - gateway-data:/snapshot/gateway-data:ro
+      - valkey-data:/snapshot/valkey-data:ro
+
+  browser:
+    <<: *security
+    profiles: [checks]
+    build: {context: ., dockerfile: deploy/docker/Browser.Dockerfile}
+    image: "${VIBEARR_BROWSER_IMAGE:-vibearr-browser:local}"
+    restart: "no"
+    mem_limit: 1024m
+    memswap_limit: 1024m
+    cpus: 1
+    tmpfs: ["/tmp:rw,nosuid,nodev,exec,size=256m"]
+    networks: [application]
+    volumes: [browser-artifacts:/artifacts]
+
+  restore-files:
+    <<: *backup
+    networks: []
+    network_mode: none
+    command: [restore-files]
+    volumes:
+      - backup-source:/backup-source:ro
+      - postgres-data:/restore-database:ro
+      - application-secrets:/restore/application-secrets
+      - database-secrets:/restore/database-secrets
+      - runner-secrets:/restore/runner-secrets
+      - runner-data:/restore/runner-data
+      - agent-secrets:/restore/agent-secrets
+      - setup-secrets:/restore/setup-secrets
+      - validation-secrets:/restore/validation-secrets
+      - agent-database-secrets:/restore/agent-database-secrets
+      - validation-database-secrets:/restore/validation-database-secrets
+      - agent-control:/restore/agent-control
+      - setup-control:/restore/setup-control
+      - validation-control:/restore/validation-control
+      - gateway-data:/restore/gateway-data
+      - valkey-data:/restore/valkey-data
+
+  restore-database:
+    <<: *backup
+    command: [restore-database]
+    volumes:
+      - backup-source:/backup-source:ro
+      - database-secrets:/restore/database-secrets:ro
 
   vibearr-runner:
     <<: *security
@@ -379,6 +464,11 @@ volumes:
   setup-secrets:
   validation-secrets:
   backup-data:
+    name: "${VIBEARR_BACKUP_VOLUME:-${COMPOSE_PROJECT_NAME:-nightly-queue}_backup-data}"
+  backup-source:
+    external: true
+    name: "${VIBEARR_RESTORE_BACKUP_VOLUME:-${COMPOSE_PROJECT_NAME:-nightly-queue}_backup-data}"
+  browser-artifacts:
   agent-database-secrets:
   validation-database-secrets:
   agent-control:

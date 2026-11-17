@@ -25,6 +25,15 @@ no paid model calls were made.
   9953-file artifact. Setup and validation independently verified its digest and
   inventory. Provenance retains the original immutable validation image and
   binds the artifact to its source, run, requirements, setup receipt and boot.
+- `docker-backup-restore.json`: a quiescent backup restored into a separate
+  Compose project. All 32 table fingerprints matched before authority fencing;
+  business data still matched afterward. The original key decrypted the saved
+  synthetic credential, and queue/run history survived. The retired runner token
+  was rejected by the restored API; a new identity authenticated with processing
+  disabled. No publishing supervisor was started.
+- `docker-browser.json` and `../screenshots/docker/`: actual Chromium desktop and
+  mobile PNGs in both themes, with released static CSS and no page errors or
+  failed requests. Desktop light and mobile dark output were visually inspected.
 
 Image and tree identities in the reports identify their particular test
 generations. Later review fixes receive their own unit tests and fresh boot
@@ -43,7 +52,21 @@ against the final images; earlier reports cannot be relabeled as that evidence.
   Private networks, public destinations and metadata remain restricted.
 - Repository and trusted Black checks now both select Python 3.12.
 - Distribution resources include the worker Dockerfile.
+- Existing PostgreSQL volumes cannot receive implicit replacement credentials.
+  Credential publication is atomic and durable before database identity creation.
+- Restore rejects nonempty targets, altered payloads, links, path traversal and
+  insufficient disk capacity. It disables copied authority and requires explicit
+  fresh-identity bootstrap, preserving the prior journal in a separate archive.
+- Actual broker stop/start exposed missing entrypoint traversal and signal-forwarding
+  capabilities. The corrected broker restarted and shut down with exit code zero.
+- Tools commands load private credential files through their entrypoint. Bare
+  container exec does not inherit secrets loaded into the running web process.
+
+The operations checkpoint passed 976 application tests, 19 focused
+initialization/filesystem/environment tests, Black, Ruff and mypy. Backup and
+restore capacity checks require a 1 GiB reserve. Snapshot bundles stay in private
+named volumes; only sanitized evidence and browser PNGs are in the repository.
 
 This is an intermediate review, not the final no-P2-or-higher signoff. D4 still
-requires containerized operations/CI/browser gates, backup/restore and delivery
-recovery, documentation replacement, and dependent two-issue acceptance.
+requires Docker CI/test orchestration, drain/upgrade and delivery recovery,
+completion of documentation replacement, and real dependent two-issue acceptance.

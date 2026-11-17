@@ -11,7 +11,10 @@
     "Task UID/capability dropping, descendant control and writable-store/IPC reset",
     "Boot-bound worker qualification with authenticated control and forced-restart reconciliation",
     "Run-scoped sealed dependency artifacts transferred from setup to validation without image builds",
-    "All nine fixed validation checks connected to exact disposable source snapshots"
+    "All nine fixed validation checks connected to exact disposable source snapshots",
+    "Docker identity bootstrap with explicit credential grants and no implicit token rotation",
+    "PostgreSQL 17 backup and empty-target restoration with retired controller authority",
+    "Pinned Chromium browser job with actual desktop/mobile light/dark PNGs"
   ],
   "verified": [
     "Isolated Compose application and three worker services started",
@@ -25,11 +28,17 @@
     "All nine checks passed again after building and transferring a changed-dependency artifact",
     "199 executor tests, four offline distribution tests and 31 review regression tests passed",
     "Operator inspection of actual running containers found no declared boundary violations",
+    "976 application tests and 19 focused initialization/filesystem/environment tests passed",
+    "Docker CLI authenticated using the private token volume",
+    "Disposable backup/restore preserved 32 table fingerprints, credential decryption, queue and run history",
+    "Restored API rejected the retired token and accepted a new identity with processing disabled",
+    "Broker restart and graceful shutdown passed after correcting scoped entrypoint capabilities",
+    "Four real Chromium PNGs passed desktop/mobile and theme checks without page errors or failed requests",
     "Black, Ruff and mypy passed in the immutable tools container"
   ],
   "remaining": [
-    "Containerized bootstrap, backup/restore, tools, browser and CI workflows",
-    "Update deployment/upgrade documentation and remove obsolete operations paths",
+    "Replace host-based CI and test orchestration with the Docker tools/worker/operations gates",
+    "Complete drain/upgrade/recovery workflows and replacement of obsolete operational instructions",
     "Run final integrated regression, delivery recovery and real dependent two-issue acceptance",
     "Perform complete P2-or-higher review/fix loops and publish the ready PR"
   ]
