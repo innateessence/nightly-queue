@@ -237,6 +237,7 @@ services:
 
   codex-account:
     <<: *account
+    profiles: [runner, operations]
     entrypoint: [python, -I, -m, vibearr_executor.account_server]
     volumes:
       - account-data:/var/lib/codex-account
