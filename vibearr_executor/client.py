@@ -88,7 +88,11 @@ class Client:
         path = Path(os.environ["VIBEARR_EXECUTOR_TOKEN_FILE"])
         if path.stat().st_mode & 0o077:
             raise Rejected("Executor token file must be private.")
-        return cls(os.environ["VIBEARR_EXECUTOR_URL"], path.read_text().strip())
+        client = cls(os.environ["VIBEARR_EXECUTOR_URL"], path.read_text().strip())
+        client.integrated = (
+            os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "integrated-runner-v1"
+        )
+        return client
 
     def request(self, path: str, data: dict | None = None) -> dict:
         headers = {

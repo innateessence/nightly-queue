@@ -139,6 +139,25 @@ class SlotManifestTests(unittest.TestCase):
         self.assertEqual(receipt["execution_identity"], prepared["execution_identity"])
         self.assertTrue(receipt["export_error"])
         self.assertIsNone(receipt["exit_code"])
+        self.assertEqual(receipt["reconciled_boot"], restarted.boot)
+
+    def test_later_boot_does_not_reuse_an_already_reconciled_restart(self):
+        self.runtime.prepare(self.manifest)
+        record = self.runtime.record(self.manifest["operation_id"])
+        record["state"] = "running"
+        self.runtime.save(record)
+        self.runtime.close()
+        with (
+            patch("vibearr_executor.slots.terminate_children"),
+            patch.object(SlotRuntime, "reset"),
+        ):
+            restarted = SlotRuntime(Path(self.temporary.name), [self.profile])
+            receipt = restarted.status(self.manifest["operation_id"])
+            restarted.close()
+            later = SlotRuntime(Path(self.temporary.name), [self.profile])
+        self.addCleanup(later.close)
+        self.assertEqual(later.status(self.manifest["operation_id"]), receipt)
+        self.assertNotEqual(receipt["result"]["reconciled_boot"], later.boot)
 
     def test_task_cannot_select_a_command_in_its_manifest(self):
         self.manifest["argv"] = ["untrusted"]

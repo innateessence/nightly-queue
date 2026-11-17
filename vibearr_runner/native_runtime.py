@@ -20,7 +20,8 @@ def runtime_diagnostics(policy: dict, client=None, *, validation_profile=None) -
             raise ValueError("Executor protocol version is unsupported.")
         sha256(capabilities.get("binding_digest"))
         if (
-            capabilities.get("runtime") != "compose-slot-v2"
+            capabilities.get("runtime")
+            not in {"compose-slot-v2", "integrated-runner-v1"}
             or capabilities.get("qualified") is not True
         ):
             raise ValueError(

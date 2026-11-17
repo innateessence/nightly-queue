@@ -100,6 +100,7 @@ class SlotRuntime:
                         "terminated": True,
                         "timed_out": False,
                         "worker_restart": True,
+                        "reconciled_boot": self.boot,
                         "started_at": None,
                         "ended_at": time.time(),
                         "export_error": "Worker restarted; no verified candidate export survived.",
@@ -393,9 +394,12 @@ class SlotRuntime:
             self.thread.start()
             return self.public(record)
 
+    def protected_material(self, secret, record):
+        return protection_material(secret, record.get("database_url", ""))
+
     def run(self, operation_id, profile, environment, secret):
         record = self.record(operation_id)
-        protected = protection_material(secret, record.get("database_url", ""))
+        protected = self.protected_material(secret, record)
         logs = bytearray()
         result = {
             "schema_version": 1,
@@ -444,6 +448,7 @@ class SlotRuntime:
                 if ready:
                     content = os.read(self.process.stdout.fileno(), 65536)
                     logs.extend(content)
+                    protected = self.protected_material(secret, record)
                     if len(logs) > MAX_LOG:
                         raise Rejected("Task output exceeds the bounded log limit.")
                     durable(
@@ -480,6 +485,7 @@ class SlotRuntime:
             if record.get("dependency_artifact"):
                 result["dependency_artifact"] = record["dependency_artifact"]
             if not self.cancel.is_set() and not result["timed_out"]:
+                protected = self.protected_material(secret, record)
                 source = snapshot(self.work)
                 if contains_secret(source, protected):
                     raise Rejected(

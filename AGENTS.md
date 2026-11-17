@@ -6,11 +6,11 @@
 - `projects/` owns project configuration; `credentials/` owns encrypted secrets and settings views.
 - `runner_control/` owns scoped machine APIs, configuration, immutable context/plans, approvals, recovery, retention, release evidence, operator views, and its migrations.
 - `vibearr_runner/` is the independent standard-library supervisor, backends, workspaces, execution boundaries, Git delivery, recovery, private logs, and cleanup. `coding_runner/` preserves compatibility imports and tests. `coding_runner/acceptance/` intentionally has no `__init__.py`; explicit Git/OS acceptance does not require Git in the Django application image.
-- `vibearr_executor/` is the independent standard-library trusted OCI service and authenticated client. The Docker-only target uses authenticated, preprovisioned worker slots with no runtime Docker daemon access; registered profiles and control state stay outside candidate checkouts.
+- `vibearr_executor/` owns the integrated Docker execution service, native CLI wrappers, persistent subscription logins, egress mediation, disposable PostgreSQL, and trusted validation. One runner executes setup, agent and validation sequentially without Docker daemon access. Historical slot modules remain for receipt compatibility and regression tests.
 - App templates and static assets live under each app's `templates/` and `static/` directories; shared navigation is in `templates/base.html`.
-- `vibearr_app/` contains settings, root routing, ASGI/WSGI, and Celery configuration.
+- `vibearr_app/` contains settings, root routing, and ASGI/WSGI. The app container supervises web serving and the durable PostgreSQL import scheduler.
 - `vibearr/` is the standalone CLI; `nq/` preserves compatibility imports and tests. It remains a standalone standard-library HTTP CLI, independent of Django, runner code, and database access.
-- Tests live beside their app or runtime module. Run deployment boundary checks in a qualification container against the actual Docker worker stack. Host-executor reports do not qualify Docker-only execution. See `docs/docker-only-runtime-plan.md`.
+- Tests live beside their app or runtime module. Run deployment boundary checks against the actual integrated Docker runner. Old host or worker-fleet reports do not qualify this runtime. See `docs/docker-only-runtime-plan.md`.
 
 ## Docker-only execution
 
@@ -23,8 +23,12 @@
   devices, or runtime mounts of the host checkout, home, `.git`, `.runtime` or secrets.
 - Use immutable images, private networks, named volumes and bounded tmpfs. A missing
   container tool is implementation work, never permission to fall back to the host.
-- Follow `docs/docker-only-runtime-plan.md`; the host-based runtime is withdrawn.
-  Keep live execution disabled until the Docker-only correction branches qualify.
+- The canonical stack has exactly three long-running services: app, postgres and
+  runner. Codex and Claude Code use managed subscription login; OpenCode uses an
+  operator-provided external Ollama endpoint/model. Do not add model API-key
+  fallback, bundled Ollama, permanent broker/worker/proxy or test-DB services.
+- Follow `docs/docker-only-runtime-plan.md`; host execution and the old fleet are
+  withdrawn. Keep processing disabled until the integrated runtime qualifies.
 - Existing Docker/Compose orchestration and deliberate repository/configuration
   edits are the operator boundary. Do not start services, deploy, run paid agents,
   or clean unrelated files just because documentation is being revised.
@@ -34,16 +38,13 @@
 Use Python 3.12 inside images. All commands below execute in Docker.
 
 ```sh
-docker compose build
-docker compose up -d --wait
-docker compose --profile tools run --rm tools python manage.py migrate
-docker compose --profile tools run --rm tools python manage.py createsuperuser
-docker compose --profile tools run --rm tools python manage.py test
-docker compose --profile tools run --rm tools python manage.py test work_queue.test_api
-docker compose --profile tools run --rm -e VIBEARR_URL=http://vibearr:8000 tools python -m vibearr projects
+bash run.sh --build
+docker compose run --rm app python manage.py createsuperuser
+bash test.sh
+bash test.sh work_queue.test_api
 ```
 
-Use the tools entrypoint so private credential files load into each process.
+Use the application bootstrap/credential entrypoint for management commands.
 Bare `docker compose exec` does not inherit the web process's loaded secrets.
 See `docs/docker-operations.md` for qualification, browser, backup and recovery
 jobs. Do not run old host test/qualification scripts as a substitute.
@@ -61,11 +62,7 @@ For existing SQLite data, follow the README's export/import procedure before swi
 Use four-space indentation, `snake_case` functions/modules, and `PascalCase` classes. Format Python with Black; Ruff's configured line-length limit is 120. Run:
 
 ```sh
-docker compose --profile tools run --rm tools black --check .
-docker compose --profile tools run --rm tools ruff check .
-docker compose --profile tools run --rm tools mypy . --config-file mypy.ini
-docker compose --profile tools run --rm tools python manage.py makemigrations --check --dry-run
-docker compose --profile tools run --rm tools python manage.py check
+bash test.sh
 ```
 
 Keep queue operations in `work_queue/services.py` so submission paths share validation. Include migrations with model changes.
@@ -84,7 +81,7 @@ History uses short, free-form subjects such as `switch to uv` and `wip`; no enfo
 
 ## Security & Configuration
 
-Keep tokens and `.env` untracked. Configure `VIBEARR_API_TOKEN` for API access, `VIBEARR_URL` for the CLI, and `VIBEARR_POSTGRES_PASSWORD` for the database. PostgreSQL data lives in the `postgres-data` Docker volume. The independent Docker `vibearr-runner` service owns task execution schedules, coding agents, Git operations, and PR delivery through the queue API. Configure its GitHub and coding backend credentials separately from issue-import credentials. Celery Beat and its worker own scheduled issue imports; Celery's greeting task is only a demo. Follow `docs/vibearr-mvp.md` and `docs/runner-execution-policy.md` for native policy, qualification, and delivery contracts. Native execution requires the qualified Docker-only worker boundary and a verified adapter; host execution and legacy approval-based proposal execution are unsupported. See `docs/runner-operations.md` for bootstrap, retention, backup, recovery, and live acceptance.
+Keep tokens and `.env` untracked. PostgreSQL data lives in `postgres-data`; runner journals/control and subscription logins use separate named volumes. The runner has no production DB network/credentials or application encryption key. Issue-import and Git delivery credentials remain independent. Native execution requires the qualified integrated boundary and a verified selected CLI/account/model. Never claim subscription allowance telemetry that the CLI cannot verify. See `docs/docker-operations.md` for setup, login, backup, recovery and acceptance. Host execution, model API-key fallback and legacy approval-based proposal execution are unsupported.
 
 ## Rules
 

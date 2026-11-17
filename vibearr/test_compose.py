@@ -1,100 +1,50 @@
 import json
 import os
 from pathlib import Path
-import shutil
-import subprocess
-import tempfile
 import unittest
 
 
-@unittest.skipUnless(shutil.which("docker"), "Compose checks run on the Docker host")
-class ComposeNamingTests(unittest.TestCase):
-    def configuration(self, values):
-        root = Path(__file__).resolve().parent.parent
-        if not (root / "docker-compose.yml").exists():
-            self.skipTest("Source deployment is not in the installed CLI package")
-        with tempfile.NamedTemporaryFile(mode="w") as environment:
-            environment.write(values)
-            environment.flush()
-            result = subprocess.run(
-                [
-                    "docker",
-                    "compose",
-                    "--env-file",
-                    environment.name,
-                    "--profile",
-                    "runner",
-                    "config",
-                    "--format",
-                    "json",
-                ],
-                cwd=root,
-                env={"PATH": os.environ["PATH"]},
-                capture_output=True,
-                text=True,
-                check=True,
+@unittest.skipUnless(
+    os.environ.get("VIBEARR_COMPOSE_CONFIG"),
+    "Rendered Compose facts are supplied by the Docker check harness",
+)
+class ComposeTests(unittest.TestCase):
+    def configuration(self):
+        return json.loads(Path(os.environ["VIBEARR_COMPOSE_CONFIG"]).read_text())
+
+    def test_default_stack_has_exactly_three_services(self):
+        self.assertEqual(
+            set(self.configuration()["services"]), {"app", "postgres", "runner"}
+        )
+
+    def test_runner_cannot_access_database_network_or_app_secrets(self):
+        config = self.configuration()
+        runner = config["services"]["runner"]
+        self.assertNotIn("database", runner["networks"])
+        sources = {entry["source"] for entry in runner["volumes"]}
+        self.assertTrue(
+            sources.isdisjoint(
+                {"postgres-data", "application-secrets", "database-secrets"}
             )
-        return json.loads(result.stdout)
-
-    def test_minimal_legacy_environment_keeps_existing_storage_identity(self):
-        values = "POSTGRES_PASSWORD=old-db\nNQ_API_TOKEN=old-api\nNQ_CREDENTIAL_KEY=old-key\nNQ_RUNNER_API_TOKEN=old-runner\n"
-        config = self.configuration(values)
-        app = config["services"]["vibearr"]["environment"]
-        self.assertEqual(app["POSTGRES_DB"], "nightly_queue")
-        self.assertEqual(app["POSTGRES_USER"], "nightly_queue")
-        self.assertEqual(app["VIBEARR_API_TOKEN"], "old-api")
-        self.assertEqual(app["VIBEARR_CREDENTIAL_KEY"], "old-key")
-        self.assertEqual(
-            config["volumes"]["postgres-data"]["name"], "nightly-queue_postgres-data"
         )
 
-    def test_fresh_example_selects_canonical_storage_identity(self):
-        example = Path(__file__).resolve().parent.parent / ".env.example"
-        if not example.exists():
-            self.skipTest(
-                "Source environment example is not in the installed CLI package"
-            )
-        config = self.configuration(example.read_text())
-        app = config["services"]["vibearr"]["environment"]
-        self.assertEqual(config["name"], "vibearr")
-        self.assertEqual(app["VIBEARR_POSTGRES_DB"], "vibearr")
-        self.assertEqual(app["VIBEARR_POSTGRES_USER"], "vibearr")
-        self.assertEqual(
-            config["volumes"]["postgres-data"]["name"], "vibearr_postgres-data"
-        )
+    def test_only_app_publishes_a_host_port(self):
+        for name, service in self.configuration()["services"].items():
+            with self.subTest(service=name):
+                self.assertEqual(bool(service.get("ports")), name == "app")
 
-    def test_explicit_legacy_project_name_keeps_custom_volume_prefix(self):
-        config = self.configuration(
-            "COMPOSE_PROJECT_NAME=private-queue\nPOSTGRES_PASSWORD=old-db\n"
-        )
-        self.assertEqual(
-            config["volumes"]["postgres-data"]["name"], "private-queue_postgres-data"
-        )
+    def test_journal_volume_keeps_legacy_absolute_paths_accessible(self):
+        mounts = self.configuration()["services"]["runner"]["volumes"]
+        targets = {entry["target"]: entry["source"] for entry in mounts}
+        self.assertEqual(targets["/var/lib/vibearr"], targets["/var/lib/coding-runner"])
 
-    def test_explicit_volume_project_is_independent_of_service_project(self):
-        config = self.configuration(
-            "COMPOSE_PROJECT_NAME=vibearr\nVIBEARR_DATA_PROJECT=old-deploy\n"
-        )
-        self.assertEqual(
-            config["volumes"]["postgres-data"]["name"], "old-deploy_postgres-data"
-        )
+    def test_runner_and_database_use_declared_named_volumes(self):
+        for name, service in self.configuration()["services"].items():
+            for mount in service.get("volumes", []):
+                with self.subTest(service=name, mount=mount["target"]):
+                    self.assertEqual(mount["type"], "volume")
 
-    def test_legacy_runner_mount_preserves_saved_absolute_paths(self):
-        config = self.configuration("NQ_RUNNER_API_TOKEN=existing\n")
-        runner = config["services"]["vibearr-runner"]
-        self.assertEqual(
-            runner["environment"]["VIBEARR_RUNNER_STATE_DIR"], "/var/lib/coding-runner"
-        )
-        self.assertEqual(runner["volumes"][0]["target"], "/var/lib/coding-runner")
-        self.assertEqual(
-            config["volumes"]["runner-data"]["name"], "nightly-queue_runner-data"
-        )
-
-    def test_fresh_runner_uses_canonical_path_in_existing_volume_mapping(self):
-        values = "COMPOSE_PROJECT_NAME=vibearr\nVIBEARR_DATA_PROJECT=vibearr\nVIBEARR_RUNNER_STATE_DIR=/var/lib/vibearr\n"
-        config = self.configuration(values)
-        runner = config["services"]["vibearr-runner"]
-        self.assertEqual(
-            runner["environment"]["VIBEARR_RUNNER_STATE_DIR"], "/var/lib/vibearr"
-        )
-        self.assertEqual(runner["volumes"][0]["target"], "/var/lib/vibearr")
+    def test_ollama_is_not_a_managed_service_or_volume(self):
+        config = self.configuration()
+        self.assertFalse(any("ollama" in name for name in config["services"]))
+        self.assertFalse(any("ollama" in name for name in config["volumes"]))

@@ -49,6 +49,9 @@ def session_secret(*, expires=None):
 
 class CodexTaskTests(unittest.TestCase):
     def setUp(self):
+        environment = patch.dict(os.environ, {DATABASE_ENV: ""})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.context = {
             "schema_version": 1,
             "adapter": "codex",

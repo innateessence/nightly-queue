@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 
 from django.core.exceptions import ValidationError
 from django.forms.models import model_to_dict
@@ -147,8 +148,8 @@ def project_configuration(project, defaults, overrides, credentials):
         if not credential or not field.startswith(("research", "implementation")):
             continue
         allowed = {
-            "codex": ("token", "session"),
-            "claude": ("token",),
+            "codex": ("token", "session", "login"),
+            "claude": ("token", "login"),
             "opencode": ("connection",),
         }
         if credential["kind"] not in allowed.get(credential["provider"], ()):
@@ -314,7 +315,7 @@ def _configuration_document(saved):
     }
     document["runtime_contract"] = {
         "schema_version": 1,
-        "runtime": "compose-slot-v2",
+        "runtime": os.environ.get("VIBEARR_RUNTIME_PROTOCOL", "compose-slot-v2"),
         "protocol_version": PROTOCOL_VERSION,
         "qualification_version": QUALIFICATION_VERSION,
         "qualification_source": "authenticated_executor_capabilities",

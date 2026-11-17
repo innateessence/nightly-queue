@@ -1,4 +1,3 @@
-from celery.result import EagerResult
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -7,15 +6,15 @@ from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from django.views.generic import ListView
-from kombu.exceptions import OperationalError
+from django.db import DatabaseError
 
 from projects.models import Project
 from runner_control.models import Run
 
 from .forms import QueueItemForm
-from .models import QueueItem
+from .models import ImportJob, QueueItem
 from .services import claimable_items, source_wait_reason, delete_queue_item
-from .tasks import import_auto_issues
+from .import_jobs import enqueue_import
 
 
 class Index(ListView):
@@ -74,6 +73,9 @@ class Index(ListView):
                 else ""
             )
         context = {
+            "latest_import": ImportJob.objects.filter(scheduled=False)
+            .order_by("-pk")
+            .first(),
             "queue_total": QueueItem.objects.filter(
                 status=QueueItem.Status.QUEUED
             ).count(),
@@ -106,39 +108,17 @@ class Index(ListView):
 @require_POST
 def sync_issues(request):
     try:
-        result = import_auto_issues.delay()
-    except OperationalError:
+        enqueue_import()
+    except DatabaseError:
         messages.error(
             request,
             "Unable to start issue sync. Please try again shortly.",
         )
         return redirect("index")
-    if not isinstance(result, EagerResult):
-        messages.success(
-            request,
-            "Issue sync started for all autonomous projects. Refresh the queue shortly to see new items.",
-        )
-        return redirect("index")
-    if not result.successful():
-        messages.error(
-            request, "Issue sync failed. Please try again or check the server logs."
-        )
-        return redirect("index")
-    summary = result.result
-    if summary["skipped"]:
-        messages.error(
-            request,
-            "Issue sync skipped. Check the GitHub API credential in Settings and try again.",
-        )
-        return redirect("index")
-    text = f"Issue sync finished. Projects synced: {summary['projects']}. New items: {summary['created']}."
-    if summary["failed"]:
-        messages.warning(
-            request,
-            f"{text} Projects that could not be synced: {summary['failed']}. Check GitHub access and try again.",
-        )
-    else:
-        messages.success(request, text)
+    messages.success(
+        request,
+        "Issue sync queued for all autonomous projects. Refresh the queue shortly to see new items.",
+    )
     return redirect("index")
 
 

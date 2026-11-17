@@ -27,4 +27,33 @@ RUN --network=none python -m pip install --no-cache-dir --no-build-isolation --n
 RUN --network=none python manage.py collectstatic --noinput --clear
 USER 10001:10001
 EXPOSE 8000
-CMD ["gunicorn", "vibearr_app.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "90", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["python", "-m", "deploy.docker.application"]
+
+FROM base AS runner-binaries
+COPY deploy/docker/install_agents.py /opt/install_agents.py
+RUN python /opt/install_agents.py
+RUN codex --version && claude --version && opencode --version
+
+FROM tools-base AS runner
+LABEL io.vibearr.role="runner"
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-15 iptables procps \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 1000 --create-home task \
+    && useradd --uid 10002 --no-create-home testdatabase \
+    && mkdir -p /work /home/task /input /secrets /control /test-database /logins /login-work /opt/candidate /opt/validation /opt/executor
+COPY --from=runner-binaries /usr/local/bin/codex /usr/local/bin/codex
+COPY --from=runner-binaries /usr/local/bin/codex-code-mode-host /usr/local/bin/codex-code-mode-host
+COPY --from=runner-binaries /usr/local/bin/claude /usr/local/bin/claude
+COPY --from=runner-binaries /usr/local/bin/opencode /usr/local/bin/opencode
+COPY requirements.txt /opt/validation/project-requirements.txt
+RUN python -m venv --copies /opt/application-python \
+    && /opt/application-python/bin/python -m pip install --no-cache-dir pip==25.0.1 setuptools==80.9.0 wheel==0.48.0 packaging==26.3
+COPY vibearr_executor /opt/executor/vibearr_executor
+COPY vibearr_runner /opt/executor/vibearr_runner
+COPY coding_runner /opt/executor/coding_runner
+RUN ln -s /opt/executor/vibearr_executor /usr/local/lib/python3.12/site-packages/vibearr_executor \
+    && ln -s /opt/executor/vibearr_runner /usr/local/lib/python3.12/site-packages/vibearr_runner \
+    && ln -s /opt/executor/coding_runner /usr/local/lib/python3.12/site-packages/coding_runner
+WORKDIR /opt/executor
+USER 0:0
+ENTRYPOINT ["python", "-I", "-m", "vibearr_executor.integrated"]

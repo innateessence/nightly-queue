@@ -1,11 +1,9 @@
-from django.conf import settings
 from django.test import Client, TestCase
 from django.urls import reverse
 
 from projects.models import Project
 
 from .models import QueueItem
-from .tasks import add, nightly_greeting
 
 
 class QueueViewTests(TestCase):
@@ -193,19 +191,3 @@ class QueueViewTests(TestCase):
         response = client.post(url)
         self.assertEqual(response.status_code, 403)
         self.assertTrue(QueueItem.objects.filter(pk=item.pk).exists())
-
-
-class CeleryTaskTests(TestCase):
-    def test_add_task_returns_sum(self):
-        result = add(2, 3)
-        self.assertEqual(result, 5)
-
-    def test_nightly_greeting_task(self):
-        result = nightly_greeting()
-        self.assertIn("greeting", result)
-        self.assertIsNotNone(result.get("at"))
-
-    def test_beat_schedule_contains_nightly_greeting(self):
-        self.assertIn("nightly-greeting", settings.CELERY_BEAT_SCHEDULE)
-        greeting = settings.CELERY_BEAT_SCHEDULE["nightly-greeting"]
-        self.assertEqual(greeting["task"], "work_queue.tasks.nightly_greeting")

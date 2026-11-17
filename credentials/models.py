@@ -36,6 +36,7 @@ class Credential(models.Model):
         SECRET = "secret", "Secret (other)"
         SESSION = "session", "Codex session (JSON)"
         CONNECTION = "connection", "OpenCode connection (JSON)"
+        LOGIN = "login", "Runner subscription login"
 
     name = models.CharField(max_length=200)
     provider = models.CharField(
@@ -115,6 +116,11 @@ class Credential(models.Model):
                 raise ValidationError({"secret": "Tokens cannot contain whitespace."})
         elif self.kind == self.Kind.SSH:
             self.validate_private_key(secret, passphrase)
+        elif self.kind == self.Kind.LOGIN:
+            if secret != "managed-subscription-login":
+                raise ValidationError(
+                    {"secret": "Subscription login is managed inside the runner."}
+                )
         elif self.kind != self.Kind.SECRET:
             raise ValidationError({"kind": "Select a supported credential type."})
         payload = json.dumps({"secret": secret, "passphrase": passphrase})
@@ -126,8 +132,8 @@ class Credential(models.Model):
         allowed = {
             self.Provider.GITHUB: (self.Kind.TOKEN, self.Kind.SSH, self.Kind.SECRET),
             self.Provider.GITLAB: (self.Kind.TOKEN, self.Kind.SSH, self.Kind.SECRET),
-            self.Provider.CODEX: (self.Kind.TOKEN, self.Kind.SESSION),
-            self.Provider.CLAUDE: (self.Kind.TOKEN,),
+            self.Provider.CODEX: (self.Kind.TOKEN, self.Kind.SESSION, self.Kind.LOGIN),
+            self.Provider.CLAUDE: (self.Kind.TOKEN, self.Kind.LOGIN),
             self.Provider.OPENCODE: (self.Kind.CONNECTION,),
         }
         if self.kind not in allowed.get(self.provider, ()):

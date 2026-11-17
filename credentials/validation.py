@@ -69,6 +69,14 @@ def validate_structured_secret(provider, kind, secret):
         return
     if provider != "opencode" or kind != "connection":
         invalid_material()
+    if value.get("provider") == "ollama" and not value.get("api_key"):
+        from vibearr_executor.ollama_relay import external_endpoint
+
+        try:
+            external_endpoint(value.get("base_url"))
+            return
+        except ValueError:
+            pass
     from vibearr_runner.opencode_connection import validate_connection
 
     try:

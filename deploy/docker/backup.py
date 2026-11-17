@@ -150,7 +150,8 @@ def backup(quiesced):
             "Database changed during backup; stop all state writers first."
         )
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "runtime": "integrated-runner-v1",
         "backup_id": identity,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "database": {
@@ -187,7 +188,11 @@ def verified_backup(identity):
     if directory.is_symlink() or not directory.is_dir():
         raise ValueError("Select a complete backup directory without links.")
     manifest = read_json(directory / "manifest.json")
-    if manifest.get("schema_version") != 1 or manifest.get("backup_id") != identity:
+    if (
+        manifest.get("schema_version") != 2
+        or manifest.get("runtime") != "integrated-runner-v1"
+        or manifest.get("backup_id") != identity
+    ):
         raise ValueError("Backup manifest does not bind this snapshot.")
     if set(manifest.get("artifacts", {})) != {
         "database.dump",

@@ -1,5 +1,10 @@
 # Standalone runner supervisor
 
+> Historical implementation reference. Deployment and authentication instructions
+> here are superseded by the [three-container runtime](docker-only-runtime-plan.md)
+> and [current operations](docker-operations.md). Do not start the old worker fleet,
+> use model API keys, or reuse its qualification evidence for the integrated runner.
+
 > **Docker-only runtime requirement:** Follow the [Docker-only runtime plan](docker-only-runtime-plan.md)
 > and [deployment contract](mvp-deployment.md). Every Python, Git, coding CLI,
 > packaging, test, qualification and browser command in this reference executes

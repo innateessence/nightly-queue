@@ -7,14 +7,14 @@ from .audit import inspect_containers
 class RuntimeInspectionTests(unittest.TestCase):
     def setUp(self):
         self.container = {
-            "Name": "/checks-validation-worker-1",
+            "Name": "/checks-runner-1",
             "Id": "a" * 64,
             "Image": "sha256:" + "b" * 64,
             "Config": {
-                "Labels": {"com.docker.compose.service": "validation-worker"},
+                "Labels": {"com.docker.compose.service": "runner"},
                 "Env": [
                     "UNRELATED_SECRET=must-not-appear-in-report",
-                    "VIBEARR_SLOT_IMAGE_ID=sha256:" + "b" * 64,
+                    "VIBEARR_RUNNER_IMAGE_ID=sha256:" + "b" * 64,
                 ],
             },
             "HostConfig": {

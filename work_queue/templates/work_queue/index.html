@@ -8,6 +8,9 @@
 </section>
 {% endblock %}
 {% block content %}
+{% if latest_import %}
+<p class="notice" role="status">Issue sync: {{ latest_import.get_status_display }}.{% if latest_import.summary.error %} {{ latest_import.summary.error }}{% elif latest_import.summary.skipped %} Check the GitHub API credential in Settings.{% elif latest_import.status == 'succeeded' %} Projects synced: {{ latest_import.summary.projects }}. New items: {{ latest_import.summary.created }}.{% if latest_import.summary.failed %} Failed projects: {{ latest_import.summary.failed }}.{% endif %}{% endif %}</p>
+{% endif %}
 <details class="add-panel panel" id="add-item"{% if form.errors %} open{% endif %}>
   <summary>Add a work item</summary>
   <section class="composer" aria-labelledby="add-title">

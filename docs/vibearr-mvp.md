@@ -1,5 +1,10 @@
 # vibearr MVP: the first self-improvement loop
 
+> Historical implementation reference. Deployment and authentication instructions
+> here are superseded by the [three-container runtime](docker-only-runtime-plan.md)
+> and [current operations](docker-operations.md). Do not start the old worker fleet,
+> use model API keys, or reuse its qualification evidence for the integrated runner.
+
 This is the release contract for the first usable vibearr, alongside the
 [feature branch plan](autonomous-ai-queue-plan.md). It describes work to implement,
 not acceptance results already obtained. Each section names the feature that

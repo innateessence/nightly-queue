@@ -736,7 +736,7 @@ def validate_execution_identity(value):
         {"runtime", "protocol_version", "instance_id", "worker_boot", "binding_digest"},
     )
     if (
-        value["runtime"] != "compose-slot-v2"
+        value["runtime"] not in {"compose-slot-v2", "integrated-runner-v1"}
         or type(value["protocol_version"]) is not int
         or value["protocol_version"] != 2
     ):

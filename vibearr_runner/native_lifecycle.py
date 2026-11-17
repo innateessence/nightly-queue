@@ -868,6 +868,11 @@ class NativeLifecycle:
             )
         )
         if failed or not isinstance(result.get("artifact"), dict):
+            failure_reason = (
+                adapter.failure_reason(session)
+                if hasattr(adapter, "failure_reason")
+                else "Native session terminated without complete successful output; no candidate was imported."
+            )
             payload = validate_native_artifact(
                 "native_agent",
                 {
@@ -889,11 +894,9 @@ class NativeLifecycle:
             self.preflight.invalidate_account(
                 self.state,
                 account,
-                "Native session failed; authenticate the selected account again before another task.",
+                failure_reason,
             )
-            raise NativeFailure(
-                "Native session terminated without complete successful output; no candidate was imported."
-            )
+            raise NativeFailure(failure_reason)
         outcome = adapter.outcome(session, original)
         payload = agent_result(
             intent_id=data["intent_id"],

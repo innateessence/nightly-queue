@@ -18,9 +18,14 @@ class ExecutionPolicy:
     execution_kind: str = "native"
     workspace_access: str = "write"
     runtime_profile: str = "native-default"
-    validation_profile: str = "project-default"
+    validation_profile: str = "vibearr-python312-v1"
     network_hosts: tuple[str, ...] = (
         "api.openai.com",
+        "chatgpt.com",
+        "auth.openai.com",
+        "api.anthropic.com",
+        "claude.ai",
+        "platform.claude.com",
         "pypi.org",
         "files.pythonhosted.org",
     )
