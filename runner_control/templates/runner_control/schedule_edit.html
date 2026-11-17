@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Schedule · vibearr{% endblock %}
+{% block schedules_current %} aria-current="page"{% endblock %}
+{% block heading %}
+<section class="page-heading" aria-labelledby="page-title"><div><h1 id="page-title">{% if schedule_id %}Edit schedule{% else %}Add schedule{% endif %}</h1><p class="subtitle">Choose when assigned coding runners may process work.</p></div><a class="button-filter" href="{% url 'runner_schedule_list' %}">All schedules</a></section>
+{% endblock %}
+{% block content %}
+<div class="settings-layout"><nav class="section-nav" aria-label="Schedule sections"><a href="#processing">Schedule</a><a href="#assigned">Coding runners</a></nav><div class="settings-content">
+  <section class="panel composer" id="processing"><h2>Processing schedule</h2>
+    <p class="field-hint">Changes apply to every assigned coding runner at its next schedule check. Task limits, pause controls and usage reserves remain on each runner.</p>
+    {% if form_unavailable %}<p role="status">{{ form_unavailable }}</p>{% else %}
+    <form method="post" class="settings-fields">{% csrf_token %}{{ form.non_field_errors }}
+      {% include "runner_control/_fields.html" with fields=form %}
+      <div class="form-actions"><button class="button-primary" type="submit">Save schedule</button></div>
+    </form>{% endif %}
+  </section>
+  <section class="panel plan-section" id="assigned"><h2>Assigned coding runners</h2>
+    {% if assigned_error %}<p role="status">{{ assigned_error }}</p>{% endif %}
+    {% for runner in assigned_runners %}<p><a href="{% url 'coding_runner_edit' runner.pk %}">{{ runner.name }}</a></p>{% empty %}<p class="field-hint">No coding runners use this schedule yet. Choose it on a runner's configuration page.</p>{% endfor %}
+    <a href="{% url 'coding_runner_list' %}">Manage coding runners</a>
+  </section>
+  {% if schedule_id and schedule_id != 1 %}<section class="panel plan-section"><h2>Delete schedule</h2><p>Assign its coding runners to another schedule before deleting it.</p><form method="post" action="{% url 'runner_schedule_delete' schedule_id %}">{% csrf_token %}<button class="button-danger" type="submit">Delete schedule</button></form></section>{% endif %}
+</div></div>
+{% endblock %}

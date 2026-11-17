@@ -120,9 +120,11 @@ repository URL, and save a GitHub token under Credentials. Select the issue-impo
 token in Settings and enable **Autonomous** on the project to discover its issues.
 You can also add tasks directly from the queue.
 
-Use **Configuration → Coding Runners** to define named runners with independent
-schedules, backends, and credentials. Assign each configuration to a provisioned
-runner identity. See [runner configuration](docs/runner-settings.md) for setup;
+Use **Configuration → Coding Runners** to define named runners with their own
+backends and credentials. Create reusable processing windows under
+**Configuration → Schedules**, then assign one schedule to each coding runner.
+Several runners can share a schedule. Assign each runner configuration to a provisioned
+identity. See [runner configuration](docs/runner-settings.md) for setup;
 existing identities continue using the preserved default configuration.
 
 The web app and issue importer start with the default Compose services. Execution

@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError
 
 from credentials.models import Credential
 
-from .settings_models import ProjectRunnerSettings, RunnerSettings
+from .settings_models import ProjectRunnerSettings, RunnerSettings, RunnerSchedule
 from .validators import BACKENDS, OVERRIDE_FIELDS
 
 
@@ -38,6 +38,9 @@ class RunnerSettingsForm(forms.ModelForm):
             "Assign a provisioned runner identity to use this configuration. "
             "Unassigned identities use the default runner configuration."
         )
+        self.fields["schedule"].help_text = (
+            "Choose a reusable schedule. Changes on the Schedules page apply to every assigned runner."
+        )
         for stage in ("research", "implementation"):
             self.fields[f"{stage}_model"].widget.attrs["list"] = "runner-claude-models"
             self.fields[f"{stage}_model"].help_text = (
@@ -54,7 +57,6 @@ class RunnerSettingsForm(forms.ModelForm):
         field_classes = {
             field: ConfigurationJSONField
             for field in (
-                "windows",
                 "setup_commands",
                 "validation_commands",
                 "execution_policy",
@@ -67,8 +69,6 @@ class RunnerSettingsForm(forms.ModelForm):
             "log_retention_days": "Expire protected local logs and uploaded artifacts for acknowledged terminal runs. Keep delivery, validation, stage, and recovery summaries.",
             "enabled": "Execution stays release-gated until live integration verification succeeds.",
             "paused": "Pause current work at the next safe checkpoint and prevent new claims.",
-            "windows": 'JSON list: [{"days": [0,1,2,3,4], "start": "22:00", "end": "06:00"}]. Days start on Monday; overnight windows belong to their starting day.',
-            "timezone": "IANA timezone. Schedule evaluation and DST policy belong to the execution gates.",
             "reserve_enabled": "Block all projects if any participating account lacks fresh allowance or is at/below the reserve.",
             "minimum_remaining_usage_percent": "40 permits work only while more than 40% remains. Zero still blocks exhausted accounts.",
             "setup_commands": "JSON list of setup commands, restricted to the configured isolated task policy.",
@@ -77,11 +77,23 @@ class RunnerSettingsForm(forms.ModelForm):
             "validation_commands": "JSON list of required validation commands.",
         }
         widgets = {
-            "windows": forms.Textarea(attrs={"rows": 3}),
             "setup_commands": forms.Textarea(attrs={"rows": 3}),
             "validation_commands": forms.Textarea(attrs={"rows": 3}),
             "research_instructions": forms.Textarea(attrs={"rows": 4}),
             "implementation_instructions": forms.Textarea(attrs={"rows": 4}),
+        }
+
+
+class RunnerScheduleForm(forms.ModelForm):
+    class Meta:
+        model = RunnerSchedule
+        fields = ["name", "schedule_mode", "timezone", "windows"]
+        labels = {"schedule_mode": "Processing mode"}
+        field_classes = {"windows": ConfigurationJSONField}
+        widgets = {"windows": forms.Textarea(attrs={"rows": 4})}
+        help_texts = {
+            "timezone": "IANA timezone, such as America/Los_Angeles. Daylight saving changes follow this timezone.",
+            "windows": 'JSON list: [{"days": [0,1,2,3,4], "start": "22:00", "end": "06:00"}]. Monday is 0; overnight windows belong to their starting day.',
         }
 
 

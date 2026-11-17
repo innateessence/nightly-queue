@@ -337,7 +337,7 @@ def inspect(request, repository, *, mvp_defaults=False):
         "processing_paused": defaults.paused,
         "worker_limit": 1,
         "tasks_per_window": defaults.tasks_per_window,
-        "schedule": defaults.schedule_mode,
+        "schedule": settings_values(defaults)["schedule_mode"],
         "reserve_enabled": defaults.reserve_enabled,
         "planned_defaults": (
             deepcopy(BOOTSTRAP_DEFAULTS) if mvp_defaults or saved is None else {}

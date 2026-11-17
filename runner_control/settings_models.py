@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
+from django.core.management.color import no_style
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models, transaction
+from django.db import connection, models, transaction
 
 from vibearr_runner.policy import default_execution_policy
 
@@ -16,6 +17,60 @@ from .validators import (
 )
 
 
+class RunnerSchedule(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    schedule_mode = models.CharField(
+        max_length=12,
+        choices=[("continuous", "Continuous"), ("windows", "Weekday windows")],
+        default="continuous",
+    )
+    timezone = models.CharField(
+        max_length=100, default="UTC", validators=[validate_timezone]
+    )
+    windows = models.JSONField(default=list, blank=True, validators=[validate_windows])
+
+    class Meta:
+        ordering = ["name", "pk"]
+
+    def clean(self):
+        super().clean()
+        try:
+            validate_windows(self.windows)
+        except ValidationError as exc:
+            raise ValidationError({"windows": exc.messages}) from None
+        if self.schedule_mode == "windows" and not self.windows:
+            raise ValidationError({"windows": "Add at least one processing window."})
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            list(
+                RunnerSettings.objects.select_for_update()
+                .filter(pk=1)
+                .values_list("pk", flat=True)
+            )
+            if self.pk is None:
+                ensure_default_schedule()
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+def ensure_default_schedule():
+    with transaction.atomic():
+        saved, created = RunnerSchedule.objects.get_or_create(
+            pk=1, defaults={"name": "Always on"}
+        )
+        if created:
+            with connection.cursor() as cursor:
+                for statement in connection.ops.sequence_reset_sql(
+                    no_style(), [RunnerSchedule]
+                ):
+                    cursor.execute(statement)
+        return saved
+
+
 class RunnerSettings(models.Model):
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=100, default="Default runner")
@@ -28,21 +83,15 @@ class RunnerSettings(models.Model):
     )
     enabled = models.BooleanField(default=False)
     paused = models.BooleanField(default=False)
+    schedule = models.ForeignKey(
+        RunnerSchedule, on_delete=models.PROTECT, default=1, related_name="runners"
+    )
     execution_policy = models.JSONField(
         default=default_execution_policy, validators=[validate_execution_policy]
     )
     merge_profile = models.JSONField(
         default=dict, blank=True, validators=[validate_merge_profile]
     )
-    schedule_mode = models.CharField(
-        max_length=12,
-        choices=[("continuous", "Continuous"), ("windows", "Weekday windows")],
-        default="continuous",
-    )
-    timezone = models.CharField(
-        max_length=100, default="UTC", validators=[validate_timezone]
-    )
-    windows = models.JSONField(default=list, blank=True, validators=[validate_windows])
     polling_interval_seconds = models.PositiveIntegerField(
         default=60, validators=[MinValueValidator(1), MaxValueValidator(86400)]
     )
@@ -130,7 +179,6 @@ class RunnerSettings(models.Model):
         for field, validator in (
             ("execution_policy", validate_execution_policy),
             ("merge_profile", validate_merge_profile),
-            ("windows", validate_windows),
             ("setup_commands", validate_commands),
             ("validation_commands", validate_commands),
         ):
@@ -142,8 +190,6 @@ class RunnerSettings(models.Model):
                 validator(value)
             except ValidationError as exc:
                 raise ValidationError({field: exc.messages}) from None
-        if self.schedule_mode == "windows" and not self.windows:
-            raise ValidationError({"windows": "Add at least one processing window."})
         for stage in ("research", "implementation"):
             try:
                 validate_backend_model(
@@ -169,6 +215,8 @@ class RunnerSettings(models.Model):
     def save(self, *args, **kwargs):
         with transaction.atomic():
             list(RunnerSettings.objects.select_for_update().filter(pk=1))
+            if self.schedule_id == 1:
+                ensure_default_schedule()
             self.full_clean()
             return super().save(*args, **kwargs)
 

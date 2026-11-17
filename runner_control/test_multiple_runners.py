@@ -17,7 +17,7 @@ from .execution_policy import current_native_policy
 from .models import Run, RunnerIdentity
 from .native_services import authorize
 from .services import RunConflict, claim_run
-from .settings_models import RunnerSettings
+from .settings_models import RunnerSettings, RunnerSchedule
 from .test_settings import ConfiguredProjectTestCase
 from .test_support import provision_controller
 
@@ -48,19 +48,23 @@ class CodingRunnerConfigurationViewsTests(TestCase):
             ("Evening", "22:00", "America/Los_Angeles"),
         ]:
             windows = [{"days": [0, 1, 2, 3, 4], "start": start, "end": "23:00"}]
+            schedule = RunnerSchedule.objects.create(
+                name=f"{name} schedule",
+                schedule_mode="windows",
+                windows=windows,
+                timezone=zone,
+            )
             data = form_data(
                 RunnerSettings(name=name),
-                schedule_mode="windows",
-                windows=json.dumps(windows),
-                timezone=zone,
+                schedule=schedule.pk,
             )
             response = self.client.post(reverse("coding_runner_add"), data)
             saved = RunnerSettings.objects.get(name=name)
             self.assertRedirects(
                 response, reverse("coding_runner_edit", args=[saved.pk])
             )
-            self.assertEqual(saved.windows, windows)
-            self.assertEqual(saved.timezone, zone)
+            self.assertEqual(saved.schedule.windows, windows)
+            self.assertEqual(saved.schedule.timezone, zone)
         self.assertEqual(RunnerSettings.objects.count(), 3)
         self.assertEqual(APISettings.objects.get().auto_sync_interval_seconds, 3600)
         response = self.client.get(reverse("coding_runner_list"))
@@ -68,26 +72,35 @@ class CodingRunnerConfigurationViewsTests(TestCase):
         self.assertContains(response, "Evening")
 
     def test_editing_one_schedule_preserves_other_schedules(self):
-        other = RunnerSettings.objects.create(name="Other", timezone="Europe/London")
-        data = form_data(other, timezone="America/New_York", tasks_per_window=5)
+        original = RunnerSchedule.objects.create(
+            name="Original", timezone="Europe/London"
+        )
+        replacement = RunnerSchedule.objects.create(
+            name="Replacement", timezone="America/New_York"
+        )
+        other = RunnerSettings.objects.create(name="Other", schedule=original)
+        data = form_data(other, schedule=replacement.pk, tasks_per_window=5)
         response = self.client.post(
             reverse("coding_runner_edit", args=[other.pk]), data
         )
         self.assertEqual(response.status_code, 302)
         other.refresh_from_db()
-        self.assertEqual(other.timezone, "America/New_York")
+        self.assertEqual(other.schedule.timezone, "America/New_York")
         self.assertEqual(other.tasks_per_window, 5)
-        self.assertEqual(RunnerSettings.objects.get(pk=1).timezone, "UTC")
+        self.assertEqual(RunnerSettings.objects.get(pk=1).schedule.timezone, "UTC")
 
     def test_invalid_schedule_does_not_create_runner(self):
-        data = form_data(
-            RunnerSettings(name="Invalid"), schedule_mode="windows", windows="[]"
-        )
-        response = self.client.post(reverse("coding_runner_add"), data)
+        data = {
+            "name": "Invalid",
+            "schedule_mode": "windows",
+            "windows": "[]",
+            "timezone": "UTC",
+        }
+        response = self.client.post(reverse("runner_schedule_add"), data)
         self.assertFormError(
-            response, "runner_form", "windows", "Add at least one processing window."
+            response, "form", "windows", "Add at least one processing window."
         )
-        self.assertFalse(RunnerSettings.objects.filter(name="Invalid").exists())
+        self.assertFalse(RunnerSchedule.objects.filter(name="Invalid").exists())
 
     def test_identity_cannot_be_assigned_to_two_configurations(self):
         identity = RunnerIdentity.objects.create(name="night", token_digest="a" * 64)
@@ -126,10 +139,15 @@ class MultipleRunnerExecutionTests(ConfiguredProjectTestCase):
         provision_controller(self)
         self.client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {self.token}"
         values = settings_values(RunnerSettings.objects.get(pk=1))
+        for key in ("schedule_mode", "timezone", "windows"):
+            values.pop(key)
+        schedule = RunnerSchedule.objects.create(
+            name="Night schedule", timezone="America/Los_Angeles"
+        )
         values.update(
             enabled=True,
             implementation_model="night-model",
-            timezone="America/Los_Angeles",
+            schedule_id=schedule.pk,
         )
         self.settings = RunnerSettings.objects.create(
             name="Night", identity=self.runner, **values
@@ -171,8 +189,8 @@ class MultipleRunnerExecutionTests(ConfiguredProjectTestCase):
         enqueue_item(project=self.project, title="Night work")
         document = configuration_document(self.runner)
         default = RunnerSettings.objects.get(pk=1)
-        default.timezone = "Europe/London"
-        default.save()
+        default.schedule.timezone = "Europe/London"
+        default.schedule.save()
         run = claim_run(
             runner=self.runner,
             run_id=uuid4(),
@@ -197,9 +215,11 @@ class MultipleRunnerExecutionTests(ConfiguredProjectTestCase):
         self.assertEqual(item.status, "queued")
 
     def test_schedules_open_independently_for_each_identity(self):
-        self.settings.schedule_mode = "windows"
-        self.settings.windows = [{"days": [0], "start": "22:00", "end": "06:00"}]
-        self.settings.save()
+        self.settings.schedule.schedule_mode = "windows"
+        self.settings.schedule.windows = [
+            {"days": [0], "start": "22:00", "end": "06:00"}
+        ]
+        self.settings.schedule.save()
         now = datetime(2026, 11, 16, 20, tzinfo=timezone.utc)
         night_interval, _ = schedule(configuration_document(self.runner)["global"], now)
         default_interval, _ = schedule(configuration_document()["global"], now)
@@ -278,8 +298,8 @@ class MultipleRunnerMigrationTests(TransactionTestCase):
         self.restore_schema()
         saved = RunnerSettings.objects.get(pk=1)
         self.assertTrue(saved.enabled)
-        self.assertEqual(saved.windows, windows)
-        self.assertEqual(saved.timezone, "America/Los_Angeles")
+        self.assertEqual(saved.schedule.windows, windows)
+        self.assertEqual(saved.schedule.timezone, "America/Los_Angeles")
         self.assertEqual(saved.name, "Default runner")
         additional = RunnerSettings.objects.create(name="Additional")
         self.assertGreater(additional.pk, 1)

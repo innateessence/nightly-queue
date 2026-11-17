@@ -4,12 +4,13 @@ from django.dispatch import receiver
 from credentials.models import Credential
 from projects.models import Project
 
-from .settings_models import ProjectRunnerSettings, RunnerSettings
+from .settings_models import ProjectRunnerSettings, RunnerSettings, RunnerSchedule
 
 
 @receiver(pre_delete, sender=Project)
 @receiver(pre_delete, sender=ProjectRunnerSettings)
 @receiver(pre_delete, sender=Credential)
 @receiver(pre_delete, sender=RunnerSettings)
+@receiver(pre_delete, sender=RunnerSchedule)
 def lock_configuration_deletion(sender, instance, using, **kwargs):
     list(RunnerSettings.objects.using(using).select_for_update().filter(pk=1))

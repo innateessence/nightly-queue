@@ -37,14 +37,16 @@ def window_labels(saved):
 def index(request):
     runner_settings()
     runners = []
-    for saved in RunnerSettings.objects.select_related("identity").order_by("pk"):
+    for saved in RunnerSettings.objects.select_related("identity", "schedule").order_by(
+        "pk"
+    ):
         document = configuration_for_settings(saved)
         metadata = {
             "name": str(saved),
             "identity": saved.identity.name if saved.identity else "Unassigned",
-            "timezone": saved.timezone,
-            "schedule": saved.get_schedule_mode_display(),
-            "windows": window_labels(saved),
+            "timezone": saved.schedule.timezone,
+            "schedule": saved.schedule.name,
+            "windows": window_labels(saved.schedule),
         }
         safe, error = present_configuration_payload(document, metadata)
         runners.append(
@@ -54,6 +56,7 @@ def index(request):
                 "paused": saved.paused,
                 "metadata": safe,
                 "error": error,
+                "schedule_id": saved.schedule_id,
             }
         )
     response = render(
