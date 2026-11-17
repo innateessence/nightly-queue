@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Schedules · vibearr{% endblock %}
+{% block schedules_current %} aria-current="page"{% endblock %}
+{% block heading %}
+<section class="page-heading" aria-labelledby="page-title"><div><h1 id="page-title">Schedules</h1><p class="subtitle">Reusable processing windows for your coding runners.</p></div><a class="button-primary" href="{% url 'runner_schedule_add' %}">Add schedule</a></section>
+{% endblock %}
+{% block content %}
+<section class="panel plan-section"><h2>Processing schedules</h2>
+  <p class="field-hint">Create as many schedules as you need. Each coding runner uses one schedule, and several runners can share it. Editing a schedule updates every assigned runner at its next schedule check.</p>
+  <div class="table-scroll"><table class="data-table">
+    <thead><tr><th scope="col">Schedule</th><th scope="col">Processing windows</th><th scope="col">Coding runners</th><th scope="col">Actions</th></tr></thead>
+    <tbody>{% for schedule in schedules %}<tr>
+      {% if schedule.error %}<td colspan="3">{{ schedule.error }}</td>{% else %}
+      <td><a href="{% url 'runner_schedule_edit' schedule.pk %}">{{ schedule.metadata.name }}</a>{% if schedule.pk == 1 %}<p class="field-hint">Default</p>{% endif %}</td>
+      <td>{{ schedule.metadata.mode }} · {{ schedule.metadata.timezone }}{% for window in schedule.metadata.windows %}<p class="field-hint">{{ window }}</p>{% endfor %}</td>
+      <td>{% for runner in schedule.metadata.runners %}<p><a href="{% url 'coding_runner_edit' runner.pk %}">{{ runner.name }}</a></p>{% empty %}<span class="field-hint">Unassigned</span>{% endfor %}</td>
+      {% endif %}<td><a href="{% url 'runner_schedule_edit' schedule.pk %}">Edit</a></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}

@@ -61,7 +61,7 @@ def diagnose(
             ),
             "execution_enabled": saved.enabled,
             "processing_paused": saved.paused,
-            "schedule": saved.schedule_mode,
+            "schedule": settings_values(saved)["schedule_mode"],
             "reserve_enabled": saved.reserve_enabled,
             "backlog": [],
         }

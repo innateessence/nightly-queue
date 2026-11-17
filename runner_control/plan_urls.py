@@ -1,8 +1,18 @@
 from django.urls import path
 
-from . import plan_views, operations_views, configuration_views
+from . import plan_views, operations_views, configuration_views, schedule_views
 
 urlpatterns = [
+    path("schedules/", schedule_views.index, name="runner_schedule_list"),
+    path("schedules/add/", schedule_views.edit, name="runner_schedule_add"),
+    path(
+        "schedules/<int:schedule_id>/", schedule_views.edit, name="runner_schedule_edit"
+    ),
+    path(
+        "schedules/<int:schedule_id>/delete/",
+        schedule_views.delete,
+        name="runner_schedule_delete",
+    ),
     path("coding-runners/", configuration_views.index, name="coding_runner_list"),
     path("coding-runners/add/", configuration_views.edit, name="coding_runner_add"),
     path(

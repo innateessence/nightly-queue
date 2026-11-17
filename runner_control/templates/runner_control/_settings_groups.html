@@ -1,9 +1,8 @@
 <fieldset class="settings-group"><legend>Processing</legend>
 {% include "runner_control/_field.html" with field=runner_form.enabled %}
 {% include "runner_control/_field.html" with field=runner_form.paused %}
-{% include "runner_control/_field.html" with field=runner_form.schedule_mode %}
-{% include "runner_control/_field.html" with field=runner_form.timezone %}
-{% include "runner_control/_field.html" with field=runner_form.windows %}
+{% include "runner_control/_field.html" with field=runner_form.schedule %}
+<p class="field-hint"><a href="{% url 'runner_schedule_list' %}">Manage schedules</a></p>
 {% include "runner_control/_field.html" with field=runner_form.polling_interval_seconds %}
 {% include "runner_control/_field.html" with field=runner_form.tasks_per_window %}
 {% include "runner_control/_field.html" with field=runner_form.reserve_enabled %}

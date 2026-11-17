@@ -108,6 +108,8 @@ class SelectedSecretTests(TestCase):
 
     def configure_separate_runner(self):
         values = settings_values(self.settings)
+        for key in ("schedule_mode", "timezone", "windows"):
+            values.pop(key)
         values["implementation_credential_id"] = self.unselected.pk
         return RunnerSettings.objects.create(
             name="Separate", identity=self.runner, **values

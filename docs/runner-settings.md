@@ -1,12 +1,24 @@
 # Coding runner configuration (schema 1)
 
 Open **Configuration → Coding Runners** to add, edit, or delete named runner
-configurations. Each has its own schedule, timezone, task-window limit, polling
-interval, pause controls, backend, credentials, execution policy, and retention.
-There is no configured limit on the number of runners. Issue import credentials
+configurations. Each selects one reusable schedule and has its own task-window
+limit, polling interval, pause controls, backend, credentials, execution policy,
+and retention. There is no configured limit on the number of runners or schedules. Issue import credentials
 and intervals remain on **Settings** and are independent of execution schedules.
 
-The migration preserves existing settings and schedules as **Default runner**.
+Open **Configuration → Schedules**, directly below Coding Runners, to create,
+edit, and delete named schedules. A schedule owns its processing mode, timezone,
+and weekday windows. Choose it in the coding runner's Schedule field; multiple
+runners may use the same schedule. Editing it updates every assigned runner at
+its next processing gate. Task-window limits are counted separately per runner.
+An assigned schedule cannot be deleted until its runners use another schedule.
+The default **Always on** schedule remains available for new runners.
+
+Migration 0015 preserves existing processing windows and timezones by assigning
+saved runner settings to matching schedule records. Existing continuous UTC
+settings use Always on; customized windows retain a schedule named for their
+runner. The schedule migration also supports restoring the original runner fields
+when rolled back. **Default runner** remains the fallback runner configuration.
 Provision machine identities with the Docker tools service:
 `docker compose --profile tools run --rm tools python manage.py provision_runner <name>`,
 using a dedicated token supplied through `VIBEARR_RUNNER_API_TOKEN`, then select
@@ -50,9 +62,9 @@ contain effective values, sources, structural errors and required capabilities.
 No secret ciphertext/plaintext is serialized. The account inventory includes
 stage defaults and every project override. There is no import-token fallback.
 
-A canonical SHA-256 revision changes with the selected runner configuration,
+A canonical SHA-256 revision changes with the selected runner configuration and schedule,
 project definitions, overrides and selected credential metadata/rotation timestamps.
-Edits to another runner or to the import interval do not alter it. Claim preflight
+Edits to an unassigned schedule, another runner, or the import interval do not alter it. Claim preflight
 supplies that revision. Inside the claim transaction,
 `locked_configuration_snapshot(project, expected_revision, runner)` locks settings
 and credentials, rejects stale/structurally incomplete configuration, and returns

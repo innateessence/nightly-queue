@@ -14,8 +14,11 @@ from .configuration import (
     effective_project_configuration,
     locked_configuration_snapshot,
 )
-from .settings_forms import ProjectRunnerSettingsForm, RunnerSettingsForm
-from .settings_models import ProjectRunnerSettings, RunnerSettings
+from .settings_forms import (
+    ProjectRunnerSettingsForm,
+    RunnerScheduleForm,
+)
+from .settings_models import ProjectRunnerSettings, RunnerSettings, RunnerSchedule
 
 
 class RunnerSettingsTests(TestCase):
@@ -38,7 +41,7 @@ class RunnerSettingsTests(TestCase):
 
     def test_model_rejects_invalid_timezone(self):
         with self.assertRaises(ValidationError):
-            RunnerSettings(timezone="Not/A_Timezone").full_clean()
+            RunnerSchedule(name="Invalid", timezone="Not/A_Timezone").full_clean()
 
     def test_model_rejects_reserve_over_100(self):
         with self.assertRaises(ValidationError):
@@ -50,13 +53,14 @@ class RunnerSettingsTests(TestCase):
 
     def test_model_rejects_invalid_window_days(self):
         with self.assertRaises(ValidationError):
-            RunnerSettings(
-                windows=[{"days": [7], "start": "22:00", "end": "06:00"}]
+            RunnerSchedule(
+                name="Invalid",
+                windows=[{"days": [7], "start": "22:00", "end": "06:00"}],
             ).full_clean()
 
     def test_model_rejects_empty_object_windows(self):
         with self.assertRaisesMessage(ValidationError, "list of at most 32 windows"):
-            RunnerSettings(windows={}).full_clean()
+            RunnerSchedule(name="Invalid", windows={}).full_clean()
 
     def test_model_rejects_empty_object_commands(self):
         with self.assertRaisesMessage(ValidationError, "list of at most 100 commands"):
@@ -157,19 +161,14 @@ class RunnerSettingsTests(TestCase):
         self.assertFalse(Project.objects.filter(name="Invalid commands").exists())
 
     def test_form_accepts_overnight_windows(self):
-        saved = RunnerSettings()
-        data = {
-            field.name: field.value_from_object(saved)
-            for field in saved._meta.fields
-            if field.name != "id"
-        }
-        data.update(
-            schedule_mode="windows",
-            windows='[{"days":[0,1],"start":"22:00","end":"06:00"}]',
-            setup_commands="[]",
-            validation_commands="[]",
+        form = RunnerScheduleForm(
+            {
+                "name": "Overnight",
+                "timezone": "UTC",
+                "schedule_mode": "windows",
+                "windows": '[{"days":[0,1],"start":"22:00","end":"06:00"}]',
+            }
         )
-        form = RunnerSettingsForm(data)
         self.assertTrue(form.is_valid(), form.errors)
 
     def test_override_inheritance_replace_and_clear(self):
@@ -327,6 +326,18 @@ class ConfiguredProjectTestCase(ConfiguredProjectMixin, TestCase):
 
 
 class ConfigurationWriteConcurrencyTests(ConfiguredProjectMixin, TransactionTestCase):
+    def test_schedule_write_waits_for_claim_snapshot(self):
+        def writer():
+            saved = RunnerSchedule.objects.get(pk=1)
+            saved.timezone = "Europe/London"
+            saved.save()
+
+        snapshot = self.assert_write_waits_for_snapshot(writer)
+        self.assertEqual(snapshot["global"]["timezone"], "UTC")
+        self.assertEqual(
+            configuration_document()["global"]["timezone"], "Europe/London"
+        )
+
     def assert_write_waits_for_snapshot(self, writer):
         started = Event()
 

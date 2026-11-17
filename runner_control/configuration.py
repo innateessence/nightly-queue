@@ -16,7 +16,7 @@ from vibearr_executor import (
     SLOT_PROTOCOL_VERSION as PROTOCOL_VERSION,
 )
 
-from .settings_models import ProjectRunnerSettings, RunnerSettings
+from .settings_models import ProjectRunnerSettings, RunnerSettings, RunnerSchedule
 from .validators import OVERRIDE_FIELDS, validate_backend_model
 
 
@@ -28,6 +28,12 @@ def settings_values(saved):
     values.pop("id", None)
     values.pop("name", None)
     values.pop("identity", None)
+    values["schedule_id"] = values.pop("schedule")
+    schedule = (
+        RunnerSchedule.objects.filter(pk=saved.schedule_id).first() or RunnerSchedule()
+    )
+    for field in ("schedule_mode", "timezone", "windows"):
+        values[field] = getattr(schedule, field)
     for field in ("research", "implementation", "issue", "repository"):
         values[f"{field}_credential_id"] = values.pop(f"{field}_credential")
     return values

@@ -165,7 +165,9 @@ class BootstrapTests(TestCase):
     def test_apply_does_not_enable_global_execution(self):
         bootstrap(self.request, apply=True, mvp_defaults=True)
         self.assertFalse(RunnerSettings.objects.get(pk=1).enabled)
-        self.assertEqual(RunnerSettings.objects.get(pk=1).schedule_mode, "continuous")
+        self.assertEqual(
+            RunnerSettings.objects.get(pk=1).schedule.schedule_mode, "continuous"
+        )
         self.assertFalse(RunnerSettings.objects.get(pk=1).reserve_enabled)
         self.assertEqual(RunnerSettings.objects.get(pk=1).polling_interval_seconds, 30)
         self.assertEqual(
@@ -213,16 +215,17 @@ class BootstrapTests(TestCase):
 
     def test_existing_windows_pause_and_reserve_are_preserved(self):
         saved = RunnerSettings.objects.get(pk=1)
-        saved.schedule_mode = "windows"
-        saved.windows = [
+        saved.schedule.schedule_mode = "windows"
+        saved.schedule.windows = [
             {"days": [0, 1, 2, 3, 4, 5, 6], "start": "00:00", "end": "23:59"}
         ]
         saved.paused = True
         saved.reserve_enabled = True
+        saved.schedule.save()
         saved.save()
         self.assertTrue(bootstrap(self.request, apply=True)["applied"])
         saved.refresh_from_db()
-        self.assertEqual(saved.schedule_mode, "windows")
+        self.assertEqual(saved.schedule.schedule_mode, "windows")
         self.assertTrue(saved.paused)
         self.assertTrue(saved.reserve_enabled)
         diagnostics = diagnose(self.request, REPOSITORY)

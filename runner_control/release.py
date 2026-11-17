@@ -17,6 +17,7 @@ CONTROL_FIELDS = {
     "enabled",
     "paused",
     "schedule_mode",
+    "schedule_id",
     "timezone",
     "windows",
     "tasks_per_window",
