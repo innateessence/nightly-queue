@@ -20,7 +20,7 @@ jobs:
     env:
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       TRUSTED_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-      INTRODUCTION_SHA: 0c774c705349eea61de4b4247704336c0c525674
+      INTRODUCTION_SHA: 39adbf4b12b7614ab37f0e97b583ba62a14b3132
     steps:
       - name: Check out the exact candidate
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
