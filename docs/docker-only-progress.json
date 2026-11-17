@@ -18,7 +18,9 @@
     "Pinned Chromium browser job with actual desktop/mobile light/dark PNGs",
     "Container-only CI with protected Docker recipes and exact candidate Git input",
     "Persistent generation-bound controller drain and archived authority after restore",
-    "Schema-2 native receipts bound to the original worker instance and boot"
+    "Schema-2 native receipts bound to the original worker instance and boot",
+    "Container-native fixture recovery and cancellation acceptance tooling",
+    "Source-bound Docker browser receipts, private run collection and explicit artifact import"
   ],
   "verified": [
     "Isolated Compose application and three worker services started",
@@ -41,11 +43,15 @@
     "Black, Ruff and mypy passed in the immutable tools container",
     "Disposable controller drain and backup/restore passed with the old journal archived",
     "All nine checks and changed-dependency validation passed in the a9 disposable worker run",
-    "All five GitHub CI jobs passed at candidate 0c774c705349eea61de4b4247704336c0c525674 using the earlier bootstrap recipe"
+    "All five GitHub CI jobs passed at candidate 32b2b9e9788c0fe57a8fe627ef0efa7cd3e8c134 using introduction 39adbf4b12b7614ab37f0e97b583ba62a14b3132",
+    "Exact candidate 88e3a641ea520e99bc71ae58bc3c20b9352ec6ab passed disposable browser, drain, backup and fenced restoration",
+    "Four schema-2 screenshots passed source/image/hash collection using a synthetic run UUID; desktop light and mobile dark were visually inspected",
+    "The documented Docker-copy import and private collection roundtrip passed in a separate disposable volume",
+    "68 focused browser, queue, bootstrap and native fixture tests passed with Black, Ruff, mypy, ShellCheck and Actionlint after review hardening"
   ],
   "remaining": [
     "Pass exact-candidate CI with the trusted recipe updated to include the final hardening fixes",
-    "Complete container-native delivery/browser recovery tooling and obsolete operational instruction replacement",
+    "Run the explicit native fixture on the selected deployment and model account before claiming native task acceptance",
     "Run real dependent two-issue acceptance and qualification on the actual deployment before enabling claims",
     "Complete the final P2-or-higher review/fix loop"
   ]

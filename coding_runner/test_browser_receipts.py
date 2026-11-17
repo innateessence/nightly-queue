@@ -13,7 +13,7 @@ from vibearr_runner.browser_receipts import (
     validate_binding,
     validate_receipt,
 )
-from vibearr_runner.merge_acceptance import capture_page
+from vibearr_runner.merge_acceptance import capture_page, screenshot_receipts
 
 
 class DockerBrowserReceiptTests(unittest.TestCase):
@@ -159,6 +159,32 @@ class DockerBrowserReceiptTests(unittest.TestCase):
         adopt_capture(self.capture.name, artifact_root=self.root, uid=os.getuid())
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.capture.stat().st_mode & 0o777, 0o700)
+
+    def test_direct_merge_acceptance_requires_all_four_capture_modes(self):
+        with self.assertRaisesRegex(ValueError, "all desktop/mobile"):
+            screenshot_receipts(
+                [self.frame()], self.binding["revision"], artifact_root=self.root
+            )
+
+    def test_direct_merge_acceptance_rejects_mixed_application_images(self):
+        frames = json.loads(self.report().read_bytes())["screenshots"]
+        frames[3]["application_image"] = "sha256:" + "f" * 64
+        with self.assertRaisesRegex(ValueError, "one source/image binding"):
+            screenshot_receipts(
+                frames, self.binding["revision"], artifact_root=self.root
+            )
+
+    def test_direct_merge_acceptance_accepts_one_complete_bound_capture(self):
+        frames = json.loads(self.report().read_bytes())["screenshots"]
+        self.assertEqual(
+            screenshot_receipts(
+                frames,
+                self.binding["revision"],
+                expected_tree=self.binding["tree_sha"],
+                artifact_root=self.root,
+            ),
+            frames,
+        )
 
     def test_import_rejects_extra_files_without_changing_the_capture(self):
         self.report()

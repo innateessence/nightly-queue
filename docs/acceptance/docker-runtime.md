@@ -75,7 +75,46 @@ initialization/filesystem/environment tests, Black, Ruff and mypy. Backup and
 restore capacity checks require a 1 GiB reserve. Snapshot bundles stay in private
 named volumes; only sanitized evidence and browser PNGs are in the repository.
 
-This is an intermediate review, not the final no-P2-or-higher signoff. D4 still
-requires the final integrated checks, pinned CI against the committed candidate,
-native delivery/browser recovery, completion of documentation replacement and
-real dependent two-issue acceptance.
+## Later committed engineering checkpoints
+
+All five GitHub jobs passed for candidate
+`32b2b9e9788c0fe57a8fe627ef0efa7cd3e8c134`, using the protected introduction
+`39adbf4b12b7614ab37f0e97b583ba62a14b3132`. This includes the actual worker
+boundary/OOM check, exact-candidate validation, application/runtime tests, native
+image checks and Docker operations. An earlier boundary run at `c0acb50` exited
+137 without enough diagnostic output; its failure remains recorded in CI. The
+later recipe retains container/OOM observations when that check fails.
+
+Candidate `88e3a641ea520e99bc71ae58bc3c20b9352ec6ab` passed the exact-source
+operations harness in disposable project `vibearr-check-native-browser-d1`.
+The source-bound browser report is `docker-source-bound-browser.json`; its four
+PNGs are in `../screenshots/docker-source-bound/`. The collector checked their
+hashes, complete viewport/theme coverage and application/browser image IDs.
+Desktop light and mobile dark were visually inspected. The report uses the
+synthetic run UUID `11111111-1111-4111-8111-111111111111` for its collection
+check; it is not evidence for a real queue run or provider merge.
+
+That operations run acknowledged drain request
+`d40d5411-1fdb-4ee8-b909-5e520e5c7d8d`, backed up 32 tables as
+`1f5ca5d9-3772-4b60-83df-382f8adbc6e1`, and restored into its separate target.
+Credential decryption and queue/history checks passed; the restored API rejected
+the old token, accepted the new identity, kept processing disabled and archived
+the old controller journal. The harness removed its disposable volumes afterward.
+The documented Docker-copy browser import and collection command also passed
+against a fresh disposable volume, using another synthetic run UUID.
+
+The native Codex fixture now uses the qualified worker APIs and an independent
+container-local observer process, without an engine client or host provisioning.
+Its offline test oracle was exercised with failing and passing source, but its
+paid model, real foreground cancellation and authentication acceptance have not
+been run. It cannot qualify a deployment until that explicit command succeeds.
+
+The subsequent review closed a direct merge-acceptance bypass: supplying receipts
+without the collector must still provide all four modes from one source/image
+binding and capture. All 68 focused browser, queue, bootstrap and native fixture
+tests passed in Docker, along with Black, Ruff, mypy, ShellCheck and Actionlint.
+
+Final CI must cover the final committed candidate and reviewed introduction.
+Real dependent two-issue acceptance and deployment qualification remain required
+before enabling claims. No paid agents, production deployment or production
+qualification have occurred in these engineering checks.

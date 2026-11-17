@@ -1,9 +1,10 @@
 # Docker-only MVP runtime
 
 This contract supersedes host-executor and host-service deployment instructions.
-It describes required implementation work; the current Compose file does not yet
-provide the complete replacement. Keep autonomous execution disabled until this
-boundary is implemented and qualified.
+It describes the implementation and release requirements. See
+`docker-only-progress.json` and `acceptance/docker-runtime.md` for completed
+engineering checks and outstanding deployment acceptance. Keep autonomous
+execution disabled until the actual target stack is qualified.
 
 ## Non-negotiable boundary
 
@@ -41,8 +42,8 @@ does not create containers dynamically and needs no Docker daemon access.
 | Model/package proxies | The job's registered public endpoint allowlist; no host/LAN/metadata access |
 | Tools, acceptance, browser, backup jobs | Explicit one-shot container commands with narrowly declared volumes and inputs |
 
-These are target services, not a claim that they all exist today. Missing tools
-must be implemented in Docker; do not replace them with host commands.
+These are the required service boundaries. Missing tools must be implemented in
+Docker; do not replace them with host commands.
 
 A trusted worker PID 1 exposes authenticated prepare/start/status/pause/stop/export
 operations. It validates registered recipes and artifacts and starts task code

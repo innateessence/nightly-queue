@@ -203,6 +203,38 @@ def store_receipts(state, run_id, frames):
     return {"run_id": run_id, "screenshots": len(frames), "path": str(output)}
 
 
+def validate_capture_receipts(
+    frames,
+    expected_revision,
+    *,
+    alternate_revision=None,
+    expected_tree=None,
+    artifact_root=Path("/screenshots"),
+):
+    if not isinstance(frames, list) or len(frames) != 4:
+        raise ValueError("Collect all desktop/mobile and light/dark captures.")
+    expected = {(name, theme) for name in VIEWPORTS for theme in ("light", "dark")}
+    observed = set()
+    first = frames[0]
+    for frame in frames:
+        validate_receipt(
+            frame,
+            expected_revision,
+            alternate_revision=alternate_revision,
+            expected_tree=expected_tree,
+            artifact_root=artifact_root,
+        )
+        if any(frame[key] != first[key] for key in BINDING_FIELDS):
+            raise ValueError("Browser frames must share one source/image binding.")
+        if Path(frame["path"]).parent != Path(first["path"]).parent:
+            raise ValueError("Browser frames must belong to one capture report.")
+        name = "desktop" if frame["viewport"] == VIEWPORTS["desktop"] else "mobile"
+        observed.add((name, frame["theme"]))
+    if observed != expected:
+        raise ValueError("Browser capture coverage is incomplete or duplicated.")
+    return frames
+
+
 def collect_report(report_path, run_id, state, *, artifact_root=Path("/screenshots")):
     from uuid import UUID
     from .bootstrap_files import private_json
@@ -232,18 +264,13 @@ def collect_report(report_path, run_id, state, *, artifact_root=Path("/screensho
     if report.get("page_errors") != [] or report.get("failed_requests") != []:
         raise ValueError("Browser errors prevent acceptance.")
     binding = validate_binding(report["source_binding"])
-    frames = report["screenshots"]
-    expected = {(name, theme) for name in VIEWPORTS for theme in ("light", "dark")}
-    observed = set()
-    if not isinstance(frames, list) or len(frames) != 4:
-        raise ValueError("Collect all desktop/mobile and light/dark captures.")
+    frames = validate_capture_receipts(
+        report["screenshots"],
+        binding["revision"],
+        expected_tree=binding["tree_sha"],
+        artifact_root=artifact_root,
+    )
     for frame in frames:
-        validate_receipt(
-            frame,
-            binding["revision"],
-            expected_tree=binding["tree_sha"],
-            artifact_root=artifact_root,
-        )
         if any(
             frame[key] != binding[key] for key in BINDING_FIELDS - {"schema_version"}
         ):
@@ -252,10 +279,6 @@ def collect_report(report_path, run_id, state, *, artifact_root=Path("/screensho
             )
         if Path(frame["path"]).parent != report_path.parent:
             raise ValueError("Browser frames must belong to this capture report.")
-        name = "desktop" if frame["viewport"] == VIEWPORTS["desktop"] else "mobile"
-        observed.add((name, frame["theme"]))
-    if observed != expected:
-        raise ValueError("Browser capture coverage is incomplete or duplicated.")
     return store_receipts(state, run_id, frames)
 
 

@@ -8,7 +8,7 @@ import re
 from .merge_contract import merge_profile, merge_receipt
 from .merge_github import MergeGitHub, merged_observation
 from .native_workspace import atomic_bytes
-from .browser_receipts import validate_receipt as validate_screenshot
+from .browser_receipts import validate_capture_receipts
 
 
 MERGE_WAYPOINTS = {
@@ -56,17 +56,13 @@ def screenshot_receipts(
     expected_tree=None,
     artifact_root=Path("/screenshots"),
 ):
-    if not isinstance(values, list) or not values:
-        raise ValueError("UI acceptance requires actual rendered browser screenshots.")
-    for value in values:
-        validate_screenshot(
-            value,
-            expected_revision,
-            alternate_revision=alternate_revision,
-            expected_tree=expected_tree,
-            artifact_root=artifact_root,
-        )
-    return values
+    return validate_capture_receipts(
+        values,
+        expected_revision,
+        alternate_revision=alternate_revision,
+        expected_tree=expected_tree,
+        artifact_root=artifact_root,
+    )
 
 
 def collect_merge_run(queue, github, *, run_id, project_id, issue_number, screenshots):
