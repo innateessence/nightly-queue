@@ -272,7 +272,7 @@ class ContextPlanAPITests(TestCase):
         self.assertContains(response, "PLAN VERSION 1")
         self.assertContains(response, "&lt;script&gt;")
         self.assertNotContains(response, "<script>alert('issue')</script>")
-        self.assertContains(response, "human approval")
+        self.assertContains(response, "Legacy proposal execution is retired")
 
     def test_expired_refresh_cannot_start_implementation(self):
         self.valid_handoff()

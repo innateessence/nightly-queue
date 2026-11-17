@@ -6,9 +6,9 @@
 {% block heading %}
     <section class="page-heading" aria-labelledby="page-title">
       <div>
-        <p class="eyebrow">LESS BUSYWORK. MORE TOMORROW.</p>
-        <h1 id="page-title">Leave it for the night.</h1>
-        <p class="subtitle">Manual work and GitHub issues, together in one queue.</p>
+        <p class="eyebrow">WORK QUEUE</p>
+        <h1 id="page-title">Queue</h1>
+        <p class="subtitle">GitHub issues and manual tasks, ready for your coding agents.</p>
       </div>
       <div class="queue-total"><span class="status-dot" aria-hidden="true"></span> {{ queue_count }} executable · {{ queue_total }} queued total</div>
     </section>
@@ -60,13 +60,21 @@
 
       <section class="queue-section" aria-labelledby="queue-title">
         <div class="queue-heading">
-          <div><h2 id="queue-title">Your queue <span class="count-badge">{{ queue_count }}</span></h2><p>A clear head starts with a clear list.</p></div>
+          <div><h2 id="queue-title">Work items <span class="count-badge">{{ queue_count }}</span></h2><p>Track queued work, active tasks and results.</p></div>
           <form method="post" action="{% url 'sync_issues' %}">
             {% csrf_token %}
             <button class="button-filter" type="submit">Sync issues now</button>
           </form>
         </div>
+        <nav class="status-tabs" aria-label="Filter by status">
+          {% for tab in status_links %}<a href="?{{ tab.query }}"{% if status == tab.value %} aria-current="page"{% endif %}>{{ tab.label }} <span class="count-badge">{{ tab.count }}</span></a>{% endfor %}
+        </nav>
         <form method="get" class="queue-filters" role="search" aria-label="Search work items">
+          <label class="sr-only" for="status-filter">Filter by status</label>
+          <select id="status-filter" name="status">
+            <option value="">All statuses</option>
+            {% for value, label in statuses %}<option value="{{ value }}"{% if status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
           <label class="sr-only" for="queue-search">Search title and instructions</label>
           <input type="search" id="queue-search" name="q" value="{{ query }}" placeholder="Search your queue…">
           <label class="sr-only" for="priority-filter">Filter by priority</label>
@@ -81,7 +89,7 @@
           </select>
           <button type="submit" class="button-filter">Filter</button>
         </form>
-        {% if filtered %}<div class="filter-summary">{{ items|length }} item{{ items|length|pluralize }} found <a href="{% url 'index' %}">Clear filters</a></div>{% endif %}
+        {% if filtered %}<div class="filter-summary">{{ items|length }} item{{ items|length|pluralize }} found <a href="{% url 'index' %}?{{ clear_filters_query }}">Clear filters{% if status %} · keep {{ status }}{% endif %}</a></div>{% endif %}
         <div class="queue-items">
           {% for item in items %}
             <article class="panel queue-item">
@@ -91,6 +99,7 @@
                 <span class="priority priority-{{ item.priority }}">{{ item.get_priority_display }} priority</span>
               </div>
               <h3>{{ item.title }}</h3>
+              {% if item.latest_run_id %}<p class="item-project"><a href="{% url 'runner_plan_detail' item.latest_run_id %}">View latest attempt and controls →</a></p>{% endif %}
               {% if item.issue_number %}<p class="item-project"><a href="{{ item.issue_repository|slice:':-4' }}/issues/{{ item.issue_number }}" target="_blank" rel="noopener noreferrer">Issue #{{ item.issue_number }}</a> · {{ item.get_issue_state_display }}</p>{% endif %}
               <p class="item-project"><a href="{{ item.project.repository_url }}" target="_blank" rel="noopener noreferrer">{{ item.project.name }}</a> · #{{ item.project_id }}{% if item.branch_name %} · {{ item.branch_name }}{% endif %}</p>
               {% if item.waiting_reason %}<p class="item-instructions" role="status">{{ item.waiting_reason }}</p>{% endif %}
@@ -112,7 +121,7 @@
               <span class="eyebrow">A LITTLE ROOM TO SEARCH</span>
               <h3>No matching work items.</h3>
               <p>Try another search or priority. Your other items are still in the queue.</p>
-              <a href="{% url 'index' %}" class="empty-link">Clear filters <span aria-hidden="true">↗</span></a>
+              <a href="{% url 'index' %}?{{ clear_filters_query }}" class="empty-link">Clear filters <span aria-hidden="true">↗</span></a>
               {% else %}
               <span class="eyebrow">A LITTLE SPACE TO THINK</span>
               <h3>Your evening starts with a clean slate.</h3>

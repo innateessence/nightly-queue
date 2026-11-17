@@ -195,10 +195,10 @@ class RetentionTests(TestCase):
         self.assertContains(response, "Test task")
         self.assertIn("no-store", response.headers["Cache-Control"])
 
-    def test_history_lists_runs_and_global_blocking_reason(self):
-        response = self.client.get(reverse("runner_plan_history"))
-        self.assertContains(response, "Run history")
-        self.assertContains(response, "Release verification blocks normal execution")
+    def test_system_lists_global_blocking_reason(self):
+        response = self.client.get(reverse("runner_system"))
+        self.assertContains(response, "System")
+        self.assertContains(response, "do not qualify native execution")
 
     def test_machine_retention_endpoint_requires_machine_authorization(self):
         self.assertEqual(self.client.get(reverse("runner_retention")).status_code, 401)
@@ -730,8 +730,8 @@ class OperatorPresentationTests(TestCase):
             self.run.approvals.get().decision_note, "previous-run-selection"
         )
 
-    def test_history_scrubs_current_global_and_owned_historical_selections(self):
-        response = self.client.get(reverse("runner_plan_history"))
+    def test_system_scrubs_current_global_and_owned_historical_selections(self):
+        response = self.client.get(reverse("runner_system"))
         self.assert_safe(response, global_values=True)
         self.assertContains(response, "[redacted]")
         self.health.refresh_from_db()
@@ -748,7 +748,7 @@ class OperatorPresentationTests(TestCase):
     def test_unavailable_selected_key_hides_expanded_content(self):
         with override_settings(NQ_CREDENTIAL_KEY=""):
             detail = self.client.get(reverse("runner_plan_detail", args=[self.run.pk]))
-            history = self.client.get(reverse("runner_plan_history"))
+            history = self.client.get(reverse("runner_system"))
             gate = self.client.get(reverse("runner_gates"))
         self.assert_safe(detail)
         self.assert_safe(history, global_values=True)
@@ -766,9 +766,7 @@ class OperatorPresentationTests(TestCase):
             kind="token",
             encrypted_payload="invalid",
         )
-        self.assert_safe(
-            self.client.get(reverse("runner_plan_history")), global_values=True
-        )
+        self.assert_safe(self.client.get(reverse("runner_system")), global_values=True)
         self.assert_safe(
             self.client.get(reverse("runner_plan_detail", args=[self.run.pk]))
         )
@@ -867,7 +865,7 @@ class OperatorPresentationTests(TestCase):
             project=self.project,
             overrides={"research_credential_id": {"mode": "replace", "value": 999999}},
         )
-        response = self.client.get(reverse("runner_plan_history"))
+        response = self.client.get(reverse("runner_system"))
         self.assert_safe(response, global_values=True)
         self.assertContains(response, "unavailable")
 
@@ -926,9 +924,7 @@ class OperatorPresentationTests(TestCase):
         self.run.save(update_fields=["state", "active_slot"])
         self.health.report["blocking_reason"] = "previous-run-selection"
         self.health.save(update_fields=["report"])
-        self.assert_safe(
-            self.client.get(reverse("runner_plan_history")), global_values=True
-        )
+        self.assert_safe(self.client.get(reverse("runner_system")), global_values=True)
 
     def test_release_metadata_exception_does_not_unmask_other_secret_fields(self):
         entry = self.qualification()

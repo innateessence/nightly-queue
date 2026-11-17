@@ -3,6 +3,8 @@ from django.urls import path
 from . import plan_views, operations_views
 
 urlpatterns = [
+    path("activity/", plan_views.activity, name="runner_activity"),
+    path("system/", plan_views.system, name="runner_system"),
     path(
         "runner/runs/<uuid:run_id>/retry/",
         operations_views.retry,
