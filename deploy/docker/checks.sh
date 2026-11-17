@@ -42,6 +42,15 @@ export VIBEARR_RUNNER_IMAGE=$project-runner:checks VIBEARR_BACKUP_IMAGE=$project
 export VIBEARR_BROWSER_IMAGE=$project-browser:checks VIBEARR_BACKUP_VOLUME=${project}_backup-data
 export VIBEARR_RESTORE_BACKUP_VOLUME=${project}_backup-data
 compose() { docker compose --file "$recipe/docker-compose.yml" --project-name "$project" "$@"; }
+start_runner() {
+  local attempt
+  for attempt in 1 2 3 4 5 6; do
+    if compose up -d --wait runner; then return; fi
+    echo "Runner restart attempt $attempt observed an earlier exit; waiting for its new boot." >&2
+    sleep 1
+  done
+  return 1
+}
 restored() { COMPOSE_PROJECT_NAME=$restore_project VIBEARR_DATA_PROJECT=$restore_project VIBEARR_RUNNER_NAME=restored-check-runner docker compose --file "$recipe/docker-compose.yml" --project-name "$restore_project" "$@"; }
 export_volume() {
   local volume=$1 destination=$2
@@ -131,11 +140,11 @@ fi
 if [[ $mode == full || $mode == boundary || $mode == candidate ]]; then
   compose exec -T runner python -I -m vibearr_executor.integrated restart-witness > "$output/restart-witness.json" 2>&1
   compose kill -s SIGKILL runner > "$output/restart.log" 2>&1
-  compose up -d --wait runner >> "$output/restart.log" 2>&1
+  start_runner >> "$output/restart.log" 2>&1
   compose exec -T runner python -I -m vibearr_executor.integrated qualify > "$output/qualification.json" 2>&1
   compose exec -T runner python -I -m vibearr_executor.integrated restart-witness > "$output/second-witness.json" 2>&1
   compose kill -s SIGKILL runner >> "$output/restart.log" 2>&1
-  compose up -d --wait runner >> "$output/restart.log" 2>&1
+  start_runner >> "$output/restart.log" 2>&1
   compose exec -T runner python -I -c 'from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path("/run/vibearr/runner/control-token").read_text().strip()); assert c.capabilities()["qualified"] is False' > "$output/restart-proof.log" 2>&1
   compose exec -T runner python -I -m vibearr_executor.integrated qualify > "$output/requalified.json" 2>&1
   compose exec -T runner python -I < deploy/docker/dependency_smoke.py > "$output/dependency-smoke.json" 2>&1
