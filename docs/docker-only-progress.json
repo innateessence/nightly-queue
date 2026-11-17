@@ -3,6 +3,11 @@
   "status": "final-review-in-progress",
   "pull_request": "https://github.com/innateessence/nightly-queue/pull/135",
   "autonomous_execution_qualified": false,
+  "runtime_constraints": {
+    "agent": "Pinned Codex with a dedicated API key; session, Claude and OpenCode profiles are not installed",
+    "worker_model": "Reusable preprovisioned slots with a separate task UID and per-boot qualification",
+    "project_limits": "Must match the actual registered slot; smaller requested ceilings are rejected"
+  },
   "completed_foundations": [
     "Immutable application/tools/worker/supervisor images",
     "Private named-volume credentials with restart preservation and conflict rejection",
