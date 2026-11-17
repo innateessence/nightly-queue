@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "projects",
     "work_queue",
     "runner_control",
+    "system_logs",
 ]
 
 MIDDLEWARE = [
@@ -169,3 +170,25 @@ CELERY_BEAT_SCHEDULE = {
 
 # Context uploads are bounded again by the runner document API.
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "system_logs": {
+            "class": "system_logs.handlers.SystemLogHandler",
+            "level": "INFO",
+        },
+    },
+    "loggers": {
+        name: {"handlers": ["system_logs"], "level": level, "propagate": True}
+        for name, level in (
+            ("work_queue", "INFO"),
+            ("credentials", "INFO"),
+            ("projects", "INFO"),
+            ("vibearr_app", "INFO"),
+            ("django.request", "WARNING"),
+            ("django.security", "WARNING"),
+        )
+    },
+}

@@ -1,0 +1,37 @@
+.log-heading { display: flex; align-items: center; gap: 12px; padding: 20px 20px 0; }
+.log-heading h2 { margin: 0; }
+.log-description { margin: 8px 20px 20px; color: var(--muted); font-size: 12px; }
+.log-category-disabled { display: block; padding: 12px 16px; color: var(--muted); border-left: 2px solid var(--border); }
+.log-category-disabled small { display: block; font-size: 10px; margin-top: 3px; }
+.log-categories a[aria-current="page"] { color: var(--accent); border-color: var(--accent); background: var(--active); }
+.log-filters select { max-width: 220px; }
+.log-table { table-layout: fixed; min-width: 760px; }
+.log-table th:first-child { width: 140px; }
+.log-table th:nth-child(2) { width: 100px; }
+.log-table th:nth-child(3) { width: 180px; }
+.log-message, .log-source { overflow-wrap: anywhere; }
+.log-message { white-space: pre-wrap; }
+.log-message details { white-space: normal; margin-top: 12px; }
+.log-message pre { margin-bottom: 0; }
+.log-level-info { background: var(--active); color: var(--accent); }
+.log-level-warning { background: var(--warning-bg); color: var(--warning); }
+.log-level-error, .log-level-critical { background: var(--danger-bg); color: var(--danger); }
+.log-pagination > span:last-child { display: flex; flex-wrap: wrap; gap: 16px; }
+@media (max-width: 1150px) {
+  .log-category-disabled { border-left: 0; border-bottom: 2px solid var(--border); padding: 10px 16px; }
+}
+@media (max-width: 560px) {
+  .log-pagination span { display: inline; }
+  .log-heading { padding: 18px 16px 0; }
+  .log-description { margin-left: 16px; margin-right: 16px; }
+  .log-filters select { max-width: none; min-width: 0; }
+  .log-table { min-width: 0; display: block; }
+  .log-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .log-table tbody { display: block; }
+  .log-table tr { display: grid; grid-template-columns: 1fr auto; padding: 16px; gap: 12px; border-bottom: 1px solid var(--border); }
+  .log-table tr:last-child { border-bottom: 0; }
+  .log-table td { display: block; padding: 0; border: 0; }
+  .log-table .log-source, .log-table .log-message { grid-column: 1 / -1; }
+  .log-table .log-source { color: var(--muted); }
+  .log-table .cell-note { display: inline; margin-left: 8px; }
+}

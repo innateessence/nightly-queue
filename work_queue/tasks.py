@@ -146,6 +146,12 @@ def import_auto_issues(scheduled=False):
         APISettings.objects.filter(pk=saved.pk).update(
             last_auto_sync_success_at=timezone.now()
         )
+    logger.info(
+        "Issue sync finished. Projects synced: %s. New items: %s. Failed projects: %s.",
+        result["projects"],
+        result["created"],
+        result["failed"],
+    )
     return result
 
 
