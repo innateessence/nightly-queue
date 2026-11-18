@@ -280,7 +280,7 @@ class MultipleRunnerMigrationTests(TransactionTestCase):
         executor = MigrationExecutor(connection)
         executor.migrate(executor.loader.graph.leaf_nodes())
 
-    def test_migration_preserves_legacy_schedule_and_allocates_new_ids(self):
+    def test_migration_preserves_schedule_and_ids_but_disables_old_processing(self):
         self.addCleanup(self.restore_schema)
         target = [("runner_control", "0013_nativedeliveryrecovery")]
         executor = MigrationExecutor(connection)
@@ -299,7 +299,7 @@ class MultipleRunnerMigrationTests(TransactionTestCase):
         )
         self.restore_schema()
         saved = RunnerSettings.objects.get(pk=1)
-        self.assertTrue(saved.enabled)
+        self.assertFalse(saved.enabled)
         self.assertEqual(saved.schedule.windows, windows)
         self.assertEqual(saved.schedule.timezone, "America/Los_Angeles")
         self.assertEqual(saved.name, "Default runner")

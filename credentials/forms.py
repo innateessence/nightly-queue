@@ -60,24 +60,14 @@ class CredentialForm(forms.ModelForm):
         label="OpenCode inference provider",
         choices=[
             ("", "Use connection JSON or keep saved connection"),
-            ("ollama", "Trusted local Ollama"),
-            ("openai", "OpenAI API"),
-            ("anthropic", "Anthropic API"),
-            ("opencode", "OpenCode Console Chat API"),
+            ("ollama", "External Ollama"),
         ],
-        help_text="For OpenCode connection credentials. Native OpenCode CLI execution is unsupported; this uses a tool-free provider API candidate.",
+        help_text="OpenCode runs inside the runner and uses your external Ollama server.",
     )
     connection_endpoint = forms.CharField(
         required=False,
         label="Ollama endpoint",
-        help_text="For local Ollama: http://runner-ollama:11434 or an explicitly trusted local IP/loopback host. No URL credentials, query or fragment. Hosted providers use fixed official endpoints.",
-    )
-    connection_api_key = forms.CharField(
-        required=False,
-        strip=False,
-        label="Inference API key",
-        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
-        help_text="Required for hosted providers; optional for local Ollama. To rotate, supply the provider and complete replacement connection. Fields are never read back.",
+        help_text="Your external Ollama HTTP(S) origin and port. Vibearr does not provide Ollama or download models.",
     )
 
     class Meta:
@@ -102,7 +92,7 @@ class CredentialForm(forms.ModelForm):
         secret = self.fields["secret"]
         secret.required = False
         secret.error_messages["required"] = "Enter a secret value."
-        secret.help_text = "Paste a token, SSH key or Codex session JSON. For OpenCode, use the inference fields below or paste connection JSON."
+        secret.help_text = "For repository access, paste a token or SSH key. For runner subscription login, leave blank and sign in inside the runner after saving. OpenCode uses the external Ollama fields."
         self.fields["passphrase"].help_text = (
             "Only needed for a passphrase-protected SSH key."
         )
@@ -110,11 +100,24 @@ class CredentialForm(forms.ModelForm):
     @sensitive_variables()
     def clean(self):
         data = super().clean()
+        if data.get("kind") == "login":
+            if data.get("provider") not in {"codex", "claude"}:
+                self.add_error(
+                    "kind", "Subscription login is available for Codex and Claude Code."
+                )
+                return data
+            if data.get("secret"):
+                self.add_error(
+                    "secret",
+                    "Leave the secret blank and sign in with your subscription inside the runner.",
+                )
+                return data
+            data["secret"] = "" if self.instance.pk else "managed-subscription-login"
         connection_provider = data.get("connection_provider")
         connection_fields = (
             connection_provider
             or data.get("connection_endpoint")
-            or data.get("connection_api_key")
+            or self.data.get("connection_api_key")
         )
         if connection_fields:
             if data.get("provider") != "opencode" or data.get("kind") != "connection":
@@ -132,12 +135,16 @@ class CredentialForm(forms.ModelForm):
             value = {"provider": connection_provider}
             if data.get("connection_endpoint"):
                 value["base_url"] = data["connection_endpoint"]
-            if data.get("connection_api_key"):
-                value["api_key"] = data["connection_api_key"]
-            from vibearr_runner.opencode_connection import validate_connection
+            if self.data.get("connection_api_key"):
+                value["api_key"] = self.data["connection_api_key"]
+            from vibearr_executor.ollama_relay import external_endpoint
 
             try:
-                validate_connection(value)
+                if connection_provider != "ollama" or value.get("api_key"):
+                    raise ValueError(
+                        "OpenCode requires external Ollama without a model API key."
+                    )
+                value["base_url"] = external_endpoint(value.get("base_url"))
             except ValueError as exc:
                 self.add_error("connection_provider", str(exc))
                 return data

@@ -4,10 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       project:
-        description: 'Existing Compose project whose current worker boots have been qualified'
-        required: true
-      tools_image:
-        description: 'Reviewed, installed Docker tools image ID (sha256:...)'
+        description: Existing three-container Compose project to inspect without enabling processing
         required: true
 
 permissions:
@@ -18,37 +15,25 @@ jobs:
     runs-on: [self-hosted, runner-deployment-qualification]
     timeout-minutes: 10
     steps:
-      - name: Verify deployed worker proof without changing the stack
+      - name: Inspect the current integrated runner boot
         shell: bash
         env:
           PROJECT: ${{ inputs.project }}
-          TOOLS_IMAGE: ${{ inputs.tools_image }}
         run: |
           set -euo pipefail
           [[ "$PROJECT" =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]]
-          [[ "$TOOLS_IMAGE" =~ ^sha256:[a-f0-9]{64}$ ]]
-          docker volume inspect "${PROJECT}_runner-secrets" >/dev/null
-          docker network inspect "${PROJECT}_worker-control" >/dev/null
-          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true \
-            --memory 512m --memory-swap 512m --pids-limit 64 --cpus 1 \
-            --tmpfs /tmp:rw,nosuid,nodev,size=32m --network "${PROJECT}_worker-control" \
-            --volume "${PROJECT}_runner-secrets:/run/vibearr/runner:ro" \
-            -e VIBEARR_RUNTIME_PROTOCOL=compose-slot-v2 \
-            -e VIBEARR_EXECUTOR_URL=http://worker-gateway:8791 \
-            -e VIBEARR_EXECUTOR_TOKEN_FILE=/run/vibearr/runner/control-token \
-            --entrypoint python "$TOOLS_IMAGE" -m vibearr_runner.verify --boundary \
-            > "$RUNNER_TEMP/runner-boundary.json"
           mapfile -t ids < <(docker ps -q --filter "label=com.docker.compose.project=$PROJECT")
-          ((${#ids[@]}))
-          docker inspect "${ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL \
-            --security-opt no-new-privileges:true --entrypoint python "$TOOLS_IMAGE" \
-            -m deploy.docker.audit --inspect > "$RUNNER_TEMP/runtime-inspection.json"
+          ((${#ids[@]} == 3))
+          mapfile -t runner < <(docker ps -q --filter "label=com.docker.compose.project=$PROJECT" --filter label=com.docker.compose.service=runner)
+          ((${#runner[@]} == 1))
+          docker exec "${runner[0]}" python -I -c 'import json; from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path("/run/vibearr/runner/control-token").read_text().strip()); r=c.capabilities(); assert r["runtime"] == "integrated-runner-v1" and r["qualified"] is True; print(json.dumps(r))' > "$RUNNER_TEMP/runner-boundary.json"
+          docker inspect "${ids[@]}" --format '{{.Name}} {{.Image}} {{.HostConfig.ReadonlyRootfs}}' > "$RUNNER_TEMP/runtime-images.txt"
       - name: Upload actual deployment observations
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: runner-deployment-boundary
           path: |
             ${{ runner.temp }}/runner-boundary.json
-            ${{ runner.temp }}/runtime-inspection.json
+            ${{ runner.temp }}/runtime-images.txt
           if-no-files-found: error
           retention-days: 7

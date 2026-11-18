@@ -14,16 +14,8 @@ VOLUMES = (
     "database-secrets",
     "runner-secrets",
     "runner-data",
-    "agent-secrets",
-    "setup-secrets",
-    "validation-secrets",
-    "agent-database-secrets",
-    "validation-database-secrets",
-    "agent-control",
-    "setup-control",
-    "validation-control",
-    "gateway-data",
-    "valkey-data",
+    "runner-control",
+    "runner-logins",
 )
 MAX_FILES = 250000
 MAX_BYTES = 64 * 1024**3

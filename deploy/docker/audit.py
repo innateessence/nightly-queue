@@ -6,6 +6,10 @@ import sys
 
 def audit(config):
     errors = []
+    if set(config["services"]) != {"app", "postgres", "runner"}:
+        errors.append(
+            "The default deployment must contain exactly app, postgres and runner."
+        )
     for name, service in config["services"].items():
         for field in ("privileged", "pid", "ipc", "network_mode", "devices"):
             value = service.get(field)
@@ -23,7 +27,7 @@ def audit(config):
         for key in service.get("environment", {}):
             if key.startswith("DOCKER_"):
                 errors.append(f"{name}: engine environment")
-        if service.get("ports") and name != "vibearr":
+        if service.get("ports") and name != "app":
             errors.append(f"{name}: private service publishes a host port")
     return errors
 
@@ -69,7 +73,7 @@ def inspect_containers(containers):
         if any(value.startswith("DOCKER_") for value in container["Config"]["Env"]):
             errors.append(f"{name}: runtime engine environment")
         ports = host.get("PortBindings") or {}
-        if ports and service != "vibearr":
+        if ports and service != "app":
             errors.append(f"{name}: private runtime port published")
         limits = {
             "memory_bytes": host.get("Memory"),
@@ -77,11 +81,11 @@ def inspect_containers(containers):
             "nano_cpus": host.get("NanoCpus"),
             "pids": host.get("PidsLimit"),
         }
-        if service in {"agent-worker", "setup-worker", "validation-worker"}:
+        if service == "runner":
             environment = dict(
                 value.split("=", 1) for value in container["Config"]["Env"]
             )
-            if environment.get("VIBEARR_SLOT_IMAGE_ID") != container["Image"]:
+            if environment.get("VIBEARR_RUNNER_IMAGE_ID") != container["Image"]:
                 errors.append(
                     f"{name}: declared worker image differs from its actual image"
                 )

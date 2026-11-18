@@ -1,5 +1,10 @@
 # Coding runner architecture and implementation plan
 
+> Historical implementation reference. Deployment and authentication instructions
+> here are superseded by the [three-container runtime](docker-only-runtime-plan.md)
+> and [current operations](docker-operations.md). Do not start the old worker fleet,
+> use model API keys, or reuse its qualification evidence for the integrated runner.
+
 Native execution uses the [versioned project policy](runner-execution-policy.md)
 and the [MVP contract](vibearr-mvp.md). Per-command human approvals and the old
 structured-proposal release path are retired. Their detailed protocols below

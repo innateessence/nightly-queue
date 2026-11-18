@@ -156,8 +156,8 @@ def secret_document(data, runner):
             unavailable("The selected credential provider does not match its purpose.")
         allowed = {
             "github": ("token",),
-            "codex": ("token", "session"),
-            "claude": ("token",),
+            "codex": ("token", "session", "login"),
+            "claude": ("token", "login"),
             "opencode": ("connection",),
         }
         if credential.kind not in allowed.get(backend, ()):

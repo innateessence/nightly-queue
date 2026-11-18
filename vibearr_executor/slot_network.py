@@ -18,7 +18,7 @@ def address(host):
     return str(value)
 
 
-def configure(destinations):
+def configure(destinations, *, blocked_ports="8791,9001"):
     for executable in ("iptables", "ip6tables"):
 
         def run(*arguments):
@@ -55,7 +55,7 @@ def configure(destinations):
             "multiport",
             "!",
             "--dports",
-            "8791,9001",
+            blocked_ports,
             "-j",
             "ACCEPT",
         )

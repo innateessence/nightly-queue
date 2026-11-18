@@ -1,5 +1,10 @@
 # Coding runner gap analysis and feature branches
 
+> Historical implementation reference. Deployment and authentication instructions
+> here are superseded by the [three-container runtime](docker-only-runtime-plan.md)
+> and [current operations](docker-operations.md). Do not start the old worker fleet,
+> use model API keys, or reuse its qualification evidence for the integrated runner.
+
 Historical implementation backlog. For the current development direction and
 feature branches, see the [vibearr development plan](autonomous-ai-queue-plan.md).
 The gap analysis below describes its original baseline, not the current code.

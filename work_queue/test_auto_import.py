@@ -5,14 +5,12 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
-from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from credentials.models import APISettings, Credential
 from credentials.test_models import TEST_KEY
-from vibearr_app.celery import app
 from projects.models import Project
 
 from .github import GitHubAPIError, NoRedirect, repository_issues
@@ -106,13 +104,6 @@ class GitHubClientTests(SimpleTestCase):
                 None, None, 302, "", {}, "https://example.com"
             )
         )
-
-    def test_real_celery_configuration_checks_scheduled_import_every_minute(self):
-        schedule = app.conf.beat_schedule["scheduled-auto-issues"]
-        self.assertEqual(schedule["task"], import_auto_issues.name)
-        self.assertEqual(schedule["schedule"], 60.0)
-        self.assertEqual(schedule["kwargs"], {"scheduled": True})
-        self.assertEqual(app.conf.broker_url, settings.CELERY_BROKER_URL)
 
 
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)

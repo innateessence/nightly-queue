@@ -126,6 +126,35 @@ class QueueItem(models.Model):
         return self.title
 
 
+class ImportJob(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    scheduled = models.BooleanField(default=False)
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.QUEUED
+    )
+    available_at = models.DateTimeField(db_index=True)
+    lease_token = models.UUIDField(null=True, editable=False)
+    lease_until = models.DateTimeField(null=True, editable=False)
+    attempts = models.PositiveIntegerField(default=0)
+    summary = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scheduled"],
+                condition=models.Q(status="queued"),
+                name="one_pending_import_per_kind",
+            )
+        ]
+
+
 class MergeEvidence(models.Model):
     repository_id = models.PositiveBigIntegerField()
     issue_number = models.PositiveBigIntegerField()
