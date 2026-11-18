@@ -152,6 +152,41 @@ its worker and checking tools from the protected recipe, so candidate runtime
 changes cannot replace their own validation controls. These CI observations do
 not replace qualification on the actual deployment after review.
 
+## Codex account login
+
+Use the selected saved Codex session connection ID and its current secret version.
+The account service runs the pinned CLI against private `account-data`; its
+dedicated control token is in `account-secrets`. Neither volume is mounted in a
+task. Start the reviewed account service, then register that selected connection
+without performing a provider refresh or enabling execution:
+
+```sh
+docker compose --profile runner up -d --wait codex-account
+docker compose --profile operations run --rm --no-deps account-register python manage.py docker_register_codex_account --credential-id <id> --credential-version <version>
+```
+
+The normal native authentication probe can use the saved managed login and
+refresh it automatically. If the provider requires sign-in again, first drain
+and stop the supervisor using the next section. Reconcile all owned operations:
+an elapsed deadline alone does not establish termination or retire a lease.
+Keep `account-proxy` running, stop the account service, and run device sign-in:
+
+```sh
+docker compose --profile runner stop codex-account
+docker compose --profile operations run --rm --no-deps account-login --credential-id <id> --credential-version <version>
+docker compose --profile runner up -d --no-deps --wait codex-account
+```
+
+Complete the URL/code printed by the pinned CLI with the same selected account
+and workspace. Login runs entirely in Docker and writes only its protected
+cache. Device sign-in starts with an empty private cache, then promotes the login
+after identity verification, so Codex cannot revoke a source deployment's copied
+login during restore. The helper refuses a running account service, an unclosed operation lease,
+an unreviewed CLI or a different account. A provider refresh token never passes
+through task arguments, task storage or host login files. Run fresh account
+authentication and worker qualification before enabling execution. Login alone
+does not qualify the deployment or enable the supervisor.
+
 ## Drain and upgrade
 
 Request a drain while the current supervisor is running, wait for that request's
@@ -191,14 +226,14 @@ Stop all writers before declaring the snapshot quiescent; leave PostgreSQL
 running for its transaction-consistent logical dump:
 
 ```sh
-docker compose --profile runner stop vibearr celery-worker celery-beat agent-worker setup-worker validation-worker worker-gateway valkey
+docker compose --profile runner stop vibearr celery-worker celery-beat agent-worker setup-worker validation-worker worker-gateway codex-account valkey
 docker compose --profile operations build backup
 docker compose --profile operations run --rm --no-deps backup backup --quiesced
 ```
 
 The job prints a backup UUID after publishing a complete snapshot. It preserves
 PostgreSQL data, encrypted connections and original keys, broker files, worker
-journals and runner/Git/recovery state. It hashes every stored file, records
+journals, protected managed account caches/control tokens, and runner/Git/recovery state. It hashes every stored file, records
 ownership and modes, checks database table fingerprints before and after the
 dump, and requires space for the snapshot plus a 1 GiB reserve. Links and setuid
 files are rejected. Broker sticky directory permissions are preserved.
@@ -237,6 +272,11 @@ uses one transaction and verifies table fingerprints. It then disables restored
 runner identities, clears their controller authority and disables processing;
 business data fingerprints are checked again after that deliberate fence.
 The restored runner volume remains marked as requiring a new identity.
+Restoration also rotates account lease authority and marks every restored account
+as requiring fresh device sign-in. Old capabilities cannot renew on the restored
+stack. Register the explicitly selected connection if needed and use the account
+login steps above; each account remains fenced until its own successful sign-in.
+Never refresh the source and restored copies of the same provider login cache.
 
 The explicit restored bootstrap requires a new runner name. It archives the old
 controller journal under `runner-data/restore-history/<backup-uuid>` and retires

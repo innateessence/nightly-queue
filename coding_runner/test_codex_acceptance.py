@@ -13,6 +13,30 @@ from vibearr_runner import codex_acceptance
 
 
 class NativeFixtureCommandTests(unittest.TestCase):
+    def test_missing_saved_connection_reference_cannot_read_or_duplicate_a_login(self):
+        with (
+            patch(
+                "sys.argv",
+                [
+                    "acceptance",
+                    "--execute",
+                    "--state",
+                    "/unused/state",
+                    "--credential-file",
+                    "/unused/secret",
+                    "--model",
+                    "selected",
+                    "--evidence",
+                    "/unused/evidence",
+                ],
+            ),
+            patch.object(codex_acceptance, "private_secret") as secret,
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit),
+        ):
+            codex_acceptance.main()
+        secret.assert_not_called()
+
     def test_missing_execute_flag_cannot_read_a_credential_or_start_acceptance(self):
         with tempfile.TemporaryDirectory() as temporary:
             args = [

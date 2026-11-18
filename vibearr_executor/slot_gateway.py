@@ -61,6 +61,7 @@ class Gateway:
             ),
             "profiles": profiles,
             "workers": workers,
+            "account_auth": workers.get("agent", {}).get("account_auth", {}),
         }
 
     def upload(self, kind, content, expected_digest):

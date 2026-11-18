@@ -20,7 +20,7 @@ class ExecutionPolicy:
     runtime_profile: str = "native-default"
     validation_profile: str = "project-default"
     network_hosts: tuple[str, ...] = (
-        "api.openai.com",
+        "chatgpt.com",
         "pypi.org",
         "files.pythonhosted.org",
     )

@@ -57,6 +57,7 @@ def main():
         "application",
         "database",
         "runner",
+        "account",
         "agent",
         "setup",
         "validation",
@@ -94,10 +95,12 @@ def main():
         os.chown(ROOT / name, 0, 10001)
         (ROOT / name).chmod(0o750)
     write_once(ROOT / "runner/control-token", "")
+    write_once(ROOT / "account/control-token", "")
     for directory in (
         Path("/var/lib/vibearr"),
         Path("/var/lib/vibearr-backups"),
         Path("/var/lib/gateway"),
+        Path("/var/lib/codex-account"),
         Path("/var/lib/vibearr-browser"),
         Path("/var/lib/vibearr-checks"),
     ):

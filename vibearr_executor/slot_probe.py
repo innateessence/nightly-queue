@@ -10,6 +10,9 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
+
+from .codex_account import OAUTH_CLIENT
 
 
 def main():
@@ -132,11 +135,49 @@ def main():
         time.sleep(60)
     elif case == "network":
         proxy = os.environ.get("HTTPS_PROXY")
+        if context.get("account_control_ip"):
+            try:
+                socket.create_connection(
+                    (context["account_control_ip"], 8793), timeout=1
+                ).close()
+            except OSError:
+                pass
+            else:
+                raise AssertionError("Task reached private account control.")
+            request = urllib.request.Request(
+                "http://127.0.0.1:8792/oauth/token",
+                data=json.dumps(
+                    {
+                        "grant_type": "refresh_token",
+                        "client_id": OAUTH_CLIENT,
+                        "refresh_token": "forged-account-capability-00000000000",
+                    }
+                ).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            try:
+                with direct.open(request, timeout=5):
+                    raise AssertionError("Task renewed a forged account capability.")
+            except urllib.error.HTTPError as error:
+                with error:
+                    assert error.code == 400
+                    assert json.loads(error.read(4096))["error"] == "invalid_grant"
+            endpoint = urllib.parse.urlsplit(proxy)
+            with socket.create_connection(
+                (endpoint.hostname, endpoint.port), timeout=5
+            ) as connection:
+                connection.sendall(
+                    b"CONNECT auth.openai.com:443 HTTP/1.1\r\nHost: auth.openai.com:443\r\n\r\n"
+                )
+                assert connection.recv(4096).startswith(
+                    b"HTTP/1.1 403 "
+                ), "Task proxy allowed provider account refresh."
         if os.environ["VIBEARR_PHASE"] == "validation":
             assert not proxy
         else:
             target = (
-                "https://api.openai.com/v1/models"
+                "https://chatgpt.com/"
                 if os.environ["VIBEARR_PHASE"] == "agent"
                 else "https://pypi.org/simple/"
             )

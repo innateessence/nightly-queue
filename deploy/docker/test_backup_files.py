@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from .backup_files import (
     VOLUMES,
     capture,
+    fence_account_restore,
     inventory,
     require_capacity,
     restore,
@@ -119,3 +120,12 @@ class BackupVolumeTests(unittest.TestCase):
             if entry["path"] == "application-secrets/encryption-key"
         )
         self.assertEqual(value["uid"], os.geteuid())
+
+    def test_restored_accounts_require_sign_in_under_a_fresh_authority(self):
+        root = self.target / "account-data"
+        first = fence_account_restore(root, "backup-one")
+        second = fence_account_restore(root, "backup-one")
+        self.assertNotEqual(first["authority"], second["authority"])
+        self.assertEqual((root / "authority").read_text(), second["authority"])
+        self.assertTrue(second["account_sign_in_required"])
+        self.assertEqual((root / "restore-required.json").stat().st_mode & 0o777, 0o600)

@@ -123,6 +123,7 @@ class NativeCodexTests(unittest.TestCase):
         self.adapter = NativeCodexAdapter(self.client)
         self.policy = default_execution_policy()
         self.policy["runtime_profile"] = self.client.profile.profile_id
+        self.policy["network_hosts"] = list(self.client.profile.network_hosts)
         self.source = pack({"answer.py": (0o644, b"answer = 0\n")})
         self.request = {
             "run_id": str(uuid4()),

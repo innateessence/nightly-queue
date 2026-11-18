@@ -20,7 +20,7 @@ jobs:
     env:
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       TRUSTED_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-      INTRODUCTION_SHA: 1cefcdce15e75ddd2919dd41d2223462e8ad69c7
+      INTRODUCTION_SHA: 3a58a409510a7f3186ed0d251c710bed29b9a197
     steps:
       - name: Check out the exact candidate
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -40,7 +40,7 @@ jobs:
         shell: bash
         run: |
           echo "RECIPE_PATH=$GITHUB_WORKSPACE/recipe" >> "$GITHUB_ENV"
-          if ! test -f recipe/deploy/docker/checks.sh; then
+          if ! test -f recipe/deploy/docker/checks.sh || ! test -f recipe/vibearr_executor/account_server.py; then
             echo "bootstrap=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Check out the immutable Docker introduction

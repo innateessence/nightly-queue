@@ -13,7 +13,9 @@ from uuid import UUID, uuid4
 from .backup_files import (
     capture,
     checksum,
+    fence_account_restore,
     inventory,
+    private_restore_file,
     read_json,
     require_capacity,
     restore,
@@ -220,9 +222,14 @@ def restore_files(identity):
             "PostgreSQL restore storage cannot fit this snapshot and its reserve."
         )
     restore(directory / "state.tar", records, Path("/restore"))
+    fence_account_restore(Path("/restore/account-data"), identity)
     marker = Path("/restore/runner-secrets/restore-required.json")
-    write_json(marker, {"backup_id": identity, "new_runner_identity_required": True})
-    os.chown(marker, 10001, 10001)
+    private_restore_file(
+        marker,
+        json.dumps(
+            {"backup_id": identity, "new_runner_identity_required": True}
+        ).encode(),
+    )
     print(
         json.dumps(
             {

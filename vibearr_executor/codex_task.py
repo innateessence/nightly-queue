@@ -63,7 +63,7 @@ def model_id(value):
     )
 
 
-def auth_material(kind: str, secret: str, *, runtime=False) -> str:
+def auth_material(kind: str, secret: str, *, runtime=False, allow_expired=False) -> str:
     if (
         not isinstance(secret, str)
         or not 16 <= len(secret.encode()) <= 16384
@@ -124,7 +124,8 @@ def auth_material(kind: str, secret: str, *, runtime=False) -> str:
             raise ValueError
         if (
             type(claims.get("exp")) is not int
-            or claims["exp"] <= datetime.now(timezone.utc).timestamp() + 300
+            or not allow_expired
+            and claims["exp"] <= datetime.now(timezone.utc).timestamp() + 300
         ):
             raise ValueError
         return json.dumps(
@@ -183,7 +184,22 @@ def launch(
     context: dict, secret: str, *, home: Path, binary: str = BINARY
 ) -> tuple[list[str], dict, Path]:
     context = context_data(context)
-    material = auth_material(context["auth_kind"], secret, runtime=True)
+    lease = None
+    if context["auth_kind"] == "session":
+        candidate = json.loads(secret)
+        if (
+            isinstance(candidate, dict)
+            and candidate.get("kind") == "codex-account-lease"
+        ):
+            from .account_leases import lease_secret
+
+            lease = lease_secret(candidate)
+            if lease["binding"]["account_digest"] != context["account_digest"]:
+                raise ValueError("Account lease differs from this native session.")
+            secret = json.dumps(lease["auth"])
+    material = auth_material(
+        context["auth_kind"], secret, runtime=True, allow_expired=lease is not None
+    )
     home.mkdir(mode=0o700, parents=True, exist_ok=True)
     codex_home = home / ".codex"
     codex_home.mkdir(mode=0o700)
@@ -215,6 +231,17 @@ def launch(
     if context["auth_kind"] == "token":
         environment["CODEX_API_KEY"] = material
     else:
+        if lease is not None:
+            from .account_bridge import BRIDGE_PORT
+
+            auth = json.loads(material)
+            auth["auth_mode"] = "chatgpt"
+            auth["tokens"]["refresh_token"] = lease["token"]
+            auth["last_refresh"] = datetime.now(timezone.utc).isoformat()
+            material = json.dumps(auth)
+            environment["CODEX_REFRESH_TOKEN_URL_OVERRIDE"] = (
+                f"http://127.0.0.1:{BRIDGE_PORT}/oauth/token"
+            )
         path = codex_home / "auth.json"
         path.write_text(material)
         path.chmod(0o600)
@@ -248,6 +275,8 @@ def launch(
         "web_search": "disabled",
         "cli_auth_credentials_store": "file",
     }
+    if context["auth_kind"] == "session":
+        overrides["forced_login_method"] = "chatgpt"
     for key, value in overrides.items():
         if key == "projects":
             literal = '{"/work"={trust_level="untrusted"}}'

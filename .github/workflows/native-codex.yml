@@ -32,4 +32,4 @@ jobs:
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
             --user 1000:1000 --pids-limit 64 --memory 512m --cpus 1 --tmpfs /tmp:rw,exec,nosuid,nodev,size=256m \
             --entrypoint /usr/local/bin/python "$image" -I -m unittest \
-            vibearr_executor.test_codex_task vibearr_executor.test_secret_material -v
+            vibearr_executor.test_codex_task vibearr_executor.test_secret_material vibearr_executor.test_account_cli -v

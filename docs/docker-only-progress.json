@@ -4,7 +4,7 @@
   "pull_request": "https://github.com/innateessence/nightly-queue/pull/135",
   "autonomous_execution_qualified": false,
   "runtime_constraints": {
-    "agent": "Pinned Codex with a dedicated API key; session, Claude and OpenCode profiles are not installed",
+    "agent": "The account-integration branch installs pinned Codex session profiles with protected account storage and operation-scoped renewal; no Codex API key is required. Claude and OpenCode profiles are not installed.",
     "worker_model": "Reusable preprovisioned slots with a separate task UID and per-boot qualification",
     "project_limits": "Must match the actual registered slot; smaller requested ceilings are rejected"
   },
@@ -54,9 +54,17 @@
     "The documented Docker-copy import and private collection roundtrip passed in a separate disposable volume",
     "68 focused browser, queue, bootstrap and native fixture tests passed with Black, Ruff, mypy, ShellCheck and Actionlint after review hardening"
   ],
+  "account_integration": {
+    "branch": "feat/docker-codex-account",
+    "pull_request": "https://github.com/innateessence/nightly-queue/pull/143",
+    "evidence": "acceptance/docker-codex-account.json",
+    "native_session_fixture": "Passed on the qualified disposable Docker stack: real edit, independent validation, controller reload, idempotent start, foreground cancellation and authentication probe; all four operations terminated.",
+    "provider_renewal": "Unqualified: saved session access works, but provider-managed renewal returns HTTP 401. Fresh device sign-in and durable renewal/restart verification remain required.",
+    "production_processing_enabled": false
+  },
   "remaining": [
     "Pass exact-candidate CI with the trusted recipe updated to include the final hardening fixes",
-    "Run the explicit native fixture on the selected deployment and model account before claiming native task acceptance",
+    "Complete fresh account sign-in and verify real provider renewal plus reuse after account-service restart; repeat the native fixture on the actual release deployment",
     "Run real dependent two-issue acceptance and qualification on the actual deployment before enabling claims",
     "Complete the final P2-or-higher review/fix loop"
   ]
