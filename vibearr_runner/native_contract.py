@@ -1512,6 +1512,12 @@ def status_document(
         "validation",
         "delivery",
         "waiting",
+        "intake",
+        "specification",
+        "build",
+        "checks",
+        "review",
+        "decision",
     }:
         raise NativeContractError("Native status stage is invalid.")
     if type(repair_count) is not int or not 0 <= repair_count <= 2:
