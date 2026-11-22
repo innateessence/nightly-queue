@@ -138,6 +138,7 @@ class ProjectRunnerSettingsForm(forms.Form):
             elif key.endswith("commands") or key in {
                 "execution_policy",
                 "merge_profile",
+                "factory",
             }:
                 value = ConfigurationJSONField(
                     required=False,
