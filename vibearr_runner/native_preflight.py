@@ -81,6 +81,11 @@ class NativePreflight:
                 validation = validation_diagnostics(policy, self.executor, self.profile)
                 if validation.get("ready") is not True:
                     raise NativeSessionError(validation["reason"])
+                from .factory_routing import require_factory_capabilities
+
+                require_factory_capabilities(
+                    project["effective"].get("factory"), self.executor.capabilities()
+                )
                 repository_grant = self.selected_grant(project, "repository")
                 report["repository"] = self.github_check(repository_grant, project)
                 if policy.delivery_mode == "merge":
