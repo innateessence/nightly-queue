@@ -20,7 +20,8 @@ flowchart TD
     R -->|all required reviews pass| D[Recorded decision]
     D -->|ready| P[Supervisor publishes or updates one PR]
     D -->|unresolved| F[Failed run with diagnostics]
-    P --> M[Current base and head verified, required CI, policy merge]
+    P --> H[Human reviews current PR and required CI, then merges]
+    H --> M[Read-only reconciliation verifies actual merge]
     M --> N[Dependent task starts from verified merge]
     G -->|budget exhausted| F
     R -->|budget exhausted or unresolved decision| F
@@ -31,6 +32,10 @@ bounded roles and return artifacts; trusted code checks evidence and advances th
 run. Codex supplies every agent role in the first implementation. Claude Code and
 OpenCode later implement the same contract, including complete single-provider
 pipelines. A mixed-provider configuration is optional, never a prerequisite.
+
+Humans merge every PR through the MVP and factory rollout. Use the existing
+`delivery_mode: "pull_request"`; automatic merge stays disabled. The final agent
+decision recommends readiness for human review and grants no merge authority.
 
 The [reference video](https://www.youtube.com/watch?v=RiaTyJ2POVo) and
 [software-factory-claude-code-v2](https://github.com/zazencodes/zazencodes-season-3/tree/de4598a8fab54425366952d886bbdb083f075af6/src/software-factory-claude-code-v2)
@@ -50,7 +55,7 @@ are based on the linked source, not a verified viewing of the video.
 | Script-owned state transitions | Extend the current owned-run services and operation journal; agents cannot mutate authoritative state |
 | Risk and affected surfaces route reviews | Trusted routing combines intake with changed paths and configured rules; code review always runs, UI adds UX/UI, security adds security review |
 | Build, gate, review rounds | One initial build plus at most two repairs by default, sharing the existing run budget with CI and base updates |
-| Agent-written verdict and merge step | A role records its assessment; the supervisor verifies every prerequisite and performs credentialed GitHub writes under project delivery policy |
+| Agent-written verdict and merge step | A role records readiness; the supervisor publishes a PR, a human merges, and read-only reconciliation verifies the resulting merge |
 | Concurrent jobs and reviewers | One active task initially; execute reviewers sequentially on the existing slot, then add parallelism only with separately qualified capacity |
 | Transcript-based cost display | Record measured provider usage when available; distinguish estimates from billed cost and report unavailable telemetry honestly |
 
@@ -73,7 +78,7 @@ artifacts. Markdown is a display rendering, not a state-transition protocol.
 | Deterministic gate | Candidate tree, trusted validation profile, dependency artifact | Existing independent validation receipts, actual exit results and protected-path checks. A failure returns diagnostics to the builder; do not spend reviewer calls on a failing gate. |
 | Required reviewers | Same gated candidate and spec, diff, check results; UI evidence where required | One structured verdict per routed role: `pass`, `changes`, or `blocked`, findings with evidence and stable IDs, acceptance-criterion coverage. Missing, malformed, failed or timed-out reviews prevent advancement. |
 | Decision role | Full required review set, current gate and findings | Recorded `ready` or `unresolved` decision with rationale, from a separate agent session. It cannot waive required findings, substitute for a gate, or authorize merge. |
-| Delivery / merge | Verified artifacts, current ownership and project policy | Existing supervisor commit/push/PR/CI/merge receipts. `pr_only` succeeds at verified PR delivery; automatic mode completes only after the verified merge. |
+| Delivery / human merge | Verified artifacts, current ownership and project policy | Supervisor commit/push/PR receipts finish the run at verified delivery. A human reviews and merges through GitHub; separate read-only reconciliation records the actual merge before dependencies unlock. |
 
 Intake may clarify or propose splitting oversized work; it cannot silently remove
 requested acceptance criteria. A changed outcome requires an explicit unresolved
@@ -112,8 +117,9 @@ each role's completion separately; a summary cannot stand in for those records.
 After any edit, rerun the gate and all required reviews on the new candidate.
 Never carry a prior tree's pass into a later round. A changed base invalidates
 affected spec, validation and review evidence; reconcile it, rebuild if needed,
-and obtain fresh evidence before merge. The final CI/merge contract still checks
-the actual PR head and required GitHub checks. Protected validation configuration
+and obtain fresh evidence before marking the PR ready again. Human review and
+required GitHub checks apply to the actual current PR head. Protected validation
+configuration
 stays outside candidate control; changing it requires a separately reviewed
 profile/image and qualification, not a builder exception.
 
@@ -134,6 +140,51 @@ Unknown operations keep their fence; confirmed failures release capacity.
 Pause/cancel covers every active role and browser/check job, with descendant
 termination confirmed before slot reuse. GitHub writes reconcile their original
 operation and repository/branch/head; a retry reuses the same PR identity.
+
+After delivery, mark the attempt `succeeded` with outcome `delivered` and release
+its claim and worker capacity. Display the PR as awaiting human review separately
+from the finished run. Independent work may continue; dependent work stays blocked.
+A read-only reconciliation path, using currently authorized project read scope
+rather than the completed claim, verifies repository/PR/head, actual merge SHA and
+base ancestry before recording dependency completion. PR creation, a readiness
+verdict, issue closure, or a closed-unmerged PR never satisfies a dependency.
+Late CI failures remain visible; a repair after delivery requires an explicit new
+attempt and reuses the existing PR, without resurrecting the finished claim.
+
+## Container footprint and consolidation review
+
+The factory needs role sessions, not a container per role. Reuse the existing
+agent slot sequentially for intake, spec, build, reviews and decision, with a
+confirmed reset and the appropriate role permissions between sessions.
+
+Rendered Compose with the `runner` profile at baseline `84ada44` defines 14
+long-running services and two one-shot startup jobs (`initialize`, `migrate`).
+The separate `feat/docker-codex-account` branch adds account service/proxy
+isolation, bringing its topology to 16 long-running services plus those startup
+jobs. This is a configured service count, not evidence that services are running.
+
+| Responsibility | Baseline main | With account branch |
+| --- | --- | --- |
+| Web, production PostgreSQL, Valkey, importer, scheduler | 5 | 5 |
+| Agent, setup and validation workers | 3 | 3 |
+| Isolated agent and validation test PostgreSQL | 2 | 2 |
+| Supervisor and authenticated worker gateway | 2 | 2 |
+| Model and package proxies | 2 | 2 |
+| Codex account service and account proxy | 0 | 2 |
+| Long-running total | 14 | 16 |
+
+Tools, qualification, browser, backup and restore jobs are additional one-shot
+operations. Claude/OpenCode do not require running three provider fleets together.
+Parallel role execution would need separately qualified capacity and is deferred.
+
+Before finalizing the installation footprint, review which processes truly need
+separate containers and which can share a trust boundary or run only when needed.
+Measure idle and active resource use and compare operator complexity. Record a
+smaller topology proposal and its qualification work before changing Compose;
+preserve independent checks, production/test separation, credential isolation,
+egress restrictions, reset guarantees and the socketless Docker boundary. The
+current 14/16-service layout is an implementation baseline, not a fixed factory
+requirement or a claim that consolidation is already proven safe.
 
 ## Current code and implementation ownership
 
@@ -170,9 +221,9 @@ qualification requires the qualified target worker stack and selected connection
 | F1 `feat/factory-role-contracts` | Existing owned runs, native protocol | Versioned role/round artifacts, stage/outcome migrations, required-role sets, configuration snapshots and idempotent APIs. Reject stale ownership, conflicting replay, invalid transitions and artifacts for another tree/round. Preserve old history and generic queue clients. |
 | F2 `feat/codex-intake-spec` | F1, native Codex | Codex intake/spec sessions through Docker; accepted work has saved criteria, unanswered questions and rejected work produce distinct outcomes without occupying capacity or repeated automatic retries. Test manual tasks and context-change retries. |
 | F3 `feat/codex-build-review-loop` | F2, independent validation | Builder, gate, trusted routing and separate code/security/UX/UI reviewer sessions; read-only reviewer source, fresh evidence, complete review barrier and shared repair budget. Demonstrate test failure repair, review-request repair and honest exhaustion; a missing reviewer blocks delivery. |
-| F4 `feat/factory-delivery-recovery` | F3, existing delivery/merge | Recorded decision and server-enforced delivery prerequisites, current-head/base invalidation, one PR, crash reconciliation, deadlines and cancellation across roles. Test lost dispatch/push/merge responses, late/stale reviews, changed base and confirmed cleanup. |
+| F4 `feat/factory-delivery-recovery` | F3, existing delivery/reconciliation | Recorded decision and server-enforced delivery prerequisites, one PR, claim release at delivery, and read-only human-merge reconciliation. Test lost dispatch/push/PR responses, late/stale reviews, changed base, confirmed cleanup, unrelated work while review waits, and no runner merge request. |
 | F5 `feat/factory-activity-evidence` | F4 | Activity/History show scope, spec, risk, required reviewers, round findings, check/browser evidence, decision, time/usage availability and PR/merge. Docker browser acceptance covers desktop/mobile, missing data and failed/recovered runs. |
-| F6 `test/codex-factory-acceptance` | F5, D1–D4 target qualification, usable Codex auth | Actual Docker Codex two-dependent-issue scenario with artifact chain, a routed UI/security case, bounded repair, cancellation and restart evidence. Record images, CLI/profile identities, trees and CI/merge ancestry; fixtures alone cannot qualify this milestone. |
+| F6 `test/codex-factory-acceptance` | F5, D1–D4 target qualification, usable Codex auth | Actual Docker Codex two-dependent-issue scenario with a human merging each PR, artifact chain, a routed UI/security case, bounded repair, cancellation and restart evidence. Record images, CLI/profile identities, trees, human merge actors and ancestry; verify zero runner merge calls. Fixtures alone cannot qualify this milestone. |
 | F7 `feat/claude-factory-roles` | F6, native Claude feature 08 | Claude-only pipeline passes the shared role conformance suite and genuine Docker auth/tool/read-only-review/cancel/resume acceptance, then its own two-issue loop. |
 | F8 `feat/opencode-factory-roles` | F6, native OpenCode feature 09 | OpenCode-only pipeline passes the same suite and genuine Docker acceptance for its pinned CLI/provider/model, then its own two-issue loop; Ollama remains an optional separately verified connection. |
 
@@ -185,10 +236,29 @@ and resume interfaces across providers.
 
 The existing two-issue Codex MVP remains the runtime/delivery prerequisite. F6 is
 the expanded factory milestone: both issues traverse intake/spec/build/gate/review/
-decision, B starts from A's verified merge, and the same run evidence appears in
-Activity/History. It adds no manual command, plan or routine merge approval.
+decision, a human merges each PR, B starts from A's verified merge, and the same
+run evidence appears in Activity/History. There are no manual command or plan
+approval prompts; human PR review and merge are required for every provider.
 Automatic deployment remains later feature 12; multi-task/parallel-review capacity
 remains feature 13 with an explicit qualified slot budget.
+
+## Later automatic merge: maturity gate
+
+Automatic merge is outside the MVP, F1–F8 and their acceptance criteria. Existing
+merge code and earlier signoffs do not authorize its use. Keep delivery mode
+`pull_request` and GitHub auto-merge disabled; no agent role may merge or enable it.
+
+Revisit feature 07 only after sustained human-reviewed operation across real
+changes demonstrates reliable scope, check/review quality, dependency handling,
+and recovery. Track escaped defects, human corrections/rejections, false passes,
+repair exhaustion and duplicate-side-effect incidents. An operator must agree
+evaluation thresholds and a representative observation period, review the actual
+results and unresolved incidents, and explicitly approve a separate limited
+rollout. Passing F6, elapsed time or an agent readiness decision cannot enable it.
+That later change must include current-head CI/review enforcement, compatible
+repository protection without bypass, opt-in per-project scope, audit evidence,
+and a tested immediate return to human merging. Required human reviews must never
+be removed or bypassed automatically. Automatic deployment remains independent.
 
 ## Source notes
 

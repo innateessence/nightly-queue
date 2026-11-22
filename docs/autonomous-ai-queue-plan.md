@@ -55,8 +55,10 @@ HTTP CLI. No framework migration is needed to reach this outcome.
 Remove human command and plan approvals from normal execution. Configured project
 policy authorizes autonomous work inside an isolated task environment. A blocked
 action produces a clear error or bounded retry rather than an approval inbox.
-Automatic merge is part of the MVP: the next task must use code merged by the
-previous task. Automatic deployment is a later feature; delivery, merge, and a
+Humans review and merge every PR through the MVP and factory rollout. The next
+dependent task must use the verified human merge of its prerequisite. Automatic
+merge is deferred until sustained operation demonstrates maturity and a human
+explicitly approves a separate rollout. Automatic deployment is a later feature; delivery, merge, and a
 running application upgrade have separate evidence and outcomes.
 
 This document supersedes the sequencing and approval requirements in
@@ -102,19 +104,23 @@ host service templates. It does not enable execution, install services or run pa
    checkpoints. Separate reviewer sessions judge the gated candidate; required
    security/UX/UI roles follow trusted routing. The complete required review set
    must pass for the current tree before a decision permits delivery.
-6. Keep the existing queue statuses. Track execution stage, wait reason, retry
+6. Use `delivery_mode: "pull_request"` and keep automatic merge disabled. Finish
+   the run and release its claim at verified PR delivery; track human review and
+   verified merge separately. Read-only merge reconciliation unlocks dependents
+   without holding a worker or reusing a finished claim.
+7. Keep the existing queue statuses. Track execution stage, wait reason, retry
    eligibility, delivery, and merge state on the run. A delivered PR is distinct
    from a merged change and from a running application upgrade.
-7. Pause, cancel, schedules, timeouts, disk limits, and configured usage reserves
+8. Pause, cancel, schedules, timeouts, disk limits, and configured usage reserves
    remain automatic execution controls. Unsupported quota telemetry must not be
    invented; reserve enforcement remains optional and blocks when enabled without
    a usable reading. Use wall-clock and attempt caps regardless of provider quota.
-8. Unknown execution or delivery outcomes reconcile before retrying. Never start
+9. Unknown execution or delivery outcomes reconcile before retrying. Never start
    a replacement agent just because a heartbeat expired. Never claim success from
    a model's final message without checking the workspace and validation results.
-9. All execution and operations stay in Docker. Application services have no host
-   engine access. State lives in named volumes; workers cannot access host paths,
-   production storage, controller journals or credentials outside their grants.
+10. All execution and operations stay in Docker. Application services have no host
+    engine access. State lives in named volumes; workers cannot access host paths,
+    production storage, controller journals or credentials outside their grants.
 
 ## Feature branches and dependencies
 
@@ -137,16 +143,17 @@ provider support; F7/F8 qualify their full factory roles after the Codex pipelin
 | 04 | P0 | `feat/unattended-issue-to-pr` | 03, 15 | Complete background task execution, validation, and repeatable PR delivery |
 | 05 | P0 | `feat/github-work-selection` | 01 | Author filtering, dependencies, holds, and deterministic priority |
 | 06 | P0 | `feat/self-development-bootstrap` | 04, 05 | This repository consumes its own feature issues automatically |
-| 07 | P0 | `feat/automatic-pr-merge` | 06 | Passing PRs merge and unlock dependent backlog work; completes the MVP |
+| 07 | P2 deferred | `feat/automatic-pr-merge` | 06, F6, sustained maturity evidence and explicit human rollout approval | Optional automatic merge after the human-merge workflow is mature; outside the MVP and F1–F8 |
 | 08 | P1 | `feat/native-claude-runner` | 06 | Native Claude Code using the same task lifecycle |
 | 09 | P1 | `feat/native-opencode-runner` | 06 | Native OpenCode using the same task lifecycle |
 | 10 | P1 | `feat/arr-queue-dashboard` | 06 | Appliance-style queue, Activity, History, and System views |
 | 11 | P1 | `feat/github-work-authoring` | 06 | Web-created GitHub work and bounded agent-created follow-ups |
-| 12 | P2 | `feat/automatic-self-updates` | 07 | Deploy merged versions and recover from failed upgrades |
-| 13 | P2 | `feat/parallel-project-workers` | 07 | Bounded concurrency across repositories |
-| 14 | P2 | `refactor/retire-legacy-approval-stack` | 07, 08, 09 | Remove obsolete runtime and approval plumbing after migration |
+| 12 | P2 | `feat/automatic-self-updates` | 06, F6 | Deploy human-merged versions and recover from failed upgrades; separately qualified deployment path |
+| 13 | P2 | `feat/parallel-project-workers` | 06, F6 | Bounded concurrency across repositories; retains human merging |
+| 14 | P2 | `refactor/retire-legacy-approval-stack` | 06, 08, 09, F6 | Remove obsolete command/proposal approval plumbing while preserving human PR review |
 
-The MVP consists of 01–07 and 15 plus mandatory Docker corrections D1–D4. Feature 15 keeps a new ID so existing plan
+The MVP consists of 01–06 and 15 plus mandatory Docker corrections D1–D4 and
+verified human-merge dependency reconciliation. Feature 07 is deferred. Feature 15 keeps a new ID so existing plan
 references do not change. The rename in 00 can land independently and does not
 delay execution work. Branch 05 can proceed after 01 while runtime work proceeds
 through 02, then 03 and 15, then 04. The factory sequence is F1 contracts → F2
@@ -154,7 +161,7 @@ Codex intake/spec → F3 build/check/review → F4 delivery/recovery → F5 Acti
 evidence → F6 actual Codex acceptance, then F7 Claude and F8 OpenCode. The existing
 runtime MVP remains its prerequisite, with D1–D4 qualification required for live
 acceptance. Features 08–11 and the full rename do not delay the initial Codex
-runtime loop or automatic merging. Dependencies describe merge order, not a
+runtime delivery loop. Dependencies describe implementation merge order, not a
 request to use multiple development agents now.
 
 ### 00 — Rename the application to vibearr
@@ -315,7 +322,7 @@ request to use multiple development agents now.
   mapping for imported issues. Detect missing/cyclic dependencies and display the
   reason. A prerequisite is fulfilled by recorded merge evidence, not simply by
   having a PR or an issue that somebody closed without completing the work.
-- Before feature 07, reconcile manually merged prerequisite PRs so dependent work
+- Reconcile human-merged prerequisite PRs so dependent work
   can proceed. Closed-unmerged PRs stop with a visible reason. No automatic requeue
   on reopen; an explicit retry creates a new attempt and preserves delivery history.
 - Apply source eligibility consistently to UI counts and generic/runner claims.
@@ -342,7 +349,9 @@ request to use multiple development agents now.
   isolated testing until this branch or launch the live-stack `test.sh` from agents.
 - Add a repeatable acceptance driver/report for the MVP's two dependent issues,
   deliberate validation failure, restart points, and exact-head checks. This branch
-  proves discovery/execution/delivery; 07 extends the same driver to real merges.
+  proves discovery/execution/delivery and verifies real human merges before
+  dependent work starts. Finish delivery runs without occupying a worker while
+  a human reviews; retain independent read-only reconciliation after completion.
   Seed tools mark already merged prerequisites complete, so bootstrapping never
   waits for the queue to implement its own missing execution prerequisites.
 - Acceptance: an owner-created issue for a small real improvement is discovered,
@@ -350,37 +359,23 @@ request to use multiple development agents now.
   issue runs next. Restart the service during one run and reconcile correctly.
   Measure issue-to-start and issue-to-PR times and record failures honestly.
 
-### 07 — Automatic merge and issue completion
+### 07 — Deferred automatic merge
 
-- Add a project delivery mode: PR delivery or automatic merge. Enable automatic
-  merge for this repository after required checks are configured. Do not add a
-  human review requirement to the autonomous path; configure GitHub repository
-  rules consistently rather than attempting to bypass required reviews.
-- Keep the run active through remote CI and merge in automatic-merge mode, using
-  its existing claim for scoped secret delivery. Finish only after verified merge
-  and idempotent completion reporting. PR-only mode still finishes at delivery.
-  Include both outcomes in native evidence; do not overload a PR URL as merge proof.
-- Track remote check runs and required status contexts for the exact PR head.
-  Merge only the expected repository/base/head with all required checks passing;
-  missing, pending, failed, or stale results are not success. Serialize merges
-  per repository and revalidate after base changes with bounded repair attempts.
-- Bootstrap must detect the current empty required-check list and require a
-  nonempty configured set with producer/workflow identities. Use an expected-head
-  SHA guard and squash merge; the app's own merge loop does not require GitHub's
-  separate auto-merge setting. Bound CI waits and share repair limits across local
-  tests, remote tests, and changed-base repairs.
-- Verify that the delivery actor has no ruleset bypass; explicitly address the
-  current admin-role bypass during initial setup rather than treating an owner's
-  token as permission to ignore branch rules.
-- Use verified merge identity to complete the issue, remove the branch according
-  to policy, and unlock dependents. Use retry-safe status comments with a stable
-  run marker. A delivered-but-unmerged run remains visible and reconcilable.
-- Acceptance: head changes invalidate old checks; permission errors, conflicts,
-  required reviews, and lost merge responses produce accurate states; retries do
-  not merge a different commit, close unrelated issues, or duplicate comments.
-- Release acceptance: the real two-issue scenario merges both changes without
-  human gates; the second starts from a base containing the first merge. Every
-  required evidence row in the MVP release contract passes before calling it ready.
+- Keep existing merge capability disabled during the MVP and F1–F8. Use
+  `delivery_mode: "pull_request"`; a successful agent decision never grants merge
+  permission. Humans review and merge, and verified provider evidence unlocks
+  dependencies through feature 05/06 reconciliation.
+- The [factory maturity gate](software-factory-plan.md#later-automatic-merge-maturity-gate)
+  requires sustained real human-reviewed use, measured defects/corrections and
+  recovery results, agreed evaluation thresholds, and explicit human approval
+  of a separate limited rollout. No automatic promotion based on tests or time.
+- A later opt-in implementation must retain exact-head checks/reviews, trusted
+  producer identities, normal branch protection without bypass, bounded repairs,
+  one-PR recovery, observed merge evidence, and an immediate off switch. It must
+  not remove required human reviews or change repository rules automatically.
+- [Automatic merge](automatic-merge.md) preserves technical implementation detail
+  for that future work; its old autonomous-MVP acceptance is superseded by this
+  human-merge plan. Neither MVP release nor provider qualification depends on 07.
 
 ### 08 — Native Claude Code adapter
 
@@ -495,11 +490,12 @@ portable test success or a model-generated success summary.
   background and delivered repeatedly. Use this loop to implement later features;
   the execution, selection, validation, and bootstrap branches must first land
   through ordinary development.
-- **M3, branch 07:** passing self-development PRs merge automatically and unblock
-  dependent features. This is the MVP release: the full two-issue scenario and
-  failure/recovery matrix pass. No per-PR approval is part of the happy path.
+- **M3, branches 05–06 reconciliation:** humans review and merge both development
+  PRs; verified merge evidence unlocks the dependent task. This is the MVP release:
+  the full two-issue scenario and failure/recovery matrix pass, with no command
+  or plan approval prompts and no runner merge calls.
 - **Factory Codex, F1–F6:** both dependent issues traverse saved intake/spec,
-  build/check/review rounds and a recorded decision before verified PR/merge.
+  build/check/review rounds and a recorded decision before PR delivery and human merge.
   Required reviews, bounded repairs, current-tree evidence and restart recovery
   pass on the actual Docker stack. This extends M3 rather than claiming the
   original runtime MVP already implements the factory stages.

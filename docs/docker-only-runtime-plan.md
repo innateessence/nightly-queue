@@ -6,6 +6,12 @@ It describes the implementation and release requirements. See
 engineering checks and outstanding deployment acceptance. Keep autonomous
 execution disabled until the actual target stack is qualified.
 
+Delivery policy revision, 2026-11-22: humans review and merge every PR throughout
+the MVP and factory rollout. Use `delivery_mode: "pull_request"`; automatic merge
+is deferred behind the [factory maturity gate](software-factory-plan.md#later-automatic-merge-maturity-gate).
+Existing automatic-merge implementation and old acceptance reports do not authorize
+its use. This revision changes the planned acceptance contract, not runtime settings.
+
 ## Non-negotiable boundary
 
 - Existing Docker Engine and Compose are the only runtime prerequisites. Setup
@@ -101,9 +107,9 @@ signoffs do not satisfy Docker-only acceptance.
 | D1 | `feat/docker-only-packaging` | — | Immutable app/controller/tool images, complete Compose services, health/restart policies, private networks, named volumes and secret initialization; no production source bind |
 | D2 | `feat/socketless-worker-slots` | D1, policy 01 | Worker APIs, UID separation, reset/stop/export, boot reconciliation, egress and enforced slot limits; replace host Docker dispatch |
 | D3 | `feat/docker-only-validation` | D2, validation 15 | Nine checks, fresh test databases/roles, sealed dependency artifacts and exact-tree evidence through worker APIs |
-| D4 | `feat/docker-only-operations` | D1–D3, bootstrap 06, merge 07 | Containerized setup, migrations, CLI, CI, qualification, browser screenshots, backup/restore, delivery recovery and real dependent two-issue acceptance |
+| D4 | `feat/docker-only-operations` | D1–D3, bootstrap 06, human-merge reconciliation 05/06 | Containerized setup, migrations, CLI, CI, qualification, browser screenshots, backup/restore, delivery recovery and real dependent two-issue acceptance with human merges |
 
-D1–D4 are P0 MVP prerequisites. Requalify features 02, 03, 04, 06, 07 and 15 against
+D1–D4 are P0 MVP prerequisites. Requalify features 02, 03, 04, 05, 06 and 15 against
 this boundary before enabling claims. Boundary qualification needs no paid agent.
 
 ## Operations and transition
@@ -119,7 +125,8 @@ queue and history. Initialize fresh Docker worker state and runner identity wher
 deleted host state cannot be recovered safely. Explicitly retire unused host
 identities. Never copy controller proofs, backdate eligibility, or relabel old
 qualification as current readiness. Reconcile unfinished GitHub publications
-before claims; do not duplicate an agent, branch, PR or merge.
+before claims; do not duplicate an agent, branch or PR. Observe human merges
+through read-only reconciliation; do not dispatch merges during this rollout.
 
 Containers write backups to a designated backup volume. Verify restore in a
 disposable Compose project. Export to a host path only through an explicit
@@ -150,10 +157,12 @@ facts; no qualification container receives a host engine socket.
 - All tests, packaging, migrations, backups/restores and actual browser PNGs run
   in containers. CI uses the same images/profiles. Old host-based reports cannot
   qualify this release.
-- Two owner issues, B depending on A, are discovered, coded, independently checked,
-  published and merged automatically. B uses A's verified merge. Record final
-  trees, CI identities, restart/termination/ACK evidence, ancestry and zero
-  command/plan approvals, including any honest failed/recovered generations.
+- Two owner issues, B depending on A, are discovered, coded, independently checked
+  and published automatically. A human reviews and merges each PR; B uses A's
+  verified human merge. Delivery releases claim/worker capacity while review waits,
+  and independent work can proceed. Record final trees, CI identities, human merge
+  actors/timestamps, restart/termination/ACK evidence, ancestry, zero runner merge
+  calls and zero command/plan approvals, including failed/recovered generations.
 
 Failure keeps execution disabled. There is no host-runner, socket, privileged-mode
-or manual-approval fallback.
+or per-command/plan approval fallback. Human PR review and merge remain required.

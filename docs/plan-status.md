@@ -7,6 +7,12 @@ runner to intake → specification → build → checks → routed reviews → d
 → PR/merge. Codex handles every role first; Claude Code and OpenCode later pass
 the same contract. F1–F8 are planned branches, not implemented stages.
 
+Humans review and merge every PR. Use `delivery_mode: "pull_request"`; automatic
+merge is outside the MVP and F1–F8 until sustained maturity evidence and explicit
+human approval of a separate rollout. Delivery releases the claim/worker; read-only
+verification of the human merge unlocks dependent tasks. Existing merge code and
+older acceptance requirements do not override this policy.
+
 Planning baseline: `84ada44` on `main`. The checked-in
 [Docker progress record](docker-only-progress.json) reports implemented runtime
 foundations and intermediate engineering checks, with
