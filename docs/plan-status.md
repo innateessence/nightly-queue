@@ -13,6 +13,13 @@ human approval of a separate rollout. Delivery releases the claim/worker; read-o
 verification of the human merge unlocks dependent tasks. Existing merge code and
 older acceptance requirements do not override this policy.
 
+The release footprint is **four always-on containers**: app, production
+PostgreSQL, runner and one worker. The former consolidation review is replaced
+by required [S1–S4 implementation](docker-only-runtime-plan.md#required-simplification-branches).
+Remove Celery/Beat/Valkey and permanent gateway/proxy/account/test-DB sidecars;
+run phase-local test/browser processes inside the worker. No Compose change or
+compact-stack qualification has occurred yet.
+
 Planning baseline: `84ada44` on `main`. The checked-in
 [Docker progress record](docker-only-progress.json) reports implemented runtime
 foundations and intermediate engineering checks, with
@@ -22,14 +29,16 @@ The older snapshot below is historical and does not describe current merge state
 
 | Work | Current evidence / next action |
 | --- | --- |
-| Existing runtime/delivery MVP | Queue, Codex lifecycle, Docker slots, independent validation and delivery/merge code are present; complete the outstanding release gates in the progress record |
+| Existing runtime/delivery MVP | Retain queue/native/validation/delivery contracts; larger-stack evidence is historical and cannot qualify consolidation |
+| S1–S2: compact app and runner | Planned; app import loop, no broker, supervised startup, direct worker dispatch and runner-owned account/egress modules |
+| S3–S4: unified worker and compact acceptance | Planned; sequential clean phases, local disposable test services, exactly four runtime containers and fresh D1–D4 engineering evidence |
 | F1–F2: contracts and Codex intake/spec | Planned; extend owned runs and immutable artifacts, then implement bounded role sessions |
 | F3–F4: build/check/review and delivery/recovery | Planned; trusted review routing, shared repairs, current-tree barriers and operation reconciliation |
 | F5–F6: visibility and Codex acceptance | Planned; Activity/History round evidence and actual Docker two-issue factory proof |
 | F7–F8: Claude and OpenCode factory roles | Planned after F6 and their native adapters; each needs a complete provider-specific acceptance run |
 
-Implement contracts and Codex roles while runtime release work completes; qualify
-the full Codex pipeline before qualifying the other providers. This docs revision
+Implement contracts alongside S1–S4, integrate roles through the compact worker,
+then qualify the full Codex pipeline before the other providers. This docs revision
 does not merge, deploy, start services, or make paid model calls.
 
 ## Historical snapshot: 2026-11-16

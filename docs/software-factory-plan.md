@@ -119,8 +119,7 @@ Never carry a prior tree's pass into a later round. A changed base invalidates
 affected spec, validation and review evidence; reconcile it, rebuild if needed,
 and obtain fresh evidence before marking the PR ready again. Human review and
 required GitHub checks apply to the actual current PR head. Protected validation
-configuration
-stays outside candidate control; changing it requires a separately reviewed
+configuration stays outside candidate control; changing it requires a separately reviewed
 profile/image and qualification, not a builder exception.
 
 Count the initial build as round 1. At most two repair sessions follow by default;
@@ -151,40 +150,86 @@ verdict, issue closure, or a closed-unmerged PR never satisfies a dependency.
 Late CI failures remain visible; a repair after delivery requires an explicit new
 attempt and reuses the existing PR, without resurrecting the finished claim.
 
-## Container footprint and consolidation review
+## Required footprint: four always-on containers
 
-The factory needs role sessions, not a container per role. Reuse the existing
-agent slot sequentially for intake, spec, build, reviews and decision, with a
-confirmed reset and the appropriate role permissions between sessions.
+The single-repository, single-active-task release must use **four always-on
+containers**, including Codex account authentication. Simplification is required
+before release. The previous 14-container main / 16-container account topology is
+the implementation to replace, not an acceptable default or an optional later
+cleanup. The Compose files have not yet been changed by this documentation PR.
 
-Rendered Compose with the `runner` profile at baseline `84ada44` defines 14
-long-running services and two one-shot startup jobs (`initialize`, `migrate`).
-The separate `feat/docker-codex-account` branch adds account service/proxy
-isolation, bringing its topology to 16 long-running services plus those startup
-jobs. This is a configured service count, not evidence that services are running.
+| Container | Responsibility |
+| --- | --- |
+| `app` | Existing Django UI/API plus one supervised issue-import scheduling loop, reusing the current import services and database locks |
+| `postgres` | Production application data only; preserve the existing volume, database identity and credentials |
+| `runner` | Independent supervisor, Git/PR delivery, durable journals, direct worker client, selected backend/account lifecycle and narrowly scoped egress mediation |
+| `worker` | One authenticated, preprovisioned execution slot; sequential setup, coding, review and independent validation phases, with browser/test-service subprocesses only while needed |
 
-| Responsibility | Baseline main | With account branch |
-| --- | --- | --- |
-| Web, production PostgreSQL, Valkey, importer, scheduler | 5 | 5 |
-| Agent, setup and validation workers | 3 | 3 |
-| Isolated agent and validation test PostgreSQL | 2 | 2 |
-| Supervisor and authenticated worker gateway | 2 | 2 |
-| Model and package proxies | 2 | 2 |
-| Codex account service and account proxy | 0 | 2 |
-| Long-running total | 14 | 16 |
+Remove Celery worker/Beat and Valkey from the target runtime. PostgreSQL remains
+the durable queue and scheduling authority; reuse synchronization leases,
+backoff, pagination, and source eligibility rather than introduce another broker.
+The app's import loop continues while agent execution is paused. A trusted
+container entrypoint supervises web/import children, forwards signals, and reports
+a failed child through health/restart behavior. Avoid starting a scheduler in
+every web worker; test duplicate app starts against the database lease.
 
-Tools, qualification, browser, backup and restore jobs are additional one-shot
-operations. Claude/OpenCode do not require running three provider fleets together.
-Parallel role execution would need separately qualified capacity and is deferred.
+Collapse the worker gateway into the runner's direct authenticated client. Account
+storage/renewal and model/package/account egress mediation become runner modules,
+without standalone account or proxy containers. The runner remains a separate
+standard-library process with no Django/database imports or production DB access.
+Persist selected account state in its protected volume; never scan a host login.
+Implement these as shared runner modules with one operation journal and lifecycle;
+do not just move the old gateway/account/proxy daemons unchanged into one container.
 
-Before finalizing the installation footprint, review which processes truly need
-separate containers and which can share a trust boundary or run only when needed.
-Measure idle and active resource use and compare operator complexity. Record a
-smaller topology proposal and its qualification work before changing Compose;
-preserve independent checks, production/test separation, credential isolation,
-egress restrictions, reset guarantees and the socketless Docker boundary. The
-current 14/16-service layout is an implementation baseline, not a fixed factory
-requirement or a claim that consolidation is already proven safe.
+The worker includes pinned test PostgreSQL and browser binaries in its immutable
+image. Start a fresh local test PostgreSQL cluster and disposable app/browser
+subprocesses only for a phase needing them; stop and discard them before phase
+reuse. No permanent test-DB or browser sidecars. Their memory, CPU, PIDs, tmpfs,
+deadlines and descendants count against the worker's real container limits.
+Projects requiring unsupported external services report that requirement instead
+of dynamically creating containers or silently expanding the default stack.
+
+### Preserve the boundaries inside the smaller stack
+
+All candidate code stays in the worker. Trusted PID 1 and image-owned tools use
+separate UIDs/private control paths from task processes. Setup, agent/reviewer and
+validation phases never overlap. Seal and export the candidate, confirm termination,
+discard writable state/credentials/test DBs, then import a verified fresh snapshot
+for the next phase. Independent validation runs trusted commands without backend
+or GitHub credentials; it must not reuse the builder's environment or test database.
+Reviews use separate sessions and read-only candidate inputs.
+
+The worker has no production DB network/volume, runner journal or publication
+credentials. Task egress can reach only the runner's operation-scoped mediation
+endpoint and approved phase-local test services. Protect the worker management
+port and runner control/account endpoints from task UIDs. Mediation binds the
+active operation, phase and configured public hosts; validation has no public
+egress. Being on a Docker private network is not sufficient enforcement.
+
+There is no runtime Docker socket, dynamic container launcher, host execution or
+privileged fallback. One role does not add one container. Codex, then Claude and
+OpenCode, use selected profiles in the same worker image/slot; do not start three
+provider fleets. Parallel workers remain later feature 13.
+
+### Startup and operations budget
+
+Initialize secrets and apply migrations as ordered, retry-safe entrypoint steps
+inside these four services. Do not add mandatory init/migration sidecars or start
+claims before migrations, account readiness and worker qualification pass. If a
+later step fails, stop unhealthy and preserve initialized identities for retry.
+
+CLI, backup/restore and developer/CI packaging/qualification remain explicit one-shot
+tooling jobs, stopped after use; count them separately from the four runtime
+containers. Normal coding, validation and UI review must work with just the four.
+Any packaging check required by a task runs as a worker phase using pinned tools.
+Measure idle/active use and recovery on that topology. Do not shrink by hiding
+additional always-running services behind optional profiles or external endpoints.
+
+The [compact runtime sequence](docker-only-runtime-plan.md#required-simplification-branches)
+S1–S4 replaces the old topology before factory release. Requalify phase isolation,
+process supervision, account renewal, restart/cancel, resource limits, backup/
+restore and human-merge reconciliation on the four-container stack. Earlier
+multi-container evidence remains historical and cannot qualify consolidation.
 
 ## Current code and implementation ownership
 
@@ -199,7 +244,7 @@ does not establish the new pipeline or live readiness.
 | --- | --- |
 | `runner_control/` | Run stage/outcome schema, immutable role/round artifacts, owned APIs, required-review set and transition validation, display evidence |
 | `vibearr_runner/` | Existing native lifecycle, backend registry, role dispatch, trusted routing, shared budgets, journals, artifact import and delivery/merge prerequisites |
-| `vibearr_executor/` | Registered role capabilities, read-only reviewer inputs, source/credential separation, authenticated worker receipts and cleanup |
+| `vibearr_executor/` | One phase-switching worker, registered role capabilities, local disposable test services, read-only reviewer inputs, source/credential separation, authenticated receipts and cleanup |
 | `work_queue/services.py` | Shared eligibility, terminal transitions and retry/context behavior; preserve generic API clients |
 | `projects/`, `credentials/` | Versioned project routing/model overrides and explicitly selected backend connections; snapshot them at claim |
 | Existing app views and Docker jobs | Activity/History round evidence, browser artifacts, qualification and CI |
@@ -213,17 +258,18 @@ Keep compatibility imports in `coding_runner/` and `nq/` intact during migration
 Create each feature on its own branch from updated `main` after prerequisites
 merge. F IDs extend the [existing roadmap](autonomous-ai-queue-plan.md); they do
 not renumber completed features. These are proposed branches, not existing PRs.
-Implementation can proceed while Docker release acceptance is pending; live
-qualification requires the qualified target worker stack and selected connection.
+S1–S4 in the compact runtime plan are mandatory runtime work. Artifact/API work
+can proceed independently; role integration uses the compact worker, and live
+qualification requires that four-container stack and the selected connection.
 
 | ID / proposed branch | Depends on | Reviewable result and acceptance |
 | --- | --- | --- |
 | F1 `feat/factory-role-contracts` | Existing owned runs, native protocol | Versioned role/round artifacts, stage/outcome migrations, required-role sets, configuration snapshots and idempotent APIs. Reject stale ownership, conflicting replay, invalid transitions and artifacts for another tree/round. Preserve old history and generic queue clients. |
-| F2 `feat/codex-intake-spec` | F1, native Codex | Codex intake/spec sessions through Docker; accepted work has saved criteria, unanswered questions and rejected work produce distinct outcomes without occupying capacity or repeated automatic retries. Test manual tasks and context-change retries. |
+| F2 `feat/codex-intake-spec` | F1, S3, native Codex | Codex intake/spec sessions through the compact worker; accepted work has saved criteria, unanswered questions and rejected work produce distinct outcomes without occupying capacity or repeated automatic retries. Test manual tasks and context-change retries. |
 | F3 `feat/codex-build-review-loop` | F2, independent validation | Builder, gate, trusted routing and separate code/security/UX/UI reviewer sessions; read-only reviewer source, fresh evidence, complete review barrier and shared repair budget. Demonstrate test failure repair, review-request repair and honest exhaustion; a missing reviewer blocks delivery. |
 | F4 `feat/factory-delivery-recovery` | F3, existing delivery/reconciliation | Recorded decision and server-enforced delivery prerequisites, one PR, claim release at delivery, and read-only human-merge reconciliation. Test lost dispatch/push/PR responses, late/stale reviews, changed base, confirmed cleanup, unrelated work while review waits, and no runner merge request. |
 | F5 `feat/factory-activity-evidence` | F4 | Activity/History show scope, spec, risk, required reviewers, round findings, check/browser evidence, decision, time/usage availability and PR/merge. Docker browser acceptance covers desktop/mobile, missing data and failed/recovered runs. |
-| F6 `test/codex-factory-acceptance` | F5, D1–D4 target qualification, usable Codex auth | Actual Docker Codex two-dependent-issue scenario with a human merging each PR, artifact chain, a routed UI/security case, bounded repair, cancellation and restart evidence. Record images, CLI/profile identities, trees, human merge actors and ancestry; verify zero runner merge calls. Fixtures alone cannot qualify this milestone. |
+| F6 `test/codex-factory-acceptance` | F5, S4, usable Codex auth | Actual four-container Codex two-dependent-issue scenario with a human merging each PR, artifact chain, a routed UI/security case, bounded repair, cancellation and restart evidence. Record service count, images, CLI/profile identities, trees, human merge actors and ancestry; verify zero runner merge calls and no permanent helper containers. Fixtures alone cannot qualify this milestone. |
 | F7 `feat/claude-factory-roles` | F6, native Claude feature 08 | Claude-only pipeline passes the shared role conformance suite and genuine Docker auth/tool/read-only-review/cancel/resume acceptance, then its own two-issue loop. |
 | F8 `feat/opencode-factory-roles` | F6, native OpenCode feature 09 | OpenCode-only pipeline passes the same suite and genuine Docker acceptance for its pinned CLI/provider/model, then its own two-issue loop; Ollama remains an optional separately verified connection. |
 
@@ -234,8 +280,9 @@ advertised capability with factory conformance. Model selection is configured
 per role; do not hard-code the reference's model names or assume equivalent quota
 and resume interfaces across providers.
 
-The existing two-issue Codex MVP remains the runtime/delivery prerequisite. F6 is
-the expanded factory milestone: both issues traverse intake/spec/build/gate/review/
+The existing native/delivery contracts remain prerequisites; S4 proves the compact
+stack's engineering boundary without paid calls. F6 supplies the real two-issue
+MVP/factory proof on that stack: both issues traverse intake/spec/build/gate/review/
 decision, a human merges each PR, B starts from A's verified merge, and the same
 run evidence appears in Activity/History. There are no manual command or plan
 approval prompts; human PR review and merge are required for every provider.

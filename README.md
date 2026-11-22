@@ -36,6 +36,15 @@ first; Claude Code and OpenCode follow the same contract. Intake, routed reviews
 and round artifacts remain implementation work, and live execution stays disabled
 until Docker qualification passes.
 
+The release target is **four always-on containers**: app, PostgreSQL, runner and
+one execution worker. The app handles issue-import scheduling; runner owns account
+and network mediation; worker runs setup, coding, reviews, checks and disposable
+test/browser processes sequentially. Celery/Beat, Valkey and the separate gateway,
+proxy, account and test-database containers are being removed from the target.
+This simplification is planned implementation work in
+[S1–S4](docs/docker-only-runtime-plan.md#required-simplification-branches), not a
+claim that the current Compose stack already has four containers.
+
 Human merging is required through the MVP and factory rollout. Automatic merging
 is deferred until sustained operation demonstrates maturity and a human explicitly
 approves a separate rollout; agent review never grants merge permission.
@@ -107,6 +116,10 @@ port **7777** by default. Every service, worker, test, browser and operational t
 runs in a container. The [Docker-only runtime plan](docs/docker-only-runtime-plan.md)
 defines the complete worker stack and its qualification gates. Autonomous execution
 stays disabled until that container boundary is implemented and verified.
+
+The commands below describe the current Compose implementation. The compact
+four-container deployment requires S1–S4; this documentation PR does not replace
+Compose services or change an installation.
 
 Copy the environment file and build the images:
 
@@ -182,16 +195,21 @@ errors exit nonzero. The compatibility `nq` module is also available in the imag
 
 ## How it fits together
 
-Django owns the queue, settings, credentials, and run history. Celery and Beat
-discover GitHub issues. The independent runner claims work over HTTP and owns
-agent processes, task workspaces, validation, and Git delivery. PostgreSQL stores
-application data; Valkey supports the background task services.
+In the compact target, Django owns the queue, settings, credentials and run history.
+One supervised import loop in the app discovers GitHub issues using existing
+services and database leases. Production PostgreSQL stores application data. The
+independent runner claims work over HTTP and owns private state, selected backend
+accounts, scoped egress and Git/PR delivery. It calls one authenticated worker
+directly; no gateway or Docker daemon access is needed.
 
-The Docker-only target gives the runner its own image and state volume. It calls
-authenticated preprovisioned worker slots, with no Docker daemon access. Released
-images contain source; workspaces and artifacts stay in named volumes and bounded
-tmpfs. Agents cannot access host paths, controller journals or production data. GitHub issue text and repository content describe the task; they
-cannot grant new permissions.
+The worker switches between setup, agent/reviewer and trusted validation phases,
+with fresh source, credentials and local test databases for each phase. Browser
+and test-service subprocesses run inside that worker only while needed. Images
+contain pinned tools and released source; state stays in named volumes/bounded
+tmpfs. Candidate code cannot access host paths, controller journals, publication
+credentials or production data. GitHub issue text and repository content describe
+the task; they cannot grant new permissions. The existing larger Compose topology
+must be replaced and these boundaries requalified before release.
 
 | Directory | Responsibility |
 | --- | --- |
@@ -201,7 +219,7 @@ cannot grant new permissions.
 | `runner_control/` | Runner APIs, configuration, run records, and operator views |
 | `vibearr_runner/` | Independent supervisor, backends, workspaces, recovery, and delivery |
 | `vibearr/` | Standalone command-line client |
-| `vibearr_app/` | Django and Celery configuration |
+| `vibearr_app/` | Django and current Celery configuration; S1 replaces background scheduling |
 
 ## Development
 

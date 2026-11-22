@@ -21,8 +21,13 @@ lingering, host configuration changes, host socket/API credentials, privileged
 containers, host namespaces or arbitrary host path mounts. Compose owns service
 lifecycle and named volumes. This supersedes previous host-executor signoffs.
 
-The current deployment code needs correction branches D1–D4 before native work
-can qualify. Keep claims disabled; a plan change is not permission to resume
+The current deployment code must be simplified to four always-on containers:
+app, production PostgreSQL, independent runner and one execution worker.
+[S1–S4](docker-only-runtime-plan.md#required-simplification-branches) replace the
+old topology-specific branch sequence; D1–D4 remain engineering acceptance
+categories. No Celery/Beat/Valkey, permanent gateway/account/proxy/test-DB sidecars
+or mandatory startup-job containers are part of the release target. Keep claims
+disabled; a plan change is not permission to resume
 paid execution or deploy an incomplete replacement.
 
 An owner creates two small development issues in this repository. The second
@@ -40,8 +45,10 @@ the MVP and factory rollout. Feature 07 is deferred until sustained operation
 demonstrates maturity and a human explicitly approves a separate limited rollout.
 Agent review and a readiness verdict never authorize merging.
 
-The first release supports one repository, one active run, native Codex, API-key
-authentication, continuous processing, and GitHub polling. Existing manual tasks,
+The first release supports one repository, one active run, native Codex with an
+explicitly selected verified connection, continuous processing and GitHub polling.
+Account lifecycle runs inside the runner and fits the same four-container budget.
+Existing manual tasks,
 schedules, pause/cancel, and optional usage reserves keep working. Claude Code,
 OpenCode, additional repositories, and the full *arr dashboard follow this loop.
 
@@ -52,7 +59,7 @@ upgrade. The MVP must be capable of implementing feature 12 through its own queu
 
 ## Build order and ownership
 
-Docker corrections D1–D4 are release-blocking; the table retains original feature
+Compact-stack work S1–S4 is release-blocking; the table retains original feature
 ownership, not permission to accept a host-based implementation.
 
 | Order | Feature | Required result before moving on |
@@ -67,7 +74,7 @@ ownership, not permission to accept a host-based implementation.
 | 6 | 05/06 — human-merge reconciliation | A human merges each PR; verified provider merge identity and ancestry unlock dependent work without retaining the completed delivery claim |
 
 Features 03 and 15 depend on 02; 05 depends on 01. They are separate branches.
-Features 01–06 plus 15, human-merge reconciliation and Docker corrections D1–D4
+Features 01–06 plus 15, human-merge reconciliation and compact-stack work S1–S4
 are the MVP. Automatic merge (07) is outside this release, with no requirement to land the full rename
 first. Product branding is vibearr now; feature 00 completes executable, package,
 and deployment naming after the execution path is stable. Bootstrap uses actual
@@ -82,16 +89,18 @@ production database into a task. It can print intended changes before saving and
 never replaces existing secrets implicitly.
 
 The setup needs GitHub issue reads, repository clone/push and PR writes, check and
-status reads, and merge permission. Use existing scoped credential delivery;
+status/merge-observation reads. Runner merge permission is not a prerequisite.
+Use existing scoped credential delivery;
 import and execution credentials remain separate. Request issue-comment/label
-writes only when status updates use them. The native CLI receives its Codex API
-credential, not a personal home directory, subscription login, GitHub credential,
-queue token, or encryption key. Supporting subscription auth is a later capability
-unless it is proven separately without blocking the API-key path.
+writes only when status updates use them. The native CLI receives only the access
+required by its selected verified backend profile. Persistent account state and
+renewal remain protected in runner storage; no host-home login, GitHub credential,
+queue token or encryption key enters the task. Qualify each supported auth mode
+without adding an account sidecar or making unverified renewal a hidden fallback.
 
 Run startup diagnostics before claiming: API identity/ownership, configuration,
 selected credentials and preflight grants, runtime launch, agent version/auth,
-validation image/database, disk capacity, and merge/check permissions. Report a
+validation tools/local database, disk capacity, and PR-write/check-read permissions. Report a
 specific component and fix. Runtime qualification and the auth smoke check can
 run before production claims; they must not depend on having already completed
 a qualified production run. Remove that circular legacy release requirement.
@@ -116,25 +125,35 @@ bypass; using an owner's token must not silently turn that into the merge policy
 Startup diagnostics verify the chosen actor and required rules, not just that a
 token has write access.
 
-## Task environment: Docker-only worker slots
+## Task environment: one phase-switching worker
 
-Compose preprovisions a fixed agent slot, a separate credential-free setup slot,
-a validation slot, private proxies and separate test PostgreSQL slots. The
-supervisor calls authenticated worker APIs. No runtime component controls the
-host daemon or launches containers, and no service gets a Docker socket or
-privileged Docker-in-Docker capability.
+Compose preprovisions app, production PostgreSQL, runner and one worker. The app
+includes supervised import scheduling using DB leases. The runner calls the worker
+directly and includes account lifecycle and operation-scoped network mediation.
+No runtime component controls the host daemon or launches containers, and no
+service gets a Docker socket or privileged Docker-in-Docker capability.
+
+The worker sequentially runs credential-free setup, selected model sessions,
+read-only reviewers and fresh independent validation. Its immutable image includes
+pinned test PostgreSQL/browser binaries. Start disposable local test databases,
+app servers and browsers only for the phase that needs them; their resources and
+descendants count against the worker's actual limits. Stop/discard them and clear
+all phase state before reuse; no permanent test-DB or browser sidecars.
 
 Trusted worker PID 1 validates registered recipes, imports bounded verified
 source/context, runs task code under a different unprivileged UID, seals receipts
 and confirms all descendants stopped. Reset all workspace, Git metadata, HOME,
-caches, credentials and test data before the next job. Slot reuse is not a fresh
+caches, credentials and test data between phases and before the next job.
+Export a sealed candidate and import a verified fresh copy for independent checks;
+validation cannot inherit the builder's environment or DB. Slot reuse is not a fresh
 container; actual cross-job isolation and boot/operation reconciliation must pass.
 Unknown stop or lost result retains the fence and cannot become success.
 
 Use read-only pinned images, named volumes, bounded tmpfs and actual Compose
 resource ceilings. A requested limit the slot cannot enforce requires a matching
-slot or rejection. Restrict task networking to its registered public proxy and
-its own test DB; deny host/LAN/metadata, production and control-plane destinations.
+slot or rejection. Restrict task networking to operation-scoped runner mediation
+and its own local test services; validation has no public egress. Deny
+host/LAN/metadata, production, runner account/control and worker management ports.
 No task capabilities, privilege escalation, host namespaces, devices or host paths.
 
 The supervisor's Git checkout and journal stay private to its volume. Agents get
@@ -150,7 +169,8 @@ receipts. Version the changed runtime and worker-boot evidence. Qualification co
 runs in containers and can execute before a production claim or paid model call.
 Old direct-host launcher reports cannot qualify this architecture.
 
-The [Docker-only plan](docker-only-runtime-plan.md) specifies D1–D4, dependency
+The [Docker-only plan](docker-only-runtime-plan.md) specifies S1–S4, retained D1–D4
+engineering categories, dependency
 artifacts, database resets, operator tools and release gates. No host-runner,
 engine-socket or manual-approval fallback is supported.
 
@@ -241,7 +261,8 @@ actual worker stack, with no host Python or nested daemon inside an agent. Recor
 that are inapplicable with an explicit profile rule; do not accept arbitrary skips.
 
 Run validation in a fresh environment without backend/GitHub credentials. Use
-throwaway DB credentials and databases/roles unique to the run on isolated test slots. Execute against the
+throwaway DB credentials and fresh local clusters/databases/roles in the worker,
+separate from production and earlier phases. Execute against the
 candidate source, but select commands and required check IDs from the trusted
 profile. Candidate edits to `test.sh`, workflows, or validation manifests do not
 silently weaken the running profile. Qualify a changed profile separately before
@@ -368,6 +389,8 @@ below. Do not publish tasks or make paid calls while merely editing this plan.
 
 | Scenario | Evidence required for the MVP release |
 | --- | --- |
+| Compact footprint | Exactly four runtime containers including selected account auth; normal setup/coding/check/browser phases add none, startup is in-service, and explicit tooling jobs exit after use |
+| Phase isolation | Agent state/credentials/processes cannot survive into validation; local test DB/admin storage is isolated and reset; cleanup failure fences the worker |
 | Normal two-issue loop | Issue IDs, discovery timestamps, distinct runs/branches/PRs, real sessions, validation manifests, check SHAs, human merge actors/timestamps and merge SHAs, and B's base containing A |
 | Human merge boundary | Human review and merge for each PR, zero runner merge calls or auto-merge enablement, no command/plan approval records consumed and no ready-label transition |
 | Awaiting human review | Delivery releases the claim/worker; independent work can proceed, dependent work cannot start before a verified merge, and closed-unmerged PRs stay unsatisfied |

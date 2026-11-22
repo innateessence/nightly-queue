@@ -4,6 +4,7 @@ Date: 2026-11-15. Baseline: `5905c0f` on `main`.
 Planning branch: `plan/autonomous-ai-queue-pivot`.
 Docker-only revision: 2026-11-16, branch `docs/docker-only-mvp`.
 Factory direction revision: 2026-11-22, baseline `84ada44` on `main`.
+Compact stack revision: four always-on containers; S1–S4 are mandatory before release.
 
 The [MVP release contract](vibearr-mvp.md) defines the first self-improvement loop,
 runtime choice, native evidence format, validation boundary, and release scenarios.
@@ -23,16 +24,20 @@ CLI, Git task process, browser, systemd/cron service, lingering, package install
 host configuration change is permitted. No runtime component receives a host Docker
 socket, privileged mode, host namespace, device or arbitrary host filesystem mount.
 
-Compose preprovisions fixed agent/setup/validation worker slots with authenticated
-APIs, private networks, named volumes and bounded tmpfs. Trusted worker initialization
-runs tasks under a separate unprivileged UID and proves complete reset/termination
-between jobs. This replaces dynamic host Docker dispatch without giving the
-application authority over the host engine. Old host-based acceptance is historical.
+The release footprint is four always-on containers: app, production PostgreSQL,
+independent runner and one worker. App includes issue-import scheduling. Runner
+includes direct worker dispatch, account lifecycle and egress mediation. The worker
+sequences setup, agent/review and independent validation, starting disposable local
+test PostgreSQL/browser processes only while needed. No Celery/Beat/Valkey, gateway,
+proxy/account sidecars, permanent test DBs or mandatory startup-job containers.
+Authenticated APIs, task/control UID separation, fresh phase state, private networks,
+named volumes and bounded tmpfs remain required; no runtime engine access.
 
-Correction branches D1–D4 in that plan cover packaging, socketless worker slots,
-validation and Docker-only operations/acceptance. Each has its own branch/issue/PR.
-They are release-blocking prerequisites for the MVP, including already implemented
-features 02–07 and 15. Keep live claims disabled until the new boundary qualifies.
+[Simplification branches S1–S4](docker-only-runtime-plan.md#required-simplification-branches)
+replace the old topology-specific correction sequence. D1–D4 remain acceptance
+categories for packaging, isolation, validation and operations. Each S branch has
+its own issue/PR; all are release prerequisites. Requalify retained native/delivery
+code on the four-container stack. Keep live claims disabled until it qualifies.
 This documentation revision does not resume execution or deploy anything.
 
 ## Outcome and priority
@@ -49,8 +54,10 @@ leaves evidence linked to its run, round and candidate tree.
 Prioritize a working self-development loop over a redesign, additional providers,
 or another layer of planning infrastructure. Start with Codex, then add native
 Claude Code and OpenCode behind the same execution contract. Keep Django,
-PostgreSQL, Celery/Beat, Valkey, the independent runner, and the standalone `nq`
-HTTP CLI. No framework migration is needed to reach this outcome.
+PostgreSQL, the independent runner and the standalone `nq` HTTP CLI. Replace
+Celery/Beat/Valkey with one supervised import loop using existing services and
+database leases. Share the existing trusted runner/worker boundaries rather than
+package every function as a container. No framework migration is needed.
 
 Remove human command and plan approvals from normal execution. Configured project
 policy authorizes autonomous work inside an isolated task environment. A blocked
@@ -98,7 +105,9 @@ host service templates. It does not enable execution, install services or run pa
    inside its task environment without human prompts. The supervisor owns claim
    tokens and GitHub writes. Agent environments receive only the backend access
    required by the selected integration, with its actual exposure documented.
-5. Start with one active task and one feature branch at a time for this repository.
+5. Start with four always-on containers, one active task and one feature branch
+   at a time for this repository. Roles share the worker sequentially with reset;
+   adding a provider or enabling normal validation must not add runtime containers.
    Each branch starts from the configured base after prerequisites merge. Intake,
    specifications and acceptance criteria are saved artifacts, not permission
    checkpoints. Separate reviewer sessions judge the gated candidate; required
@@ -152,16 +161,17 @@ provider support; F7/F8 qualify their full factory roles after the Codex pipelin
 | 13 | P2 | `feat/parallel-project-workers` | 06, F6 | Bounded concurrency across repositories; retains human merging |
 | 14 | P2 | `refactor/retire-legacy-approval-stack` | 06, 08, 09, F6 | Remove obsolete command/proposal approval plumbing while preserving human PR review |
 
-The MVP consists of 01–06 and 15 plus mandatory Docker corrections D1–D4 and
+The MVP consists of 01–06 and 15 plus mandatory compact-stack work S1–S4 and
 verified human-merge dependency reconciliation. Feature 07 is deferred. Feature 15 keeps a new ID so existing plan
 references do not change. The rename in 00 can land independently and does not
 delay execution work. Branch 05 can proceed after 01 while runtime work proceeds
 through 02, then 03 and 15, then 04. The factory sequence is F1 contracts → F2
 Codex intake/spec → F3 build/check/review → F4 delivery/recovery → F5 Activity
 evidence → F6 actual Codex acceptance, then F7 Claude and F8 OpenCode. The existing
-runtime MVP remains its prerequisite, with D1–D4 qualification required for live
-acceptance. Features 08–11 and the full rename do not delay the initial Codex
-runtime delivery loop. Dependencies describe implementation merge order, not a
+native/delivery contracts remain prerequisites, with S4 engineering qualification
+before the joint real MVP/factory proof in F6. Features 08–11 and the full rename
+do not delay the initial Codex runtime delivery loop. Dependencies describe
+implementation merge order, not a
 request to use multiple development agents now.
 
 ### 00 — Rename the application to vibearr
@@ -220,8 +230,8 @@ request to use multiple development agents now.
 
 ### 02 — Isolated native agent runtime
 
-- Implement the Docker-only worker contract and correction branch D2. Compose
-  starts fixed slots; no executor, supervisor or agent receives a host engine
+- Implement the compact Docker-only worker contract in S2/S3. Compose
+  starts one phase-switching slot; no executor, supervisor or agent receives a host engine
   socket, daemon credentials, privileged mode or host-management API.
 - Trusted worker PID 1 accepts authenticated registered jobs, separates task UIDs
   from control state, enforces actual slot limits/deadlines/egress, and confirms
@@ -261,14 +271,15 @@ request to use multiple development agents now.
 
 ### 15 — Isolated project validation
 
-- Implement the Docker-only validation contract and correction branch D3. A
-  preprovisioned validation slot runs trusted image-owned commands against a fresh
+- Implement the Docker-only validation contract in S3. A clean validation phase
+  in the shared worker runs trusted image-owned commands against a fresh
   exact-tree snapshot; no host test process or daemon access is involved.
-- Use separate test PostgreSQL slots with fresh job databases/roles and trusted
-  reset. No production volume, connection, credentials or published test DB port.
+- Start fresh local test PostgreSQL clusters/databases/roles only when needed,
+  using worker-image binaries and trusted reset. No production volume, connection,
+  credentials, permanent test DB sidecar or published test DB port.
 - Retain formatting/lint/types, migrations/system checks, full Django, CLI,
   portable runner, Git acceptance and containerized distribution checks.
-- Resolve dependency changes in the credential-free setup slot into verified,
+- Resolve dependency changes in the credential-free setup phase into verified,
   digest-bound artifacts. Do not build images from runtime services, replace
   image-owned validation tools or modify production dependencies in place.
 - Emit profile/image/tree/job/worker-boot identities, actual outcomes and bounded
@@ -479,8 +490,11 @@ portable test success or a model-generated success summary.
 
 ## Milestones
 
-- **Container foundation, D1–D4:** the complete Docker-only boundary and operations
-  qualify before M1–M3 can be accepted. Host-based milestones do not substitute.
+- **Compact container foundation, S1–S4:** app, PostgreSQL, runner and one worker
+  replace the existing larger topology. D1–D4 engineering categories qualify on
+  exactly four runtime containers; no paid calls required for this foundation.
+  F6 then supplies the real two-issue proof. Old host/larger-stack milestones do
+  not substitute, and consolidation is a release prerequisite.
 
 - **Identity, branch 00:** the application ships as vibearr with a tested migration
   from the previous command, configuration, package, and deployment names.
