@@ -21,13 +21,20 @@ it alone when everything is working.
    must pass before a change can be delivered.
 2. **Add work.** Write a GitHub issue or submit a task from the queue. Give it a
    clear outcome and any acceptance criteria the agent will need.
-3. **Let the queue run.** The worker picks up eligible work during its processing
-   window, prepares an isolated checkout, and gives the agent the issue context.
-4. **Check the result.** The agent implements the change and runs validation.
-   Failed checks get a bounded repair attempt; unresolved failures stay visible.
-5. **Deliver the change.** Passing work becomes a pull request linked to the
-   original issue. Projects configured for automatic merge can finish the job
-   once the required GitHub checks pass.
+3. **Scope the work.** The target runner performs intake, records risk and affected
+   surfaces, and saves a specification with acceptance criteria.
+4. **Build and review.** A builder implements the spec in an isolated workspace.
+   Trusted checks run before separate code review and any required security, UX
+   or UI reviews. Failures return to the builder within a shared repair budget.
+5. **Deliver the change.** The supervisor verifies the checks and reviews, then
+   publishes one pull request linked to the issue. Projects configured for
+   automatic merge finish after current-head validation and required GitHub checks.
+
+This is the planned [Codex-first software factory](docs/software-factory-plan.md),
+inspired by the ZazenCodes v2 workflow. Codex implements the full role pipeline
+first; Claude Code and OpenCode follow the same contract. Intake, routed reviews
+and round artifacts remain implementation work, and live execution stays disabled
+until Docker qualification passes.
 
 Routine work should finish without approval prompts. Connecting a project sets
 the boundaries for its agents: which issues they can work on, what they can
@@ -64,7 +71,7 @@ vibearr's own GitHub issue tracker is its development backlog. The intended
 loop is the same one used for any other project:
 
 ```text
-Issue → Queue → Agent → Tests → Pull request → Merge
+Issue → Intake → Spec → Build → Checks → Reviews → Decision → PR → Merge
 ```
 
 Each feature gets its own issue, branch, and PR. Dependencies keep later features
@@ -74,8 +81,10 @@ Automatic updates extend it from merged code to the running installation.
 
 The [development plan](docs/autonomous-ai-queue-plan.md) lays out the implementation
 milestones: the application rename, autonomous execution, an isolated runtime,
-native agent integrations, issue selection, automatic merging, the operations UI,
-and self-updates.
+native agent integrations, issue selection, automatic merging, the factory role
+pipeline, the operations UI, and self-updates. The
+[factory branch sequence](docs/software-factory-plan.md#branch-sequence-and-acceptance)
+defines F1–F8 and their acceptance gates.
 
 The [MVP release contract](docs/vibearr-mvp.md) defines the first complete loop:
 two dependent issues implemented, tested, and merged automatically, with the second

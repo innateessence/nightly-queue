@@ -3,10 +3,16 @@
 Date: 2026-11-15. Baseline: `5905c0f` on `main`.
 Planning branch: `plan/autonomous-ai-queue-pivot`.
 Docker-only revision: 2026-11-16, branch `docs/docker-only-mvp`.
+Factory direction revision: 2026-11-22, baseline `84ada44` on `main`.
 
 The [MVP release contract](vibearr-mvp.md) defines the first self-improvement loop,
 runtime choice, native evidence format, validation boundary, and release scenarios.
 This document maps that contract to feature branches and the later product roadmap.
+The [Codex-first software factory plan](software-factory-plan.md) extends the
+runner toward intake → specification → build → deterministic checks → routed
+reviews → decision → PR/merge. It defines the new role/artifact contracts and
+F1–F8 implementation sequence, inspired by ZazenCodes v2. Its routing, reviews
+and round evidence are planned work; the baseline inventory below is historical.
 
 ## Docker-only deployment is a P0 requirement
 
@@ -36,6 +42,9 @@ and coding agents once, add work, and let background processing deliver tested
 changes. Its first customer is `innateessence/nightly-queue`. This repository's
 GitHub issues become its development backlog, with one feature per issue, branch,
 and PR. The web queue provides scheduling, visibility, history, and controls.
+The supervisor coordinates distinct intake, specification, builder and reviewer
+roles. Trusted code owns transitions, validation and GitHub delivery; each role
+leaves evidence linked to its run, round and candidate tree.
 
 Prioritize a working self-development loop over a redesign, additional providers,
 or another layer of planning infrastructure. Start with Codex, then add native
@@ -88,8 +97,11 @@ host service templates. It does not enable execution, install services or run pa
    tokens and GitHub writes. Agent environments receive only the backend access
    required by the selected integration, with its actual exposure documented.
 5. Start with one active task and one feature branch at a time for this repository.
-   Each branch starts from the configured base after prerequisites merge. Plans
-   and acceptance criteria are saved artifacts, not permission checkpoints.
+   Each branch starts from the configured base after prerequisites merge. Intake,
+   specifications and acceptance criteria are saved artifacts, not permission
+   checkpoints. Separate reviewer sessions judge the gated candidate; required
+   security/UX/UI roles follow trusted routing. The complete required review set
+   must pass for the current tree before a decision permits delivery.
 6. Keep the existing queue statuses. Track execution stage, wait reason, retry
    eligibility, delivery, and merge state on the run. A delivered PR is distinct
    from a merged change and from a running application upgrade.
@@ -111,6 +123,9 @@ feature or Docker correction needs its own branch and PR from updated `main` aft
 its dependencies merge. Do not reuse an already merged branch or accumulate
 implementation on this documentation branch.
 The numbered IDs are planning identifiers, not existing GitHub issue numbers.
+F1–F8 in the [factory plan](software-factory-plan.md#branch-sequence-and-acceptance)
+extend these IDs without renumbering them. Native adapter features 08/09 supply
+provider support; F7/F8 qualify their full factory roles after the Codex pipeline.
 
 | ID | Priority | Feature branch | Depends on | Result |
 | --- | --- | --- | --- | --- |
@@ -134,8 +149,12 @@ The numbered IDs are planning identifiers, not existing GitHub issue numbers.
 The MVP consists of 01–07 and 15 plus mandatory Docker corrections D1–D4. Feature 15 keeps a new ID so existing plan
 references do not change. The rename in 00 can land independently and does not
 delay execution work. Branch 05 can proceed after 01 while runtime work proceeds
-through 02, then 03 and 15, then 04. Features 08–11 and the full rename do not delay
-the Codex loop or automatic merging. Dependencies describe merge order, not a
+through 02, then 03 and 15, then 04. The factory sequence is F1 contracts → F2
+Codex intake/spec → F3 build/check/review → F4 delivery/recovery → F5 Activity
+evidence → F6 actual Codex acceptance, then F7 Claude and F8 OpenCode. The existing
+runtime MVP remains its prerequisite, with D1–D4 qualification required for live
+acceptance. Features 08–11 and the full rename do not delay the initial Codex
+runtime loop or automatic merging. Dependencies describe merge order, not a
 request to use multiple development agents now.
 
 ### 00 — Rename the application to vibearr
@@ -479,8 +498,15 @@ portable test success or a model-generated success summary.
 - **M3, branch 07:** passing self-development PRs merge automatically and unblock
   dependent features. This is the MVP release: the full two-issue scenario and
   failure/recovery matrix pass. No per-PR approval is part of the happy path.
+- **Factory Codex, F1–F6:** both dependent issues traverse saved intake/spec,
+  build/check/review rounds and a recorded decision before verified PR/merge.
+  Required reviews, bounded repairs, current-tree evidence and restart recovery
+  pass on the actual Docker stack. This extends M3 rather than claiming the
+  original runtime MVP already implements the factory stages.
 - **M4, branches 08–11:** Codex, Claude Code, and OpenCode share one queue, with
   usable appliance controls and GitHub-backed work creation.
+  F7/F8 additionally prove complete Claude-only and OpenCode-only factory loops
+  against the common role contract; native adapter availability alone is insufficient.
 - **M5, branches 12–14:** merged changes update the running app, capacity grows,
   and obsolete approval infrastructure is removed.
 

@@ -1,5 +1,33 @@
 # vibearr plan status
 
+## Current direction: 2026-11-22
+
+The [Codex-first software factory plan](software-factory-plan.md) extends the
+runner to intake → specification → build → checks → routed reviews → decision
+→ PR/merge. Codex handles every role first; Claude Code and OpenCode later pass
+the same contract. F1–F8 are planned branches, not implemented stages.
+
+Planning baseline: `84ada44` on `main`. The checked-in
+[Docker progress record](docker-only-progress.json) reports implemented runtime
+foundations and intermediate engineering checks, with
+`autonomous_execution_qualified: false`. Actual deployment qualification, native
+acceptance and the dependent two-issue proof remain open. Keep execution disabled.
+The older snapshot below is historical and does not describe current merge state.
+
+| Work | Current evidence / next action |
+| --- | --- |
+| Existing runtime/delivery MVP | Queue, Codex lifecycle, Docker slots, independent validation and delivery/merge code are present; complete the outstanding release gates in the progress record |
+| F1–F2: contracts and Codex intake/spec | Planned; extend owned runs and immutable artifacts, then implement bounded role sessions |
+| F3–F4: build/check/review and delivery/recovery | Planned; trusted review routing, shared repairs, current-tree barriers and operation reconciliation |
+| F5–F6: visibility and Codex acceptance | Planned; Activity/History round evidence and actual Docker two-issue factory proof |
+| F7–F8: Claude and OpenCode factory roles | Planned after F6 and their native adapters; each needs a complete provider-specific acceptance run |
+
+Implement contracts and Codex roles while runtime release work completes; qualify
+the full Codex pipeline before qualifying the other providers. This docs revision
+does not merge, deploy, start services, or make paid model calls.
+
+## Historical snapshot: 2026-11-16
+
 Snapshot: 2026-11-16. This is a point-in-time overview, not a live status page.
 UI work branch: `feat/mvp-operations-ui`, pushed for review in [PR #134](https://github.com/innateessence/nightly-queue/pull/134).
 No merges or runtime changes are part of this branch.

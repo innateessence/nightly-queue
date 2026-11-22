@@ -5,6 +5,13 @@ This is the release contract for the first usable vibearr, alongside the
 not acceptance results already obtained. Each section names the feature that
 owns it so an implementation issue can be written without inventing new policy.
 
+The [Codex-first software factory plan](software-factory-plan.md) defines the next
+runner milestone: intake, saved specification, build/check/review rounds and a
+recorded decision before delivery. The runtime MVP below remains the prerequisite;
+F1–F6 extend its two-issue acceptance to the full Codex role pipeline. Claude Code
+and OpenCode qualify against that same contract in F7/F8. These stages are planned,
+and this revision does not enable execution or change deployment qualification.
+
 ## What counts as an MVP
 
 The [Docker-only runtime contract](docker-only-runtime-plan.md) is mandatory.
@@ -257,7 +264,9 @@ available while processing is paused; otherwise a pause could prevent safe clean
 
 Initial defaults are one active run, 30 seconds controller polling, 30 minutes
 aggregate agent time, 20 minutes aggregate validation time, 30 minutes CI wait,
-and at most two repair sessions after the initial attempt. Remote CI failures and
+and at most two repair sessions after the initial attempt. In the factory
+extension, reviewer-requested changes also consume this budget and all role
+sessions count toward aggregate agent time. Remote CI failures and
 base-update repairs share that same repair budget. Bound each transport retry to
 three attempts with backoff and honor GitHub rate-limit headers. A run held by
 schedule/operator pause preserves its claim; it has a 24-hour maximum elapsed
