@@ -1336,6 +1336,11 @@ class NativeLifecycle:
             return FactoryRecovery(self, self.native["factory"]).stop()
         return self.resources.reconcile(self.run_id, self.executor, stop=True)
 
+    def factory_base_update(self):
+        from .factory_generation import FactoryBaseUpdate
+
+        return FactoryBaseUpdate(self).step()
+
     def terminate(self):
         from .native_contract import termination_record, intent_operations
         from .native_merge import NativeMerge

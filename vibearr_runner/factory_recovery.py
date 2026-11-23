@@ -468,3 +468,8 @@ class FactoryRecovery:
         self.native.native["phase"] = "factory"
         self.native.save()
         return "continue"
+
+    def base_changed(self, observation):
+        from .factory_generation import FactoryBaseUpdate
+
+        return FactoryBaseUpdate(self.native).prepare(observation)
