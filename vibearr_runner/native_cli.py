@@ -206,8 +206,10 @@ class NativeCLIAdapter(NativeCodexAdapter):
             return profile
         raise NativeSessionError("Selected native runner profile is unavailable.")
 
-    def context(self, account, prompt, kind):
-        return {
+    def context(
+        self, account, prompt, kind, *, factory_role=None, browser_capture=None
+    ):
+        value = {
             "schema_version": 1,
             "adapter": self.provider,
             "model": account["model"],
@@ -215,6 +217,19 @@ class NativeCLIAdapter(NativeCodexAdapter):
             "auth_kind": kind,
             "account_digest": digest(canonical(account)),
         }
+        if factory_role is not None:
+            from .native_conformance import FACTORY_ROLES
+
+            if factory_role not in FACTORY_ROLES:
+                raise NativeSessionError("Unknown native factory role.")
+            value["factory_role"] = factory_role
+        if browser_capture is not None:
+            from .native_conformance import validate_browser_capture
+
+            value["browser_capture"] = validate_browser_capture(
+                factory_role, browser_capture
+            )
+        return value
 
     def prepare(
         self,
@@ -227,6 +242,8 @@ class NativeCLIAdapter(NativeCodexAdapter):
         policy,
         deadline,
         credential,
+        factory_role=None,
+        browser_capture=None,
     ):
         if not valid_model(model):
             raise NativeSessionError(
@@ -249,7 +266,15 @@ class NativeCLIAdapter(NativeCodexAdapter):
             "credential_version": reference["version"],
             "model": model,
         }
-        context = canonical(self.context(account, prompt, reference["kind"]))
+        context = canonical(
+            self.context(
+                account,
+                prompt,
+                reference["kind"],
+                factory_role=factory_role,
+                browser_capture=browser_capture,
+            )
+        )
         manifest = {
             "schema_version": 1,
             "run_id": run_id,
