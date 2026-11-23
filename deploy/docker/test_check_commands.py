@@ -1,4 +1,5 @@
 from pathlib import Path
+import shlex
 import subprocess
 from tempfile import TemporaryDirectory
 import unittest
@@ -145,3 +146,28 @@ docker() { printf '%s sha256:%064d\\n' "${3%-image}" 1; return 28; }
         result = self.run_shell(stub + section + "\necho AUDITED\n")
         self.assertEqual(result.returncode, 33, result.stderr)
         self.assertNotIn("AUDITED", result.stdout)
+
+    def test_portable_verify_uses_a_writable_copy_of_the_source(self):
+        text = Path(__file__).with_name("checks.sh").read_text()
+        line = next(
+            line for line in text.splitlines() if '> "$output/tools-tests.log"' in line
+        )
+        command = line.split("-c '", 1)[1].split("' >", 1)[0]
+        stub = """
+black() { :; }; ruff() { :; }; mypy() { :; }; shellcheck() { :; }; actionlint() { :; }
+python() { if [[ $* == '-m vibearr_runner.verify' ]]; then mkdir permission-probe; fi; }
+"""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "immutable-source"
+            copied = root / "portable-source"
+            source.mkdir()
+            (source / "source-marker").write_text("same source")
+            command = command.replace("/tmp/portable-source", shlex.quote(str(copied)))
+            command = command.replace("/app", shlex.quote(str(source)))
+            script = "cd " + shlex.quote(str(source)) + "\n" + stub + command
+            result = self.run_shell(script)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((copied / "source-marker").read_text(), "same source")
+            self.assertTrue((copied / "permission-probe").is_dir())
+            self.assertFalse((source / "permission-probe").exists())
