@@ -381,6 +381,17 @@ class CompactWorkerRuntime(SlotRuntime):
 class CompactHandler(Handler):
     def route(self, data):
         runtime = self.server.runtime
+        if self.command == "POST":
+            from .compact_protocol import PREFIX, recovery_request
+
+            if self.path.startswith(PREFIX + "/"):
+                if runtime.execution_identity().get("runtime") != RUNTIME:
+                    raise Rejected(
+                        "Compact writes require the registered worker boundary."
+                    )
+                self.path = self.path[len(PREFIX) :]
+            elif not recovery_request(self.path):
+                raise Rejected("Compact writes require the versioned worker route.")
         if self.command == "GET" and self.path == "/v4/qualification" and not data:
             path = runtime.directory / "compact-qualification.json"
             report = json.loads(path.read_bytes()) if path.exists() else {}

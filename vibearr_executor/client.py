@@ -133,6 +133,11 @@ class Client:
         return client
 
     def request(self, path: str, data: dict | None = None) -> dict:
+        if self.expected_runtime and data is not None:
+            from .compact_protocol import PREFIX, recovery_request
+
+            if not recovery_request(path):
+                path = PREFIX + path
         headers = {
             "Authorization": "Bearer " + self.token,
             "Content-Type": "application/json",
