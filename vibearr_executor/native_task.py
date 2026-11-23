@@ -61,47 +61,9 @@ def command(provider, model, home, *, factory_role=None):
         return claude_command(model, home, factory_role=factory_role)
     if provider != "opencode":
         raise ValueError("Unsupported coding agent.")
-    relay = os.environ.get("VIBEARR_OLLAMA_URL", "http://127.0.0.1:3130/v1")
-    grant = os.environ.get("VIBEARR_EGRESS_GRANT", "")
-    options = {"baseURL": relay}
-    if grant:
-        options["headers"] = {"X-Vibearr-Grant": grant}
-    config = {
-        "$schema": "https://opencode.ai/config.json",
-        "provider": {
-            "ollama": {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": "External Ollama",
-                "options": options,
-                "models": {model: {"name": model}},
-            }
-        },
-        "model": "ollama/" + model,
-        "enabled_providers": ["ollama"],
-        "plugin": [],
-        "mcp": {},
-        "permission": "allow",
-        "autoupdate": False,
-    }
-    config_path = home / "opencode.json"
-    config_path.write_text(json.dumps(config))
-    os.environ.update(
-        OPENCODE_CONFIG=str(config_path),
-        OPENCODE_CONFIG_CONTENT=json.dumps(config),
-        OPENCODE_DISABLE_PROJECT_CONFIG="true",
-        OPENCODE_DISABLE_AUTOUPDATE="true",
-        OPENCODE_DISABLE_DEFAULT_PLUGINS="true",
-        OPENCODE_DISABLE_MODELS_FETCH="true",
-    )
-    return [
-        "/usr/local/bin/opencode",
-        "run",
-        "--pure",
-        "--format",
-        "json",
-        "--model",
-        "ollama/" + model,
-    ]
+    from .opencode_task import command as opencode_command
+
+    return opencode_command(model, home, factory_role=factory_role)
 
 
 def main():
