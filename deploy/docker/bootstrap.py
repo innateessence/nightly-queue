@@ -25,7 +25,7 @@ def initialization_lock(directory, timeout=120):
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     if not stat.S_ISDIR(directory.lstat().st_mode):
         raise RuntimeError("Initialization lock requires a private directory.")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW
+    flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
     descriptor = os.open(directory / ".initialize.lock", flags, 0o600)
     with os.fdopen(descriptor, "w") as lock:
         info = os.fstat(lock.fileno())
