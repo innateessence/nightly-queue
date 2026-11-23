@@ -53,6 +53,9 @@ deployed factory implementation qualification; the task repository's inspected
 base and candidate identities are collected separately from each actual run.
 `connection_id` is the selected positive numeric credential ID from the native
 account contract. The collector checks its frozen version and each role's model.
+Each frozen criterion must remain verbatim in the accepted intake and saved
+specification, as a string or an identified criterion's `description`/`text`.
+Frozen UI/security surfaces must remain present in intake and trusted routing.
 
 ```sh
 python -m vibearr_runner.factory_acceptance prepare \
@@ -127,18 +130,60 @@ and worker restart, and independent work during human review. Missing prerequisi
 are listed in `missing_prerequisites`; `qualified` remains false until all release
 requirements and both genuine human merges are verified.
 
-Trusted failure-scenario report producers are not implemented by this observer.
-Even matching terminal worker receipts remain listed as pending: termination
-does not establish repair, restart or scheduling behavior. A future producer
-must preserve source-bound run/artifact identities and case-specific observations.
-Controller restart needs before/after durable checkpoint and controller boot
-identities showing the same original operation resumed with cumulative budget.
-Worker restart needs the original operation, original and new worker boots and
-authenticated reconciliation. Independent-work proof needs A's released claim,
-open human-review interval, a distinct eligible run's claim/completion timestamps,
-and A's later human merge. Repair/exhaustion cases need actual failed check or
-changes-request artifacts, subsequent shared attempt numbers, and terminal
-outcomes with publication absence where required. Cancellation and missing
-capability need their actual terminal control observations and absence of
-unauthorized dispatch. These remain explicit release gates until such producers
-and semantic verification are implemented; `passed` booleans cannot remove them.
+The `factory_scenarios` verifier reads actual saved run/context/native/artifact
+history for each case. Failed-check and review repair require the original
+protected failure, a later shared attempt and a complete ready delivery chain.
+Exhaustion requires the configured allowance to be spent, actual failed rounds,
+terminal failure and no publication. Cancellation requires protected requested,
+confirmed and canceled-operation timing. Missing capability requires trusted
+observed capability absence, recomputed routing, terminal failure and no
+unauthorized role dispatch. It also checks failed branches have no provider PR.
+
+Supply a versioned failure input with the acceptance operation UUID from its
+private state, and immutable case identities:
+
+```json
+{
+  "schema_version": 1,
+  "operation_id": "<acceptance operation UUID>",
+  "cases": {
+    "controller-restart": {
+      "run_id": "<actual case run UUID>",
+      "context_id": "<actual immutable context UUID>",
+      "context_digest": "<context SHA256>",
+      "evidence_ids": ["<all actual native evidence operation UUIDs>"],
+      "artifact_ids": ["<all actual factory artifact UUIDs>"],
+      "checkpoints": []
+    }
+  }
+}
+```
+
+Use the same identity fields for every case. Checkpoints are objects returned by
+`factory_scenarios.capture_checkpoint(journal_path, worker=authenticated_client,
+operation_id=acceptance_operation_id)`, running inside the trusted runner. The
+finite producer reads the owned private journal, actual controller process and
+worker statuses; it acquires no controller lock and starts no work. Save its JSON
+privately. Retry capture if the controller changes its journal during the read.
+
+Observe and persist each new checkpoint immediately, while its worker/controller
+state still matches the actual runtime. The observer rereads those sources and
+requires a fresh observation. Pin the before checkpoint before the external
+restart; afterward append a separately captured after checkpoint and observe
+again. Original checkpoint digests and run/context identities cannot be replaced.
+`--controller-journal PATH` can select another mount alias of the actual registered
+controller journal. The producer checks that it is the same file selected by the
+running controller's state configuration; a copied or invented journal does not
+qualify. Importing both historical snapshots after a restart cannot establish
+their original provenance.
+
+Controller restart verifies a changed actual process identity while retaining the
+original operation, frozen deadlines and cumulative charges. Worker restart needs
+original/new boots and authenticated original-operation reconciliation without
+inventing a successful agent result. Independent-work proof derives A's released
+claim and human-review interval from collected provider evidence and requires a
+different eligible run to complete inside that interval before A's real human
+merge. These checks can consume genuine future evidence; the actual paid sessions,
+external restarts, cancellation and human merges remain operator-run release
+requirements. Case labels, `passed` booleans and termination-only receipts cannot
+remove any gate.

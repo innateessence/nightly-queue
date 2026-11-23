@@ -235,7 +235,10 @@ def chain(allowance=100):
                                 "session": {
                                     "adapter": execution["adapter"],
                                     "agent_version": execution["agent_version"],
+                                    "image_digest": "sha256:" + "5" * 64,
                                     "manifest": {
+                                        "profile_id": "factory-" + role,
+                                        "profile_digest": "a" * 64,
                                         "run_id": run["id"],
                                         "operation_id": execution["operation_id"],
                                         "source_digest": execution[
@@ -327,6 +330,20 @@ def chain(allowance=100):
                         "run_id": run["id"],
                         "source": deepcopy(run["source_snapshot"]),
                         "repository": workspace,
+                        "runtime_binding_digest": worker_identity()["binding_digest"],
+                        "factory": {
+                            "profiles": {
+                                role: {
+                                    "profile_id": "factory-" + role,
+                                    "profile_digest": "a" * 64,
+                                    "qualification": {
+                                        **worker_identity(),
+                                        "image_digest": "sha256:" + "5" * 64,
+                                    },
+                                }
+                                for role in configuration["roles"]
+                            }
+                        },
                         "account": {
                             "backend": "codex",
                             "credential_id": selected["connection_id"],
@@ -477,6 +494,16 @@ class FactoryChainTests(unittest.TestCase):
     def test_native_account_model_must_match_its_configured_role_model(self):
         self.native[1]["data"]["data"]["session"]["account"]["model"] = "another-model"
         with self.assertRaisesRegex(ValueError, "configured model"):
+            self.check()
+
+    def test_role_cannot_use_another_worker_boot_than_its_frozen_context(self):
+        context = self.collected["_factory_documents"]["contexts"][identity(2)][
+            "document"
+        ]
+        context["factory"]["profiles"]["intake"]["qualification"]["worker_boot"] = (
+            identity(999)
+        )
+        with self.assertRaisesRegex(ValueError, "frozen worker boot"):
             self.check()
 
     def test_builder_export_must_match_its_actual_imported_workspace(self):
@@ -664,6 +691,91 @@ class ObserveTests(unittest.TestCase):
         self.client.request.assert_not_called()
 
 
+class FailureCheckpointTests(unittest.TestCase):
+    def setUp(self):
+        self.state = {"operation_id": identity(99)}
+        self.case = {
+            "run_id": identity(1),
+            "context_id": identity(2),
+            "context_digest": "a" * 64,
+            "evidence_ids": [identity(3)],
+            "artifact_ids": [identity(4)],
+            "checkpoints": [
+                {
+                    "schema_version": 1,
+                    "kind": "factory-observation",
+                    "operation_id": identity(99),
+                    "run_id": identity(1),
+                    "context_id": identity(2),
+                    "context_digest": "a" * 64,
+                    "original_operation_id": identity(5),
+                }
+            ],
+        }
+        self.evidence = {
+            "schema_version": 1,
+            "operation_id": identity(99),
+            "cases": {"controller-restart": self.case},
+        }
+
+    def test_later_observation_can_append_original_checkpoint_progress(self):
+        factory.pin_failure_evidence(self.state, self.evidence)
+        self.case["checkpoints"].append(
+            {**self.case["checkpoints"][0], "state": "exited"}
+        )
+        factory.pin_failure_evidence(self.state, self.evidence)
+        self.assertEqual(
+            len(self.state["failure_bindings"]["controller-restart"]["checkpoints"]), 2
+        )
+
+    def test_restart_observation_cannot_replace_the_original_checkpoint(self):
+        factory.pin_failure_evidence(self.state, self.evidence)
+        self.case["checkpoints"][0]["original_operation_id"] = identity(999)
+        with self.assertRaisesRegex(ValueError, "original checkpoint was replaced"):
+            factory.pin_failure_evidence(self.state, self.evidence)
+
+    def test_failure_scenario_cannot_resume_under_another_run_identity(self):
+        factory.pin_failure_evidence(self.state, self.evidence)
+        self.case["run_id"] = identity(999)
+        with self.assertRaisesRegex(ValueError, "original failure scenario run"):
+            factory.pin_failure_evidence(self.state, self.evidence)
+
+    def test_checkpoint_for_another_acceptance_operation_cannot_be_pinned(self):
+        self.case["checkpoints"][0]["operation_id"] = identity(777)
+        with self.assertRaisesRegex(ValueError, "another acceptance operation"):
+            factory.pin_failure_evidence(self.state, self.evidence)
+        self.assertNotIn("failure_bindings", self.state)
+
+    def test_raw_checkpoint_is_not_authenticated_by_pinning_its_hash(self):
+        factory.pin_failure_evidence(self.state, self.evidence)
+        self.assertEqual(self.state["authenticated_checkpoints"], [])
+
+    def test_new_checkpoints_are_authenticated_once_before_their_digests_are_saved(
+        self,
+    ):
+        worker = object()
+        with patch(
+            "vibearr_runner.factory_scenarios.authenticate_checkpoint"
+        ) as authenticate:
+            factory.pin_failure_evidence(self.state, self.evidence, worker=worker)
+            factory.pin_failure_evidence(self.state, self.evidence, worker=worker)
+        authenticate.assert_called_once_with(self.case["checkpoints"][0], worker)
+        self.assertEqual(
+            self.state["authenticated_checkpoints"],
+            [digest(self.case["checkpoints"][0])],
+        )
+
+    def test_stale_or_forged_checkpoint_does_not_change_saved_identity(self):
+        original = deepcopy(self.state)
+        with patch(
+            "vibearr_runner.factory_scenarios.authenticate_checkpoint",
+            side_effect=ValueError("Stale proof"),
+        ):
+            with self.assertRaisesRegex(ValueError, "Stale proof"):
+                factory.pin_failure_evidence(self.state, self.evidence, worker=object())
+        self.assertEqual(self.state, original)
+
+
 class GenerationTests(unittest.TestCase):
     def setUp(self):
         previous = {
@@ -764,6 +876,108 @@ class HumanMergeTests(unittest.TestCase):
             factory.observe_human_merge(
                 SimpleNamespace(pull=lambda *_: self.pull), self.collected
             )
+
+
+class NativeValidationProofTests(unittest.TestCase):
+    def setUp(self):
+        from coding_runner.test_factory_scenarios import Fixture
+
+        self.fixture = Fixture()
+        self.documents = {
+            "contexts": {self.fixture.context["id"]: self.fixture.context}
+        }
+
+    def verify(self):
+        return factory.verify_native_receipts(
+            self.fixture.entries,
+            self.fixture.worker,
+            documents=self.documents,
+            artifacts=self.fixture.artifacts,
+        )
+
+    def test_fixed_checks_retain_their_actual_authenticated_dispatch_and_termination(
+        self,
+    ):
+        self.assertTrue(self.verify())
+
+    def test_passed_check_cannot_reference_a_nonexistent_original_operation(self):
+        validation = next(
+            entry["data"]
+            for entry in self.fixture.entries
+            if entry["kind"] == "native_validation"
+        )
+        validation["checks"][-1]["receipt"]["operation_id"] = identity(999999)
+        with self.assertRaises(ValueError):
+            self.verify()
+
+    def test_validation_manifest_cannot_switch_the_inspected_source(self):
+        intent = next(
+            entry["data"]
+            for entry in self.fixture.entries
+            if entry["kind"] == "native_intent"
+            and entry["data"]["kind"] == "validation"
+        )
+        intent["data"]["operations"][0]["manifest"]["source_digest"] = "0" * 64
+        with self.assertRaises(ValueError):
+            self.verify()
+
+    def test_validation_dispatch_cannot_reuse_a_different_repair_attempt(self):
+        intent = next(
+            entry["data"]
+            for entry in self.fixture.entries
+            if entry["kind"] == "native_intent"
+            and entry["data"]["kind"] == "validation"
+        )
+        intent["attempt"] += 1
+        with self.assertRaisesRegex(
+            ValueError, "another context, policy, repair attempt"
+        ):
+            self.verify()
+
+
+class DependencyProofTests(unittest.TestCase):
+    def setUp(self):
+        self.first = {
+            "human_merge": {
+                "status": "human_merged",
+                "merged_at": "2026-11-22T00:03:00+00:00",
+                "merge_sha": "d" * 40,
+            }
+        }
+        self.second = {
+            "claimed_at": "2026-11-22T00:04:00+00:00",
+            "delivery": {"workspace": {"base_revision": "e" * 40}},
+        }
+        self.github = SimpleNamespace(
+            request=Mock(
+                return_value={"status": "ahead", "merge_base_commit": {"sha": "d" * 40}}
+            )
+        )
+
+    def test_b_starts_later_from_a_base_containing_the_actual_human_merge(self):
+        factory.verify_dependency(self.github, self.first, self.second, scenario())
+        self.github.request.assert_called_once_with(
+            "GET", "/repos/owner/repo/compare/" + "d" * 40 + "..." + "e" * 40
+        )
+
+    def test_b_claim_before_the_human_merge_is_rejected(self):
+        self.second["claimed_at"] = "2026-11-22T00:02:59+00:00"
+        with self.assertRaisesRegex(ValueError, "claimed before"):
+            factory.verify_dependency(self.github, self.first, self.second, scenario())
+        self.github.request.assert_not_called()
+
+    def test_b_base_cannot_omit_the_actual_human_merge(self):
+        self.github.request.return_value = {
+            "status": "ahead",
+            "merge_base_commit": {"sha": "f" * 40},
+        }
+        with self.assertRaisesRegex(ValueError, "does not contain"):
+            factory.verify_dependency(self.github, self.first, self.second, scenario())
+
+    def test_unmerged_a_cannot_unlock_b(self):
+        self.first["human_merge"] = {"status": "awaiting_human_merge"}
+        with self.assertRaisesRegex(ValueError, "cannot start before"):
+            factory.verify_dependency(self.github, self.first, self.second, scenario())
 
 
 class BrowserProofTests(unittest.TestCase):
@@ -885,10 +1099,21 @@ class QualificationTests(unittest.TestCase):
 
     def test_missing_failure_matrix_keeps_release_unqualified(self):
         self.assertEqual(
-            len(factory.verify_failures({}, None)), len(factory.FAILURE_CASES)
+            len(
+                factory.verify_failures(
+                    {},
+                    None,
+                    queue=None,
+                    github=None,
+                    scenario=scenario(),
+                    records=[],
+                    operation_id=identity(99),
+                )
+            ),
+            len(factory.FAILURE_CASES),
         )
 
-    def test_terminated_operations_do_not_prove_named_factory_scenarios(self):
+    def test_legacy_pass_flags_do_not_prove_named_factory_scenarios(self):
         receipt = {
             "operation_id": identity(30),
             "receipt_digest": "a" * 64,
@@ -905,29 +1130,43 @@ class QualificationTests(unittest.TestCase):
             name: {"passed": True, "fixtures": False, "receipts": [receipt]}
             for name in factory.FAILURE_CASES
         }
-        missing = factory.verify_failures(evidence, worker)
-        self.assertEqual(len(missing), len(factory.FAILURE_CASES))
-        self.assertTrue(
-            all("No trusted scenario producer" in value for value in missing)
-        )
+        with self.assertRaisesRegex(ValueError, "Unsupported or foreign"):
+            factory.verify_failures(
+                evidence,
+                worker,
+                queue=None,
+                github=None,
+                scenario=scenario(),
+                records=[],
+                operation_id=identity(99),
+            )
 
-    def test_failure_receipt_must_match_actual_terminated_worker_operation(self):
+    def test_termination_only_failure_input_is_rejected(self):
         receipt = {
             "operation_id": identity(30),
             "receipt_digest": "a" * 64,
             "execution_identity": worker_identity(),
         }
         worker = SimpleNamespace(status=lambda _operation: {"state": "running"})
-        with self.assertRaisesRegex(ValueError, "authenticated terminated"):
+        with self.assertRaisesRegex(ValueError, "termination-only evidence"):
             factory.verify_failures(
                 {
-                    "cancellation": {
-                        "passed": True,
-                        "fixtures": False,
-                        "receipts": [receipt],
-                    }
+                    "schema_version": 1,
+                    "operation_id": identity(99),
+                    "cases": {
+                        "cancellation": {
+                            "passed": True,
+                            "fixtures": False,
+                            "receipts": [receipt],
+                        }
+                    },
                 },
                 worker,
+                queue=None,
+                github=None,
+                scenario=scenario(),
+                records=[],
+                operation_id=identity(99),
             )
 
     def test_prepare_cli_never_constructs_provider_or_controller_clients(self):
