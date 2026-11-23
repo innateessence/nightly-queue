@@ -155,7 +155,7 @@ def boundary_proof(boundary, authority):
             raise ValueError("Worker boundary contains an invalid protected receipt.")
 
 
-def fixed_probe(record, worker, case):
+def fixed_probe(record, worker, case, *, reconciled=False):
     from vibearr_executor.contracts import Manifest, Profile
     from vibearr_executor.integrated_profiles import LIMITS, MODEL_HOSTS
     from vibearr_executor.slot_qualification import ARGV
@@ -172,7 +172,10 @@ def fixed_probe(record, worker, case):
         worker["image_digest"],
     )
     manifest = record["manifest"]
-    Manifest.parse(manifest, profile)
+    if reconciled:
+        Manifest.parse_reconciled(manifest, profile, record["result"].get("ended_at"))
+    else:
+        Manifest.parse_archived(manifest, profile, record["result"].get("started_at"))
     if manifest["context_digest"] != digest({"case": case}):
         raise ValueError("Protected qualification operation used another fixed probe.")
 
@@ -207,7 +210,9 @@ def validate_payload(name, payload, source, worker, images, containers=None):
             manifest, result = protected_operation(
                 records[check["operation_id"]], worker
             )
-            Manifest.parse(manifest, expected[check["id"]])
+            Manifest.parse_archived(
+                manifest, expected[check["id"]], result["started_at"]
+            )
             if (
                 manifest["source_digest"] != report["source_digest"]
                 or manifest["phase"] != "validation"
@@ -232,7 +237,7 @@ def validate_payload(name, payload, source, worker, images, containers=None):
         provenance = validate_dependency_provenance(
             build["provenance"], profile, parent=parent, run_id=build["run_id"]
         )
-        manifest, _result = protected_operation(payload["operation"], worker)
+        manifest, validation_result = protected_operation(payload["operation"], worker)
         if (
             build["state"] != "ready"
             or parent.dependency_digest == profile.dependency_digest
@@ -250,7 +255,7 @@ def validate_payload(name, payload, source, worker, images, containers=None):
         ):
             raise ValueError
         fixed = profile.executor_profiles()[0]
-        Manifest.parse(manifest, fixed)
+        Manifest.parse_archived(manifest, fixed, validation_result["started_at"])
         if (
             provenance["setup_instance_id"] != worker["instance_id"]
             or provenance["setup_worker_boot"] != worker["worker_boot"]
@@ -258,7 +263,7 @@ def validate_payload(name, payload, source, worker, images, containers=None):
         ):
             raise ValueError
         setup, result = protected_operation(payload["setup_operation"], worker)
-        Manifest.parse(setup, parent.setup_profile())
+        Manifest.parse_archived(setup, parent.setup_profile(), result["started_at"])
         if (
             setup["operation_id"] != provenance["setup_operation_id"]
             or setup["run_id"] != build["run_id"]
@@ -324,7 +329,6 @@ def validate_payload(name, payload, source, worker, images, containers=None):
             or result.get("artifact")
         ):
             raise ValueError
-        fixed_probe(record, worker, "wait")
         if (
             identity["worker_boot"] != record["worker_boot"]
             or identity["instance_id"] != worker["instance_id"]
@@ -348,6 +352,7 @@ def validate_payload(name, payload, source, worker, images, containers=None):
             or payload["boundary"]["restart_receipt"] != record["receipt_digest"]
         ):
             raise ValueError
+        fixed_probe(record, worker, "wait", reconciled=True)
     elif name == "runner_restart":
         before, after = payload["before"], payload["after"]
         if containers is None or before["Id"] != containers["runner"]:
@@ -799,9 +804,9 @@ def validate_browser(payload, source, worker):
         binding["browser_image"],
     } != {worker["image_digest"]}:
         raise ValueError
-    manifest, _result = protected_operation(payload["operation"], worker)
+    manifest, result = protected_operation(payload["operation"], worker)
     expected = browser_profile(worker["image_digest"], Limits(2, 4096, 128, 2048))
-    Manifest.parse(manifest, expected)
+    Manifest.parse_archived(manifest, expected, result["started_at"])
     if (
         manifest["source_digest"] != binding["source_digest"]
         or observed["operation_id"] != manifest["operation_id"]
