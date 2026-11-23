@@ -21,6 +21,7 @@ from .contracts import (
     Conflict,
     Manifest,
     NotFound,
+    PhaseEvidenceRejected,
     Rejected,
     canonical,
     digest,
@@ -345,6 +346,7 @@ class SlotRuntime:
             )
             context.write_bytes((self.artifacts / manifest.context_digest).read_bytes())
             context.chmod(0o444)
+            self.prepare_source(profile, record)
             secret = secret_path.read_bytes() if secret_path.exists() else b""
             environment = {
                 "PATH": "/usr/local/bin:/usr/bin:/bin",
@@ -375,6 +377,7 @@ class SlotRuntime:
                 target.chmod(0o400)
                 os.chown(target, 1000, 1000)
                 environment["VIBEARR_BACKEND_SECRET_FILE"] = str(target)
+            environment = self.task_environment(operation_id, profile, environment)
             record["dependency_artifact"] = dependency
             record["execution_identity"] = self.execution_identity()
             record.update(
@@ -397,9 +400,21 @@ class SlotRuntime:
     def protected_material(self, secret, record):
         return protection_material(secret, record.get("database_url", ""))
 
+    def prepare_source(self, profile, record):
+        pass
+
+    def finish_source(self, profile, record):
+        pass
+
+    def task_environment(self, operation_id, profile, environment):
+        return environment
+
+    def end_phase(self, operation_id):
+        pass
+
     def run(self, operation_id, profile, environment, secret):
         record = self.record(operation_id)
-        protected = self.protected_material(secret, record)
+        protected = protection_material(secret, record.get("database_url", ""))
         logs = bytearray()
         result = {
             "schema_version": 1,
@@ -414,6 +429,7 @@ class SlotRuntime:
             "started_at": time.time(),
         }
         try:
+            protected = self.protected_material(secret, record)
             deadline = datetime.fromisoformat(
                 record["manifest"]["deadline"]
             ).timestamp()
@@ -486,6 +502,7 @@ class SlotRuntime:
                 result["dependency_artifact"] = record["dependency_artifact"]
             if not self.cancel.is_set() and not result["timed_out"]:
                 protected = self.protected_material(secret, record)
+                self.finish_source(profile, record)
                 source = snapshot(self.work)
                 if contains_secret(source, protected):
                     raise Rejected(
@@ -502,13 +519,25 @@ class SlotRuntime:
             )
         finally:
             try:
-                if self.process is not None and self.process.poll() is None:
-                    self.process.kill()
-                    result["exit_code"] = self.process.wait(timeout=10)
-                terminate_children()
-                if self.database and record.get("database_url"):
-                    self.database.reset(operation_id)
-                self.reset()
+                try:
+                    if self.process is not None and self.process.poll() is None:
+                        self.process.kill()
+                        result["exit_code"] = self.process.wait(timeout=10)
+                    terminate_children()
+                    try:
+                        self.end_phase(operation_id)
+                    except PhaseEvidenceRejected:
+                        result["export_error"] = (
+                            "Phase evidence was rejected after confirmed process cleanup."
+                        )
+                        result.pop("artifact", None)
+                        (self.path(operation_id) / "source.tar").unlink(missing_ok=True)
+                finally:
+                    try:
+                        if self.database and record.get("database_url"):
+                            self.database.reset(operation_id)
+                    finally:
+                        self.reset()
                 result["terminated"] = True
             except Exception:
                 self.fenced = "Termination or reset is unknown; worker remains fenced."
@@ -585,7 +614,7 @@ class SlotRuntime:
             ):
                 raise Conflict("Only a running operation can pause.")
             os.killpg(self.process.pid, signal.SIGSTOP)
-            signal_tasks(signal.SIGSTOP)
+            signal_tasks(signal.SIGSTOP, getattr(self, "task_uids", (1000,)))
             record["paused"] = True
             self.save(record)
             return self.public(record)
@@ -602,7 +631,7 @@ class SlotRuntime:
             ):
                 raise Conflict("Operation is not paused in this worker boot.")
             os.killpg(self.process.pid, signal.SIGCONT)
-            signal_tasks(signal.SIGCONT)
+            signal_tasks(signal.SIGCONT, getattr(self, "task_uids", (1000,)))
             record["paused"] = False
             self.save(record)
             return self.public(record)

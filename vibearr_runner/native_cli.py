@@ -178,9 +178,16 @@ class NativeCLIAdapter(NativeCodexAdapter):
 
     def selected_profile(self, policy, _kind):
         capabilities = self.client.capabilities()
-        if capabilities.get("runtime") != RUNTIME or not capabilities.get("qualified"):
+        if (
+            capabilities.get("runtime")
+            not in {
+                RUNTIME,
+                "compact-worker-v1",
+            }
+            or capabilities.get("qualified") is not True
+        ):
             raise NativeSessionError(
-                "Qualify the current integrated runner boot before coding."
+                "Qualify the current execution worker boot before coding."
             )
         for value in capabilities["profiles"]:
             if (
@@ -191,6 +198,8 @@ class NativeCLIAdapter(NativeCodexAdapter):
             profile = Profile.parse(
                 {key: entry for key, entry in value.items() if key != "profile_digest"}
             )
+            if value.get("profile_digest") != profile.digest:
+                raise NativeSessionError("Registered native profile digest differs.")
             desired = {
                 "cpu": policy.cpu_limit,
                 "memory_mb": policy.memory_mb,
@@ -214,6 +223,7 @@ class NativeCLIAdapter(NativeCodexAdapter):
             "prompt": prompt,
             "auth_kind": kind,
             "account_digest": digest(canonical(account)),
+            "credential_id": account["credential_id"],
         }
 
     def prepare(
