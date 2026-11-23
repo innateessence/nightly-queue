@@ -1,6 +1,7 @@
 import json
 import socket
 import threading
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -12,6 +13,7 @@ from vibearr_runner.compact_connections import (
     MediationClient,
 )
 from vibearr_runner.native_sessions import NativeBackendRegistry
+from vibearr_runner.native_cli import NativeCLIAdapter
 from vibearr_runner.policy import default_execution_policy
 
 from .client import Client
@@ -25,6 +27,21 @@ from . import test_compact_connections as connection_fixtures
 from . import test_compact_worker as worker_fixtures
 
 login_files = connection_fixtures.login_files
+
+
+class CompactAdapterRoutingTests(unittest.TestCase):
+    def test_compact_client_selects_native_cli_without_integrated_identity(self):
+        with TemporaryDirectory() as directory:
+            client = CompactClient(
+                object(), "http://runner:8792", "c" * 48, directory=directory
+            )
+            for provider in ("codex", "claude", "opencode"):
+                with self.subTest(provider=provider):
+                    adapter = NativeBackendRegistry().create(provider, client)
+                    self.assertIs(type(adapter), NativeCLIAdapter)
+                    self.assertEqual(adapter.provider, provider)
+            self.assertIs(client.compact, True)
+            self.assertIs(client.integrated, False)
 
 
 class CompactConnectionHTTPTests(unittest.TestCase):
