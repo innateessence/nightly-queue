@@ -85,3 +85,63 @@ docker() { printf '%s sha256:%064d\\n' "${3%-image}" 1; return 28; }
         result = self.run_shell(stub + section + "\necho STARTED\n")
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("STARTED", result.stdout)
+
+    def test_failed_existing_container_query_stops_preflight(self):
+        section = self.section("checks.sh", "for selected in", "scratch=")
+        stub = (
+            "project=probe; restore_project=probe-restore; docker() { return 29; };\n"
+        )
+        result = self.run_shell(stub + section + "\necho STARTED\n")
+        self.assertEqual(result.returncode, 29, result.stderr)
+        self.assertNotIn("STARTED", result.stdout)
+
+    def test_failed_existing_volume_query_stops_preflight(self):
+        section = self.section("checks.sh", "for selected in", "scratch=")
+        stub = "project=probe; restore_project=probe-restore; docker() { if [[ $1 == ps ]]; then return; fi; return 30; };\n"
+        result = self.run_shell(stub + section + "\necho STARTED\n")
+        self.assertEqual(result.returncode, 30, result.stderr)
+        self.assertNotIn("STARTED", result.stdout)
+
+    def check_failed_base_inspection(self, source):
+        text = source.read_text()
+        section = text[
+            text.index("worker_base_after=") : text.index("VIBEARR_RUNNER_IMAGE_ID=")
+        ]
+        stub = "VIBEARR_WORKER_BASE_IMAGE=base; VIBEARR_WORKER_BASE_IMAGE_ID=selected; docker() { echo selected; return 31; };\n"
+        result = self.run_shell(stub + section + "\necho STARTED\n")
+        self.assertEqual(result.returncode, 31, result.stderr)
+        self.assertNotIn("STARTED", result.stdout)
+
+    def test_failed_worker_base_inspection_stops_qualification(self):
+        self.check_failed_base_inspection(Path(__file__).with_name("checks.sh"))
+
+    def test_failed_worker_base_inspection_stops_startup(self):
+        self.check_failed_base_inspection(Path(__file__).parents[2] / "run.sh")
+
+    def test_failed_deployment_workflow_listing_stops_audit(self):
+        source = (
+            Path(__file__).parents[2]
+            / ".github/workflows/runner-deployment-boundary.yml"
+        )
+        text = source.read_text()
+        section = text[
+            text.index("          id_listing=") : text.index("          docker exec")
+        ]
+        stub = "PROJECT=probe; docker() { printf '%064d\\n' 1 2 3 4; return 32; };\n"
+        result = self.run_shell(stub + section + "\necho AUDITED\n")
+        self.assertEqual(result.returncode, 32, result.stderr)
+        self.assertNotIn("AUDITED", result.stdout)
+
+    def test_failed_deployment_worker_listing_stops_audit(self):
+        source = (
+            Path(__file__).parents[2]
+            / ".github/workflows/runner-deployment-boundary.yml"
+        )
+        text = source.read_text()
+        section = text[
+            text.index("          id_listing=") : text.index("          docker exec")
+        ]
+        stub = "PROJECT=probe; docker() { if [[ $* == *service=worker* ]]; then printf '%064d\\n' 1; return 33; fi; printf '%064d\\n' 1 2 3 4; };\n"
+        result = self.run_shell(stub + section + "\necho AUDITED\n")
+        self.assertEqual(result.returncode, 33, result.stderr)
+        self.assertNotIn("AUDITED", result.stdout)

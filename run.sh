@@ -11,7 +11,8 @@ docker build --target worker-base --tag "$VIBEARR_WORKER_BASE_IMAGE" .
 VIBEARR_WORKER_BASE_IMAGE_ID=$(docker image inspect "$VIBEARR_WORKER_BASE_IMAGE" --format '{{.Id}}')
 export VIBEARR_WORKER_BASE_IMAGE_ID
 docker compose build
-[[ $(docker image inspect "$VIBEARR_WORKER_BASE_IMAGE" --format '{{.Id}}') == "$VIBEARR_WORKER_BASE_IMAGE_ID" ]] || { echo 'Worker toolchain image changed during build.' >&2; exit 1; }
+worker_base_after=$(docker image inspect "$VIBEARR_WORKER_BASE_IMAGE" --format '{{.Id}}') || exit $?
+[[ $worker_base_after == "$VIBEARR_WORKER_BASE_IMAGE_ID" ]] || { echo 'Worker toolchain image changed during build.' >&2; exit 1; }
 VIBEARR_RUNNER_IMAGE_ID=''
 VIBEARR_WORKER_IMAGE_ID=''
 image_listing=$(docker compose config --images) || exit $?
