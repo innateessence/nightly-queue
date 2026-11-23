@@ -1,3 +1,4 @@
+import importlib.util
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +8,6 @@ import unittest
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
-from vibearr_executor.contracts import Limits, Profile
 from vibearr_runner.factory_reviews import (
     FactoryBrowserCapture,
     FactoryReviewError,
@@ -19,6 +19,11 @@ from vibearr_runner.native_contract import digest
 from vibearr_runner.native_validation import CandidateSource
 from vibearr_runner.recovery import ReconciliationRequired
 from vibearr_runner.workspaces import git
+
+
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor.contracts import Limits, Profile
 
 
 def reviewer(verdict="pass", *, coverage=None):
@@ -496,6 +501,9 @@ class FactoryReviewTests(unittest.TestCase):
         self.assertEqual(self.factory.calls, [])
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class RealGitRoutingTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -574,6 +582,9 @@ class RealGitRoutingTests(unittest.TestCase):
         )
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class BrowserCaptureTests(unittest.TestCase):
     def setUp(self):
         self.factory = Factory()
@@ -749,6 +760,9 @@ class BrowserCaptureTests(unittest.TestCase):
                 self.capture.step(self.factory.source)
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class NativeFactoryTransitionTests(unittest.TestCase):
     def setUp(self):
         from coding_runner.test_native_lifecycle import NativeLifecycleTests
@@ -800,6 +814,9 @@ class NativeFactoryTransitionTests(unittest.TestCase):
         )
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class NativeFactoryEngineTests(unittest.TestCase):
     def setUp(self):
         from coding_runner.test_factory_spec_sessions import (
