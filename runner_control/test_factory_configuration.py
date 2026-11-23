@@ -98,6 +98,59 @@ class FactoryConfigurationTests(ConfiguredProjectTestCase):
             ]
         )
 
+    def test_factory_source_renders_only_supported_choices(self):
+        form = ProjectRunnerSettingsForm()
+        rendered = str(form["factory_mode"])
+        self.assertIn('value="inherit"', rendered)
+        self.assertIn('value="replace"', rendered)
+        self.assertNotIn('value="clear"', rendered)
+        self.assertIn('{"enabled": false}', form["factory"].help_text)
+
+    def test_other_override_sources_retain_clear_value(self):
+        form = ProjectRunnerSettingsForm({"setup_commands_mode": "clear"})
+        self.assertIn('value="clear"', str(form["setup_commands_mode"]))
+        self.assertTrue(form.is_valid(), form.errors)
+        saved = form.save(self.project)
+        self.assertEqual(saved.overrides["setup_commands"], {"mode": "clear"})
+
+    def test_factory_clear_source_is_rejected_by_the_form(self):
+        form = ProjectRunnerSettingsForm({"factory_mode": "clear"})
+        self.assertFalse(form.is_valid())
+        self.assertIn("factory_mode", form.errors)
+        self.assertFalse(ProjectRunnerSettings.objects.exists())
+
+    def test_factory_disable_value_survives_a_form_roundtrip(self):
+        self.save_factory({"enabled": True})
+        form = ProjectRunnerSettingsForm(
+            {"factory_mode": "replace", "factory": '{"enabled": false}'}
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        saved = form.save(self.project)
+        restored = ProjectRunnerSettingsForm(instance=saved)
+        self.assertEqual(restored["factory_mode"].value(), "replace")
+        self.assertEqual(restored.initial["factory"], {"enabled": False})
+        self.assertFalse(
+            effective_project_configuration(self.project)["effective"]["factory"][
+                "enabled"
+            ]
+        )
+
+    def test_factory_inherit_source_survives_a_form_roundtrip(self):
+        self.save_factory({"enabled": True})
+        form = ProjectRunnerSettingsForm({"factory_mode": "inherit"})
+        self.assertTrue(form.is_valid(), form.errors)
+        saved = form.save(self.project)
+        restored = ProjectRunnerSettingsForm(instance=saved)
+        self.assertEqual(restored["factory_mode"].value(), "inherit")
+        self.assertEqual(saved.overrides["factory"], {"mode": "inherit"})
+
+    def test_empty_factory_replacement_explains_supported_options(self):
+        form = ProjectRunnerSettingsForm({"factory_mode": "replace", "factory": ""})
+        self.assertFalse(form.is_valid())
+        self.assertIn("Inherit runner settings", form.errors["factory"][0])
+        self.assertIn('{"enabled": false}', form.errors["factory"][0])
+        self.assertNotIn("Clear value", form.errors["factory"][0])
+
     def test_factory_change_invalidates_configuration_revision(self):
         original = configuration_document()["revision"]
         self.save_factory({"enabled": True})
