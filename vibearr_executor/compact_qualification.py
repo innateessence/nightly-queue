@@ -3,11 +3,14 @@
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
+from pathlib import Path
+import socket
 import time
 from uuid import uuid4
 
 from .artifacts import pack
 from .client import Client, ExecutorRejected
+from .compact_protocol import PREFIX
 from .contracts import Conflict, Rejected, canonical, digest
 from .runtime import durable
 from .slot_processes import task_states
@@ -49,13 +52,18 @@ for name in ['/logins','/control','/var/lib/vibearr','/run/vibearr/runner','/run
         pass
     else:
         raise AssertionError('trusted state exposed: ' + name)
-for host,port in [('127.0.0.1',8791),('runner',8791),('runner',8793),('app',8000),('postgres',5432),('169.254.169.254',80),('1.1.1.1',443)]:
+for host,port in [('127.0.0.1',8791),('runner',8792),('runner',3128),('runner',3130),('app',8000),('postgres',5432),('169.254.169.254',80),('1.1.1.1',443)]:
     try:
         socket.create_connection((host,port),timeout=0.5).close()
     except OSError:
         pass
     else:
         raise AssertionError('forbidden network destination exposed')
+with socket.socket() as local:
+    local.bind(('127.0.0.1',0))
+    local.listen()
+    with socket.create_connection(local.getsockname(),timeout=1):
+        pass
 for name in ['/home/task/previous-job','/tmp/compact-previous-phase','/dev/shm/compact-previous-phase']:
     path = pathlib.Path(name)
     assert not path.exists(), 'previous phase data survived'
@@ -141,6 +149,30 @@ def require_exit(runtime, operation, result):
         )
 
 
+def lost_start(runtime, operation):
+    path = PREFIX + "/v1/operations/" + operation + "/start"
+    headers = (
+        "POST "
+        + path
+        + " HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer "
+        + runtime.control_token
+        + "\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+    )
+    with socket.create_connection(("127.0.0.1", 8791), timeout=5) as connection:
+        connection.sendall(headers.encode())
+        connection.shutdown(socket.SHUT_WR)
+    client = Client("http://127.0.0.1:8791", runtime.control_token)
+    deadline = time.monotonic() + 10
+    while client.status(operation).get("state") == "prepared":
+        if time.monotonic() >= deadline:
+            raise Rejected("Lost-response start was not durably reconciled.")
+        time.sleep(0.05)
+    record = runtime.record(operation)
+    client.start(operation)
+    if runtime.record(operation) != record:
+        raise Rejected("A retry after a lost response changed the running operation.")
+
+
 def qualify(runtime):
     if not runtime.qualification_lock.acquire(blocking=False):
         raise Conflict("Another qualification owns the worker.")
@@ -153,6 +185,13 @@ def qualify(runtime):
         if identity.get("runtime") != RUNTIME:
             raise Rejected(
                 "Compact qualification requires the separate compact worker."
+            )
+        with socket.create_connection(("runner", 8792), timeout=5):
+            pass
+        control = Client("http://127.0.0.1:8791", runtime.control_token).capabilities()
+        if control.get("worker_boot") != runtime.boot:
+            raise Rejected(
+                "Trusted control positive witness differs from this worker boot."
             )
         restart_receipt = check_restart(runtime)
         witness = json.loads((runtime.directory / "restart-witness.json").read_bytes())
@@ -176,7 +215,7 @@ def qualify(runtime):
             raise Rejected("Deadline did not terminate every task descendant.")
         receipts.append(result)
         operation = prepare(runtime, "wait")
-        runtime.start(operation)
+        lost_start(runtime, operation)
         wait(runtime, operation, terminal=False)
         runtime.pause(operation)
         if not all(state in {"T", "t", "Z"} for state in task_states().values()):
@@ -197,12 +236,37 @@ def qualify(runtime):
             if time.monotonic() >= deadline:
                 raise Rejected("Task did not reach the actual worker PID ceiling.")
             time.sleep(0.05)
-        if runtime.status(operation).get("state") != "running":
+        client = Client("http://127.0.0.1:8791", runtime.control_token)
+        if client.status(operation).get("state") != "running":
             raise Rejected("Worker control failed under PID pressure.")
-        result = runtime.stop(operation)
+        result = client.stop(operation)
         runtime.thread.join(timeout=5)
         if result.get("descendants_terminated") is not True:
             raise Rejected("PID exhaustion cancellation did not confirm cleanup.")
+        receipts.append(result)
+        memory_events = Path("/sys/fs/cgroup/memory.events")
+        before_oom = dict(
+            line.split() for line in memory_events.read_text().splitlines()
+        )
+        operation = prepare(runtime, "memory")
+        runtime.start(operation)
+        result = wait(runtime, operation)
+        runtime.thread.join(timeout=5)
+        after_oom = dict(
+            line.split() for line in memory_events.read_text().splitlines()
+        )
+        if (
+            result.get("result", {}).get("exit_code") != -9
+            or not result.get("descendants_terminated")
+            or int(after_oom["oom_kill"]) <= int(before_oom["oom_kill"])
+            or Client("http://127.0.0.1:8791", runtime.control_token)
+            .status(operation)
+            .get("state")
+            != "exited"
+        ):
+            raise Rejected(
+                "Actual cgroup OOM did not terminate the task with responsive control."
+            )
         receipts.append(result)
         operation = prepare(runtime, "flood")
         runtime.start(operation)
@@ -245,6 +309,13 @@ def qualify(runtime):
                 for value in receipts
             ],
             "restart_receipt": restart_receipt,
+            "resources": {
+                "memory_max": Path("/sys/fs/cgroup/memory.max").read_text().strip(),
+                "memory_peak": Path("/sys/fs/cgroup/memory.peak").read_text().strip(),
+                "oom_kill_before": int(before_oom["oom_kill"]),
+                "oom_kill_after": int(after_oom["oom_kill"]),
+                "pids_max": Path("/sys/fs/cgroup/pids.max").read_text().strip(),
+            },
             "completed_at": datetime.now(timezone.utc).isoformat(),
         }
         durable(report_path, canonical(report))
