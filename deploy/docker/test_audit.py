@@ -110,6 +110,23 @@ class RuntimeInspectionTests(unittest.TestCase):
             str(inspect_containers([self.container])["errors"]),
         )
 
+    def test_app_may_initialize_worker_channel_secrets(self):
+        self.container["Config"]["Labels"]["com.docker.compose.service"] = "app"
+        self.container["Mounts"] = [self.container["Mounts"][1]]
+        self.container["Mounts"][0]["RW"] = True
+        self.container["NetworkSettings"]["Networks"] = {
+            "checks_database": {},
+            "checks_runner-api": {},
+            "checks_app-egress": {},
+        }
+        self.assertEqual(inspect_containers([self.container])["errors"], [])
+
+    def test_runner_worker_channel_secret_mount_cannot_be_writable(self):
+        self.container["Config"]["Labels"]["com.docker.compose.service"] = "runner"
+        self.container["Mounts"][1]["RW"] = True
+        errors = inspect_containers([self.container])["errors"]
+        self.assertIn("channel secrets are writable", str(errors))
+
     def test_partial_stack_cannot_pass_actual_container_audit(self):
         self.assertIn("exactly one app", str(inspect_stack([self.container])["errors"]))
 
