@@ -18,7 +18,7 @@
 {% endif %}
 {% if run.error_summary %}<pre role="status">{{ run.error_summary }}</pre>{% endif %}
 {% if delivery %}<p>PR delivery evidence recorded. {% if run.state == "active" %}<strong>Completion reporting pending; keep this run and its volume.</strong>{% endif %}</p><pre>{{ delivery.payload|pretty_json }}</pre>{% endif %}
-{% if run.result_url %}<p><a href="{{ run.result_url }}" rel="noreferrer">Delivered pull request</a></p>{% endif %}
+{% if run.result_url %}<p><a href="{{ run.result_url }}" rel="noreferrer">Delivered pull request</a> · {{ run.publication.label }}{% if run.publication.observed_at %} · Observed {{ run.publication.observed_at }}{% endif %}</p>{% if run.publication.merge_sha %}<p>Verified human merge <code>{{ run.publication.merge_sha }}</code></p>{% endif %}{% if run.state == 'completed' %}<p>Execution is complete and worker capacity is released. Independent work can proceed; dependent work waits for verified merge evidence.</p>{% endif %}{% endif %}
 {% if run.state == "active" %}
 {% if run.cancellation_requested_at %}<p>Cancellation requested {{ run.cancellation_requested_at }}. {% if run.cancellation_confirmed_at %}Process termination confirmed.{% else %}Awaiting confirmed backend and process termination. The claim remains owned.{% endif %}</p>{% else %}
 <form method="post" class="operator-action" action="{% url 'runner_operator_cancel' run.pk %}">{% csrf_token %}<label for="cancel-reason">Cancellation reason</label><input id="cancel-reason" name="reason" maxlength="2000" required value="Operator requested cancellation"><button class="button-filter" type="submit">Request cancellation</button></form>{% endif %}
@@ -28,6 +28,7 @@
 {% endif %}
 <details><summary>Effective configuration at claim · {{ run.configuration_revision }}</summary><pre>{{ configuration_json }}</pre></details>
 </section>
+{% include "runner_control/_factory_artifacts.html" %}
 {% if not native_run %}<section class="panel plan-section"><h2>Historical approval decisions</h2>{% for approval in approvals %}<details><summary>{{ approval.decision_display }} · {{ approval.created_at }}</summary><pre>{{ approval.action|pretty_json }}</pre><p>{{ approval.decision_note }} · Decision {{ approval.decided_at|default:"pending" }} · Consumed {{ approval.consumed_at|default:"no" }}</p></details>{% empty %}<p>No command approvals requested.</p>{% endfor %}<p>These decisions are retained for historical runs.</p></section>{% endif %}
 <section class="panel plan-section"><h2>Stages, validation, errors, and artifacts</h2>
 {% for entry in evidence_page %}<details><summary>{{ entry.kind }} · {{ entry.created_at }}</summary><pre>{{ entry.payload|pretty_json }}</pre></details>{% empty %}<p>No uploaded execution evidence.</p>{% endfor %}
