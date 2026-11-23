@@ -7,7 +7,7 @@ case "$action" in backup|restore-files|restore-database|restore-bootstrap|browse
 backup_image=${VIBEARR_BACKUP_IMAGE:-vibearr-backup:local}
 export BUILDX_CONFIG=${BUILDX_CONFIG:-/tmp/vibearr-operations-buildx}
 docker build --file deploy/docker/Backup.Dockerfile --tag "$backup_image" . >&2
-mapfile -t facts < <(docker compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python3.12 "$backup_image" -I -c '
+facts_text=$(docker compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python3.12 "$backup_image" -I -c '
 import json,sys
 config=json.load(sys.stdin)
 app=config["services"]["app"]
@@ -20,6 +20,7 @@ for value in values:
         raise ValueError("Invalid deployment facts")
     print(value)
 ')
+mapfile -t facts <<< "$facts_text"
 ((${#facts[@]} == 15)) || { echo 'Unable to read the selected compact deployment.' >&2; exit 1; }
 project=${facts[0]}
 [[ $project =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]] || exit 2
