@@ -437,6 +437,14 @@ class History:
             and result["agent_version"] == execution["agent_version"],
             "Scenario role lacks genuine completed execution.",
         )
+        allowance = finite(
+            self.run["configuration_snapshot"]["global"]["task_timeout_seconds"]
+        )
+        require(
+            receipt["ended_at"]
+            <= timestamp(self.run["created_at"]).timestamp() + allowance,
+            "Successful scenario role exceeded the frozen overall deadline.",
+        )
         require(
             manifest["run_id"] == self.run_id
             and manifest["operation_id"] == operation
@@ -487,9 +495,17 @@ class History:
             intent for intent in self.intents.values() if intent["kind"] == "agent"
         ]
         elapsed = 0.0
+        controls = self.run["configuration_snapshot"]["global"]
+        overall = timestamp(self.run["created_at"]).timestamp() + finite(
+            controls["task_timeout_seconds"]
+        )
         for intent in agents:
             session = intent["data"]["session"]
             operation = session["manifest"]["operation_id"]
+            require(
+                timestamp(session["manifest"]["deadline"]).timestamp() <= overall,
+                "Scenario dispatch extended the frozen overall deadline.",
+            )
             role = intent["data"].get("factory", {}).get("role")
             expected_account = {**self.context["document"]["account"]}
             if role:
@@ -530,7 +546,6 @@ class History:
                 "Scenario role timing differs from its run.",
             )
             elapsed += finite(end - start)
-        controls = self.run["configuration_snapshot"]["global"]
         require(
             elapsed <= finite(controls["implementation_timeout_seconds"]),
             "Scenario reset aggregate role budget.",
@@ -782,6 +797,14 @@ def checkpoint(value, history, operation_id):
         "Checkpoint belongs to another run/context.",
     )
     native = value["native"]
+    controls = history.run["configuration_snapshot"]["global"]
+    overall = timestamp(history.run["created_at"]).timestamp() + finite(
+        controls["task_timeout_seconds"]
+    )
+    require(
+        timestamp(native["deadline"]).timestamp() == overall,
+        "Checkpoint changed the frozen overall deadline.",
+    )
     require(
         native["run_id"] == history.run_id
         and all(

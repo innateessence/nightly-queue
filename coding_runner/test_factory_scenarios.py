@@ -1069,6 +1069,27 @@ class CheckpointAuthenticationTests(unittest.TestCase):
 
 
 class FinalValidationBindingTests(unittest.TestCase):
+    def test_failure_dispatch_cannot_extend_frozen_overall_deadline(self):
+        fixture = Fixture(rounds=2, terminal=True)
+        intent = next(
+            entry["data"]
+            for entry in fixture.entries
+            if entry["kind"] == "native_intent"
+        )
+        intent["data"]["session"]["manifest"]["deadline"] = "2026-11-22T00:20:00+00:00"
+        with self.assertRaisesRegex(ValueError, "extended the frozen overall deadline"):
+            fixture.verify("repair-exhaustion")
+
+    def test_restart_cannot_preserve_an_already_extended_deadline(self):
+        fixture = Fixture()
+        points = [fixture.checkpoint(), fixture.checkpoint(after=True)]
+        for point in points:
+            point["native"]["deadline"] = "2026-11-22T00:20:00+00:00"
+        with self.assertRaisesRegex(ValueError, "changed the frozen overall deadline"):
+            fixture.verify(
+                "controller-restart", pin={**fixture.pin(), "checkpoints": points}
+            )
+
     def test_exhausted_review_cannot_lower_the_frozen_required_reviewer_set(self):
         fixture = Fixture(rounds=2, terminal=True, failure="reviews")
         for entry in fixture.entries:
