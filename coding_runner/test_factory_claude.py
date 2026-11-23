@@ -250,7 +250,7 @@ class ClaudeFactoryEventTests(unittest.TestCase):
 
     def test_whitespace_line_cannot_bypass_the_event_byte_limit(self):
         with self.assertRaises(NativeSessionError):
-            NativeEvents("claude").feed(b" " * (MAX_LINE + 1) + b"\n", final=True)
+            NativeEvents("claude").line(b" " * (MAX_LINE + 1))
 
     def test_event_limit_includes_the_session_started_event(self):
         parser = NativeEvents("claude")
