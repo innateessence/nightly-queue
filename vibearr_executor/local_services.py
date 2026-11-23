@@ -293,8 +293,11 @@ class LocalServices:
             raise
 
     def _spawn(self, mode, environment, directory):
-        path = directory / (mode + ".log")
-        with path.open("wb") as log:
+        path = self._runtime().path(self.active) / f"app-{mode}-{uuid4().hex}.log"
+        descriptor = os.open(
+            path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+        )
+        with os.fdopen(descriptor, "wb") as log:
             process = subprocess.Popen(
                 [
                     "/usr/local/bin/python",
