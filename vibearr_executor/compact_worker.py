@@ -226,7 +226,41 @@ class CompactWorkerRuntime(SlotRuntime):
 
     def prepare_database(self, operation_id, deadline):
         return self.database.prepare(
-            operation_id, cancel=PreparationCancellation(self.cancel, deadline)
+            operation_id,
+            allow_createdb=self.database_creation_allowed(operation_id),
+            cancel=PreparationCancellation(self.cancel, deadline),
+        )
+
+    def database_creation_allowed(self, operation_id):
+        from .validation_profile import TASK_ARGV, ValidationProfile
+
+        if self.qualifying or self.validation_profile is None:
+            return False
+        record = self.record(operation_id)
+        data = record.get("manifest", {})
+        if (
+            record.get("operation_id") != operation_id
+            or data.get("operation_id") != operation_id
+        ):
+            return False
+        try:
+            parent = ValidationProfile.parse(self.validation_profile)
+            expected = next(
+                profile
+                for profile in parent.executor_profiles()
+                if profile.argv == (*TASK_ARGV, "django")
+            )
+            registered = self.profiles.get(expected.profile_id)
+            if registered != expected or self.profile_for(data) is not registered:
+                return False
+            manifest = Manifest.parse(data, expected)
+        except (Rejected, StopIteration):
+            return False
+        return (
+            manifest.phase == "validation"
+            and manifest.limits == expected.limits
+            and manifest.network_hosts == expected.network_hosts
+            and record.get("execution_identity") == self.execution_identity()
         )
 
     def prepare_source(self, profile, record):
