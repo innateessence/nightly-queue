@@ -1,5 +1,6 @@
 """Native lifecycle protocol fixtures; these do not qualify a live worker/provider."""
 
+import importlib.util
 from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
@@ -7,10 +8,6 @@ import json
 import unittest
 from uuid import uuid4
 
-from vibearr_executor.artifacts import pack, result_manifest, unpack
-from vibearr_executor.client import ExecutorUnavailable
-from vibearr_executor.contracts import Profile
-from vibearr_executor.integrated_profiles import ARGV
 from vibearr_runner.factory_roles import BASE_ROLES, freeze_context, retain_criteria
 from vibearr_runner.client import APIError
 from vibearr_runner.native_contract import (
@@ -24,6 +21,14 @@ from vibearr_runner.native_sessions import NativeSessionError
 from vibearr_runner.recovery import ReconciliationRequired
 
 from . import test_native_lifecycle as native_fixture
+
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor.artifacts import pack, result_manifest, unpack
+    from vibearr_executor.client import ExecutorUnavailable
+    from vibearr_executor.contracts import Profile
+    from vibearr_executor.integrated_profiles import ARGV
+
 
 RUNTIME = "compact-worker-v1"
 
@@ -222,6 +227,9 @@ class RoleExecutor(native_fixture.Executor):
         return self.status(identity)
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class FactorySpecSessionTests(unittest.TestCase):
     def setUp(self):
         native_fixture.NativeLifecycleTests.setUp(self)
