@@ -27,7 +27,7 @@ def scenario():
         "base_branch": "main",
         "provider": "codex",
         "agent_version": "codex-cli test-version",
-        "connection_id": identity(90),
+        "connection_id": 90,
         "configuration_revision": "c" * 64,
         "source_revision": "a" * 40,
         "repair_limit": 2,
@@ -70,6 +70,19 @@ def worker_identity():
 def chain(allowance=100):
     selected = scenario()
     configuration = {**default_configuration(), "enabled": True}
+    configuration["roles"] = {
+        role: {"model": "selected-model", "instructions": ""}
+        for role in (
+            "intake",
+            "specification",
+            "build",
+            "reviewer-code",
+            "reviewer-security",
+            "reviewer-ux",
+            "reviewer-ui",
+            "decision",
+        )
+    }
     snapshot = {
         "global": {"implementation_timeout_seconds": allowance},
         "effective": {"factory": configuration},
@@ -83,6 +96,7 @@ def chain(allowance=100):
         "finished_at": "2026-11-22T00:02:00+00:00",
         "context_reference": identity(2),
         "plan_reference": identity(3),
+        "source_snapshot": {"body": "first"},
     }
     workspace = {
         "repository_id": 9,
@@ -122,7 +136,7 @@ def chain(allowance=100):
         "intake": {
             "verdict": "accept",
             "scope": "Add behavior",
-            "criteria": ["A"],
+            "criteria": selected["tasks"][0]["acceptance_criteria"],
             "rationale": "Useful",
             "questions": [],
             "risk": "low",
@@ -130,7 +144,7 @@ def chain(allowance=100):
         },
         "specification": {
             "scope": "Add behavior",
-            "criteria": ["A"],
+            "criteria": selected["tasks"][0]["acceptance_criteria"],
             "exclusions": [],
             "verification": ["Run tests"],
         },
@@ -186,7 +200,7 @@ def chain(allowance=100):
                 "session_id": f"session-{index}",
                 "operation_id": identity(400 + index),
                 "execution_identity": worker_identity(),
-                "input_source_digest": "2" * 64,
+                "input_source_digest": ("2" if role == "build" else "1") * 64,
                 "input_digest": "3" * 64,
                 "prompt_digest": "4" * 64,
                 "started_at": 1795305601.0 + index * 2,
@@ -222,6 +236,7 @@ def chain(allowance=100):
                                     "adapter": execution["adapter"],
                                     "agent_version": execution["agent_version"],
                                     "manifest": {
+                                        "run_id": run["id"],
                                         "operation_id": execution["operation_id"],
                                         "source_digest": execution[
                                             "input_source_digest"
@@ -229,7 +244,9 @@ def chain(allowance=100):
                                         "context_digest": execution["input_digest"],
                                     },
                                     "account": {
+                                        "backend": "codex",
                                         "credential_id": selected["connection_id"],
+                                        "credential_version": 2,
                                         "model": execution["model"],
                                     },
                                 },
@@ -246,6 +263,9 @@ def chain(allowance=100):
                             "agent_version": execution["agent_version"],
                             "intent_id": execution["intent_id"],
                             "receipt": {
+                                "run_id": run["id"],
+                                "source_digest": execution["input_source_digest"],
+                                "export_digest": ("6" if role == "build" else "1") * 64,
                                 "operation_id": execution["operation_id"],
                                 "execution_identity": worker_identity(),
                                 "started_at": execution["started_at"],
@@ -288,6 +308,7 @@ def chain(allowance=100):
     )
     collected = {
         "run_id": identity(1),
+        "issue_number": 10,
         "finished_at": run["finished_at"],
         "claimed_at": run["created_at"],
         "delivery": {
@@ -298,7 +319,23 @@ def chain(allowance=100):
         "validation": validation,
         "changed_files": paths,
         "_factory_documents": {
-            "contexts": {identity(2): {"id": identity(2), "digest": "e" * 64}},
+            "contexts": {
+                identity(2): {
+                    "id": identity(2),
+                    "digest": "e" * 64,
+                    "document": {
+                        "run_id": run["id"],
+                        "source": deepcopy(run["source_snapshot"]),
+                        "repository": workspace,
+                        "account": {
+                            "backend": "codex",
+                            "credential_id": selected["connection_id"],
+                            "credential_version": 2,
+                            "model": "initial-implementation-model",
+                        },
+                    },
+                }
+            },
             "plans": {identity(3): plan},
         },
     }
@@ -312,6 +349,8 @@ def chain(allowance=100):
                 "context_id": identity(2),
                 "context_digest": "e" * 64,
                 "source_digest": "1" * 64,
+                "agent_intent_id": identity(202),
+                "export_digest": "6" * 64,
                 "factory_paths": paths,
             },
         }
@@ -409,6 +448,47 @@ class FactoryChainTests(unittest.TestCase):
             identity(900)
         )
         with self.assertRaisesRegex(ValueError, "another selected connection"):
+            self.check()
+
+    def test_frozen_acceptance_criterion_cannot_be_dropped(self):
+        self.scenario["tasks"][0]["acceptance_criteria"] = [
+            "Mandatory security behavior"
+        ]
+        with self.assertRaisesRegex(
+            ValueError, "dropped a frozen acceptance criterion"
+        ):
+            self.check()
+
+    def test_frozen_security_surface_requires_actual_routed_review(self):
+        self.scenario["tasks"][0]["surfaces"] = ["security"]
+        with self.assertRaisesRegex(ValueError, "dropped a frozen acceptance surface"):
+            self.check()
+
+    def test_frozen_issue_body_cannot_be_substituted_then_reverted(self):
+        self.run["source_snapshot"]["body"] = "A different task was executed"
+        with self.assertRaisesRegex(ValueError, "selected acceptance issue body"):
+            self.check()
+
+    def test_native_account_version_must_match_the_frozen_context(self):
+        self.native[1]["data"]["data"]["session"]["account"]["credential_version"] = 999
+        with self.assertRaisesRegex(ValueError, "frozen provider, credential version"):
+            self.check()
+
+    def test_native_account_model_must_match_its_configured_role_model(self):
+        self.native[1]["data"]["data"]["session"]["account"]["model"] = "another-model"
+        with self.assertRaisesRegex(ValueError, "configured model"):
+            self.check()
+
+    def test_builder_export_must_match_its_actual_imported_workspace(self):
+        next(entry for entry in self.native if entry["kind"] == "native_workspace")[
+            "data"
+        ]["export_digest"] = ("9" * 64)
+        with self.assertRaisesRegex(ValueError, "actual imported native workspace"):
+            self.check()
+
+    def test_read_only_export_cannot_substitute_different_source_bytes(self):
+        self.native[2]["data"]["receipt"]["export_digest"] = "9" * 64
+        with self.assertRaisesRegex(ValueError, "Read-only role output"):
             self.check()
 
     def test_four_field_historical_dispatch_cannot_qualify_new_factory_work(self):
@@ -684,6 +764,99 @@ class HumanMergeTests(unittest.TestCase):
             factory.observe_human_merge(
                 SimpleNamespace(pull=lambda *_: self.pull), self.collected
             )
+
+
+class BrowserProofTests(unittest.TestCase):
+    def setUp(self):
+        from vibearr_executor.test_local_services import WorkerBrowserReceiptTests
+
+        self.capture = WorkerBrowserReceiptTests()
+        self.capture.setUp()
+        self.addCleanup(self.capture.doCleanups)
+        binding, worker = self.capture.binding, self.capture.worker
+        self.result = {
+            "run_id": worker["run_id"],
+            "operation_id": worker["operation_id"],
+            "terminated": True,
+            "exit_code": 0,
+            "started_at": 1.0,
+            "ended_at": 2.0,
+            "log_digest": "a" * 64,
+            "execution_identity": worker["execution_identity"],
+            "artifact": {
+                "source_digest": binding["source_digest"],
+                "result_digest": binding["source_digest"],
+            },
+        }
+        self.status = {
+            "state": "exited",
+            "operation_id": worker["operation_id"],
+            "descendants_terminated": True,
+            "execution_identity": worker["execution_identity"],
+            "worker_boot": worker["execution_identity"]["worker_boot"],
+            "result": self.result,
+        }
+        self.client = SimpleNamespace(
+            status=Mock(return_value=self.status),
+            browser_result=Mock(
+                return_value=(self.capture.report, self.capture.archive())
+            ),
+        )
+        self.collected = {
+            "run_id": worker["run_id"],
+            "delivery": {
+                "workspace": {
+                    "commit_sha": binding["revision"],
+                    "tree_sha": binding["tree_sha"],
+                },
+                "runtime": {"image_digest": binding["application_image"]},
+            },
+        }
+        self.capabilities = {
+            "profiles": [
+                {
+                    "profile_id": "browser-ui",
+                    "profile_digest": worker["profile_digest"],
+                    "image": binding["application_image"],
+                }
+            ]
+        }
+
+    def verify(self):
+        return factory.verify_browser(
+            self.collected,
+            {"source_digest": self.capture.binding["source_digest"]},
+            {"report": self.capture.report, "storage_root": str(self.capture.root)},
+            self.client,
+            self.capabilities,
+        )
+
+    def test_genuine_bound_export_is_reread_and_all_actual_frames_are_verified(self):
+        self.assertEqual(len(self.verify()), 4)
+        self.client.browser_result.assert_called_once_with(
+            self.capture.worker["operation_id"]
+        )
+
+    def test_nonzero_canceled_result_cannot_be_substituted_by_good_screenshots(self):
+        self.result.update(exit_code=1, canceled=True)
+        with self.assertRaisesRegex(ValueError, "did not pass"):
+            self.verify()
+        self.client.browser_result.assert_not_called()
+
+    def test_protected_result_for_another_source_cannot_qualify_screenshots(self):
+        self.result["artifact"]["source_digest"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "unchanged source"):
+            self.verify()
+
+    def test_supplied_report_cannot_replace_the_authenticated_original_export(self):
+        self.client.browser_result.return_value = ({}, self.capture.archive())
+        with self.assertRaisesRegex(ValueError, "authenticated original export"):
+            self.verify()
+
+    def test_screenshot_profile_must_match_the_registered_browser_profile(self):
+        self.capabilities["profiles"][0]["profile_digest"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "registered immutable browser profile"):
+            self.verify()
 
 
 class QualificationTests(unittest.TestCase):
