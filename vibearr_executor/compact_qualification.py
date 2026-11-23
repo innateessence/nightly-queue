@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
 import socket
 import time
@@ -12,6 +13,7 @@ from .artifacts import pack
 from .client import Client, ExecutorRejected
 from .compact_protocol import PREFIX, qualification_targets as service_targets
 from .contracts import Conflict, Rejected, canonical, digest
+from .control_token import read_control_token
 from .runtime import durable
 from .slot_processes import task_states
 from .slot_qualification import check_restart, prepare, wait
@@ -78,8 +80,8 @@ assert not os.environ.get('VIBEARR_BACKEND_SECRET_FILE')
 assert not os.environ.get('HTTP_PROXY') and not os.environ.get('HTTPS_PROXY')
 with psycopg2.connect(os.environ['DATABASE_URL']) as database:
     with database.cursor() as cursor:
-        cursor.execute('SELECT rolsuper,rolcreaterole,rolreplication FROM pg_roles WHERE rolname=current_user')
-        assert cursor.fetchone() == (False,False,False), 'task database role has administrative authority'
+        cursor.execute('SELECT rolsuper,rolcreatedb,rolcreaterole,rolreplication,rolbypassrls FROM pg_roles WHERE rolname=current_user')
+        assert cursor.fetchone() == (False,False,False,False,False), 'task database role has administrative authority'
         cursor.execute("SELECT to_regclass('compact_previous_phase')")
         assert cursor.fetchone()[0] is None, 'previous phase database survived'
         cursor.execute('CREATE TABLE compact_previous_phase(value text)')
@@ -149,19 +151,19 @@ def require_exit(runtime, operation, result):
         )
 
 
-def lost_start(runtime, operation):
+def lost_start(runtime, operation, token):
     path = PREFIX + "/v1/operations/" + operation + "/start"
     headers = (
         "POST "
         + path
         + " HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer "
-        + runtime.control_token
+        + token
         + "\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
     )
     with socket.create_connection(("127.0.0.1", 8791), timeout=5) as connection:
         connection.sendall(headers.encode())
         connection.shutdown(socket.SHUT_WR)
-    client = Client("http://127.0.0.1:8791", runtime.control_token)
+    client = Client("http://127.0.0.1:8791", token)
     deadline = time.monotonic() + 10
     while client.status(operation).get("state") != "running":
         if time.monotonic() >= deadline:
@@ -193,6 +195,7 @@ def qualify(runtime, targets=None):
         if runtime.active or runtime.fenced:
             raise Conflict("Stop or reconcile active work before qualification.")
         targets = qualification_targets(targets)
+        token = read_control_token(Path(os.environ["VIBEARR_EXECUTOR_TOKEN_FILE"]))
         identity = runtime.execution_identity()
         if identity.get("runtime") != RUNTIME:
             raise Rejected(
@@ -200,7 +203,7 @@ def qualify(runtime, targets=None):
             )
         with socket.create_connection((targets["runner"], 8792), timeout=5):
             pass
-        control = Client("http://127.0.0.1:8791", runtime.control_token).capabilities()
+        control = Client("http://127.0.0.1:8791", token).capabilities()
         if control.get("worker_boot") != runtime.boot:
             raise Rejected(
                 "Trusted control positive witness differs from this worker boot."
@@ -230,7 +233,7 @@ def qualify(runtime, targets=None):
             raise Rejected("Deadline did not terminate every task descendant.")
         receipts.append(result)
         operation = prepare(runtime, "wait")
-        lost_start(runtime, operation)
+        lost_start(runtime, operation, token)
         wait(runtime, operation, terminal=False)
         runtime.pause(operation)
         if not all(state in {"T", "t", "Z"} for state in task_states().values()):
@@ -251,7 +254,7 @@ def qualify(runtime, targets=None):
             if time.monotonic() >= deadline:
                 raise Rejected("Task did not reach the actual worker PID ceiling.")
             time.sleep(0.05)
-        client = Client("http://127.0.0.1:8791", runtime.control_token)
+        client = Client("http://127.0.0.1:8791", token)
         if client.status(operation).get("state") != "running":
             raise Rejected("Worker control failed under PID pressure.")
         result = client.stop(operation)
@@ -274,9 +277,7 @@ def qualify(runtime, targets=None):
             result.get("result", {}).get("exit_code") != -9
             or not result.get("descendants_terminated")
             or int(after_oom["oom_kill"]) <= int(before_oom["oom_kill"])
-            or Client("http://127.0.0.1:8791", runtime.control_token)
-            .status(operation)
-            .get("state")
+            or Client("http://127.0.0.1:8791", token).status(operation).get("state")
             != "exited"
         ):
             raise Rejected(
@@ -331,6 +332,7 @@ def qualify(runtime, targets=None):
                 "oom_kill_before": int(before_oom["oom_kill"]),
                 "oom_kill_after": int(after_oom["oom_kill"]),
                 "pids_max": Path("/sys/fs/cgroup/pids.max").read_text().strip(),
+                "pids_peak": Path("/sys/fs/cgroup/pids.peak").read_text().strip(),
             },
             "completed_at": datetime.now(timezone.utc).isoformat(),
         }
