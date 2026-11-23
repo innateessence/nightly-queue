@@ -93,10 +93,42 @@ class CompactEvidenceTests(unittest.TestCase):
     def setUp(self):
         self.report, self.capabilities = valid_evidence()
 
-    def test_complete_report_matches_current_authority(self):
-        self.assertEqual(
-            validate_compact_report(self.report, self.capabilities), self.report
-        )
+    def test_fixture_documents_cannot_qualify_current_authority(self):
+        with self.assertRaises(CompactEvidenceError):
+            validate_compact_report(self.report, self.capabilities)
+
+    def test_empty_hashed_documents_cannot_qualify_any_gate(self):
+        from .compact_evidence import validate_document
+
+        for name in EVIDENCE:
+            with self.subTest(gate=name), self.assertRaises(CompactEvidenceError):
+                validate_document(
+                    name,
+                    {},
+                    self.report["source_revision"],
+                    self.report["worker"],
+                    self.report["images"],
+                )
+
+    def test_typed_labels_without_underlying_proof_cannot_qualify_any_gate(self):
+        from .compact_evidence import validate_document
+
+        for name in EVIDENCE:
+            document = {
+                "kind": "actual-" + name,
+                "source_revision": self.report["source_revision"],
+                "worker": self.report["worker"],
+                "images": self.report["images"],
+                "payload": {},
+            }
+            with self.subTest(gate=name), self.assertRaises(CompactEvidenceError):
+                validate_document(
+                    name,
+                    document,
+                    self.report["source_revision"],
+                    self.report["worker"],
+                    self.report["images"],
+                )
 
     def test_missing_observation_is_rejected(self):
         del self.report["evidence"]["browser"]
