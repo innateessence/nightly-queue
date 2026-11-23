@@ -94,10 +94,15 @@ the worker container, then qualify its new boot without making model calls:
 ```sh
 export VIBEARR_RUNNER_IMAGE_ID=$(docker inspect "$(docker compose ps -q runner)" --format '{{.Image}}')
 export VIBEARR_WORKER_IMAGE_ID=$(docker inspect "$(docker compose ps -q worker)" --format '{{.Image}}')
+qualification_project=$(docker inspect "$(docker compose ps -q runner)" --format '{{index .Config.Labels "com.docker.compose.project"}}')
+runner_probe_ip=$(docker inspect "$(docker compose ps -q runner)" --format "{{(index .NetworkSettings.Networks \"${qualification_project}_worker-control\").IPAddress}}")
+app_probe_ip=$(docker inspect "$(docker compose ps -q app)" --format "{{(index .NetworkSettings.Networks \"${qualification_project}_runner-api\").IPAddress}}")
+postgres_probe_ip=$(docker inspect "$(docker compose ps -q postgres)" --format "{{(index .NetworkSettings.Networks \"${qualification_project}_database\").IPAddress}}")
+qualification_targets="{\"runner\":\"$runner_probe_ip\",\"app\":\"$app_probe_ip\",\"postgres\":\"$postgres_probe_ip\"}"
 docker compose exec -T worker python -I -m vibearr_executor.compact_worker restart-witness
 docker compose kill -s SIGKILL worker
 docker compose up -d --wait worker runner
-docker compose exec -T worker python -I -m vibearr_executor.compact_worker qualify
+docker compose exec -T -e "VIBEARR_QUALIFICATION_TARGETS=$qualification_targets" worker python -I -m vibearr_executor.compact_worker qualify
 ```
 
 The actual container must match its registered read-only image and CPU, memory,
@@ -106,6 +111,8 @@ state and control access, direct egress denial, detached-descendant termination,
 cleanup between jobs, pause/resume, deadlines, cancellation and replay. The
 interrupted witness must reconcile without a new execution or fabricated result.
 Every worker restart invalidates its proof and needs a fresh interrupted witness.
+Targets come from the current container networks; task DNS denial alone cannot
+prove that application, database or runner administration traffic is blocked.
 
 Native account/model probes run separately, only for eligible work with selected
 credentials/grants. Fixture responses, `--version`, stored auth files, and old
