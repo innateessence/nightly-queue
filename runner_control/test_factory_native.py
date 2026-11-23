@@ -12,6 +12,7 @@ from credentials.test_models import TEST_KEY
 from vibearr_executor.artifacts import digest, pack
 from vibearr_runner import native_contract as contract
 from vibearr_runner.factory_roles import freeze_context
+from vibearr_runner.factory_routing import route
 from vibearr_runner.native_codex import CODEX_VERSION
 from vibearr_runner.native_sessions import NativeSession
 from work_queue.models import QueueItem
@@ -222,13 +223,15 @@ class FactoryNativeFixture(native_fixture.NativeProtocolMixin):
         )
         return self.workspace_entry
 
-    def complete_role(self, role, payload):
-        intent = self.write("native_intent", self.role_intent(role))
+    def complete_role(self, role, payload, *, specification=None, workspace=None):
+        intent = self.write(
+            "native_intent",
+            self.role_intent(role, specification=specification, workspace=workspace),
+        )
         self.intent_ids.append(str(intent.operation_id))
         session = NativeSession.from_data(intent.payload["data"]["session"])
-        observed = self.observed(
-            session.manifest["operation_id"], self.original, self.original
-        )
+        source = self.changed if workspace else self.original
+        observed = self.observed(session.manifest["operation_id"], source, source)
         self.operations.append(observed)
         result = self.write(
             "native_agent",
@@ -239,13 +242,17 @@ class FactoryNativeFixture(native_fixture.NativeProtocolMixin):
                 outcome={
                     "result": observed["result"],
                     "artifact": observed["result"]["artifact"],
-                    "source": self.original,
+                    "source": source,
                     "successful": True,
-                    "session_id": "ses_role",
+                    "session_id": "ses_" + role,
                     "agent_version": CODEX_VERSION,
                 },
             ),
         )
+        if workspace:
+            return self.save_candidate_artifact(
+                role, payload, intent=intent, result=result
+            )
         receipt = result.payload["receipt"]
         document = {
             "schema_version": 1,
@@ -279,6 +286,51 @@ class FactoryNativeFixture(native_fixture.NativeProtocolMixin):
                 "ended_at": receipt["ended_at"],
             },
         }
+        return save_artifact(
+            runner=self.runner,
+            run_id=self.run.pk,
+            claim_token=self.claim,
+            operation_id=document["operation_id"],
+            document=document,
+        )
+
+    def save_candidate_artifact(self, role, payload, *, intent=None, result=None):
+        plan = self.run.plans.filter(context=self.context).last()
+        document = {
+            "schema_version": 1,
+            "run_id": str(self.run.pk),
+            "operation_id": str(uuid4()),
+            "role": role,
+            "round": self.common()["attempt"] + 1,
+            "context_id": str(self.context.pk),
+            "context_digest": self.context.digest,
+            "specification_id": str(plan.pk),
+            "specification_digest": plan.digest,
+            "source_digest": self.workspace_entry.payload["source_digest"],
+            "tree_sha": self.workspace["tree_sha"],
+            "base_sha": self.workspace["base_revision"],
+            "head_sha": self.workspace["commit_sha"],
+            "configuration_digest": contract.digest(self.run.configuration_snapshot),
+            "payload": payload,
+        }
+        if intent:
+            session = NativeSession.from_data(intent.payload["data"]["session"])
+            receipt = result.payload["receipt"]
+            document["execution"] = {
+                "intent_id": str(intent.operation_id),
+                "result_id": str(result.operation_id),
+                "adapter": session.adapter,
+                "model": session.account["model"],
+                "agent_version": result.payload["agent_version"],
+                "session_id": result.payload["session_id"],
+                "operation_id": session.manifest["operation_id"],
+                "execution_identity": receipt["execution_identity"],
+                "input_source_digest": session.manifest["source_digest"],
+                "input_digest": session.manifest["context_digest"],
+                "prompt_digest": intent.payload["data"]["factory"]["prompt_digest"],
+                "started_at": receipt["started_at"],
+                "ended_at": receipt["ended_at"],
+            }
         return save_artifact(
             runner=self.runner,
             run_id=self.run.pk,
@@ -572,6 +624,53 @@ class FactoryGenerationTests(FactoryNativeFixture, TestCase):
             }
         )
 
+    def complete_validation(self):
+        super().complete_validation()
+        builder_result = self.run.evidence.get(
+            kind="native_agent", payload__intent_id=str(self.agent_intent.operation_id)
+        )
+        criteria = [entry["id"] for entry in self.specification["criteria"]]
+        self.save_candidate_artifact(
+            "build",
+            {
+                "summary": "Implement every accepted criterion",
+                "criteria": {identity: "Updated file.py" for identity in criteria},
+            },
+            intent=self.agent_intent,
+            result=builder_result,
+        )
+        checks = self.save_candidate_artifact(
+            "checks",
+            {"state": "passed", "validation_id": str(self.validation.operation_id)},
+        )
+        routing_payload = route(
+            self.configuration,
+            self.intake,
+            self.workspace_entry.payload["factory_paths"],
+        )
+        routing = self.save_candidate_artifact("routing", routing_payload)
+        reviews = [
+            self.complete_role(
+                role,
+                {"verdict": "pass", "findings": [], "coverage": criteria},
+                specification=self.previous_plan,
+                workspace=self.workspace_entry,
+            )
+            for role in routing_payload["required_reviewers"]
+        ]
+        self.complete_role(
+            "decision",
+            {
+                "verdict": "ready",
+                "rationale": "Every criterion is independently checked and reviewed",
+                "artifact_ids": [
+                    str(entry.pk) for entry in (checks, routing, *reviews)
+                ],
+            },
+            specification=self.previous_plan,
+            workspace=self.workspace_entry,
+        )
+
     def generation_document(self):
         document = copy.deepcopy(self.previous_context.document)
         document["source_digest"] = digest(self.new_source)
@@ -704,6 +803,11 @@ class FactoryGenerationTests(FactoryNativeFixture, TestCase):
 
     def test_published_generation_requires_explicit_new_attempt(self):
         self.complete_delivery()
+        self.assertTrue(
+            self.run.evidence.filter(
+                kind="native_delivery", payload__pull_request__number=9
+            ).exists()
+        )
         self.terminate()
         response = self.post_generation()
         self.assertEqual(response.status_code, 409, response.content)
