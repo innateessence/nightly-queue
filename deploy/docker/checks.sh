@@ -54,6 +54,33 @@ start_runtime() {
   return 1
 }
 restored() { COMPOSE_PROJECT_NAME=$restore_project VIBEARR_DATA_PROJECT=$restore_project VIBEARR_RUNNER_NAME=restored-check-runner docker compose --file "$recipe/docker-compose.yml" --project-name "$restore_project" "$@"; }
+qualify_worker() {
+  local orchestrate=${1:-compose}
+  local targets
+  local selected_ids=()
+  mapfile -t selected_ids < <("$orchestrate" ps -q runner app postgres)
+  targets=$(docker inspect "${selected_ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -I -c '
+import ipaddress,json,sys
+containers=json.load(sys.stdin)
+networks={"runner":"worker-control","app":"runner-api","postgres":"database"}
+targets={}
+projects=set()
+for container in containers:
+    labels=container["Config"]["Labels"]
+    service=labels["com.docker.compose.service"]
+    project=labels["com.docker.compose.project"]
+    address=container["NetworkSettings"]["Networks"][project+"_"+networks[service]]["IPAddress"]
+    parsed=ipaddress.ip_address(address)
+    if parsed.version != 4 or not parsed.is_private or parsed.is_loopback or service in targets:
+        raise ValueError("Qualification requires distinct current private service addresses")
+    targets[service]=address
+    projects.add(project)
+if set(targets) != set(networks) or len(projects) != 1:
+    raise ValueError("Qualification requires one complete selected Compose project")
+print(json.dumps(targets,sort_keys=True))
+')
+  "$orchestrate" exec -T -e "VIBEARR_QUALIFICATION_TARGETS=$targets" worker python -I -m vibearr_executor.compact_worker qualify
+}
 export_volume() {
   local volume=$1 destination=$2
   if ! docker volume inspect "$volume" >/dev/null 2>&1; then return; fi
@@ -153,12 +180,12 @@ if [[ $mode == full || $mode == boundary || $mode == candidate || $mode == opera
   compose exec -T worker python -I -m vibearr_executor.compact_worker restart-witness > "$output/restart-witness.json" 2>&1
   compose kill -s SIGKILL worker > "$output/restart.log" 2>&1
   start_runtime >> "$output/restart.log" 2>&1
-  compose exec -T worker python -I -m vibearr_executor.compact_worker qualify > "$output/qualification.json" 2>&1
+  qualify_worker > "$output/qualification.json" 2>&1
   compose exec -T worker python -I -m vibearr_executor.compact_worker restart-witness > "$output/second-witness.json" 2>&1
   compose kill -s SIGKILL worker >> "$output/restart.log" 2>&1
   start_runtime >> "$output/restart.log" 2>&1
   compose exec -T worker python -I -c 'from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path("/run/vibearr/worker/control-token").read_text().strip()); assert c.capabilities()["qualified"] is False' > "$output/restart-proof.log" 2>&1
-  compose exec -T worker python -I -m vibearr_executor.compact_worker qualify > "$output/requalified.json" 2>&1
+  qualify_worker > "$output/requalified.json" 2>&1
   compose exec -T worker python -I -m vibearr_executor.compact_worker qualify-roles > "$output/role-qualification.json" 2>&1
   compose exec -T worker python -I < deploy/docker/dependency_smoke.py > "$output/dependency-smoke.json" 2>&1
   docker cp "$(compose ps -q worker):/control/dependency-smoke-proof.json" "$output/dependency-smoke-proof.json" > "$output/dependency-smoke-export.log" 2>&1
@@ -210,6 +237,6 @@ if [[ $mode == full || $mode == operations ]]; then
   restored exec -T worker python -I -m vibearr_executor.compact_worker restart-witness > "$output/restored-restart-witness.json" 2>&1
   restored kill -s SIGKILL worker > "$output/restored-restart.log" 2>&1
   start_runtime restored >> "$output/restored-restart.log" 2>&1
-  restored exec -T worker python -I -m vibearr_executor.compact_worker qualify > "$output/restored-qualification.json" 2>&1
+  qualify_worker restored > "$output/restored-qualification.json" 2>&1
   restored exec -T worker python -I -m vibearr_executor.compact_worker qualify-roles > "$output/restored-role-qualification.json" 2>&1
 fi
