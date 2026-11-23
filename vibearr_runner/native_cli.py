@@ -53,6 +53,10 @@ class NativeEvents(CodexEvents):
         return "Selected native CLI failed; inspect its protected diagnostics before retrying."
 
     def line(self, line):
+        if self.provider == "opencode":
+            from .native_opencode import consume
+
+            return consume(self, line)
         if self.provider == "codex":
             try:
                 event = json.loads(line)
@@ -162,16 +166,11 @@ class NativeCLIAdapter(NativeCodexAdapter):
                 "Select a runner subscription login or external Ollama connection."
             )
         if self.provider == "opencode":
-            from vibearr_executor.ollama_relay import external_endpoint
+            from .native_opencode import connection
 
-            connection = json.loads(credential["material"]["secret"])
-            if connection["provider"] != "ollama" or connection.get("api_key"):
-                raise NativeSessionError(
-                    "OpenCode requires external Ollama without cloud API keys."
-                )
             return {
                 "provider": "opencode",
-                "endpoint": external_endpoint(connection["base_url"]),
+                "endpoint": connection(credential["material"]["secret"]),
                 "credential_id": reference["id"],
             }
         return {"provider": self.provider, "credential_id": reference["id"]}
