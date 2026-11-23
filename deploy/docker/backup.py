@@ -1,6 +1,7 @@
 """Explicit PostgreSQL 17 backup and empty-target restoration jobs."""
 
 import argparse
+import base64
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -245,6 +246,11 @@ def restore_files(identity):
             "PostgreSQL restore storage cannot fit this snapshot and its reserve."
         )
     restore(directory / "state.tar", records, Path("/restore"), volumes)
+    restored_records = inventory(Path("/restore"), volumes)
+    if restored_records != records:
+        raise ValueError(
+            "Restored private-state files differ from the complete backup inventory."
+        )
     marker = Path("/restore/runner-secrets/restore-required.json")
     write_json(marker, {"backup_id": identity, "new_runner_identity_required": True})
     os.chown(marker, 10001, 10001)
@@ -259,6 +265,11 @@ def restore_files(identity):
                 "backup_id": identity,
                 "files_restored": True,
                 "qualification_required": True,
+                "artifacts_verified": manifest["artifacts"],
+                "inventory_json": base64.b64encode(
+                    (directory / "inventory.json").read_bytes()
+                ).decode(),
+                "restored_inventory": restored_records,
             }
         )
     )
@@ -296,7 +307,8 @@ def restore_database(identity):
         check=True,
         timeout=3600,
     )
-    if fingerprint() != manifest["database"]["tables"]:
+    restored_tables = fingerprint()
+    if restored_tables != manifest["database"]["tables"]:
         raise ValueError(
             "Restored database differs from the backup table fingerprints."
         )
@@ -329,6 +341,9 @@ def restore_database(identity):
                 "business_data_fingerprints_match": True,
                 "restored_runner_identities_disabled": True,
                 "processing_disabled": True,
+                "artifacts_verified": manifest["artifacts"],
+                "restored_tables": restored_tables,
+                "business_tables_after_fencing": observed,
             }
         )
     )
