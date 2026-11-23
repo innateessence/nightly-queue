@@ -9,12 +9,18 @@ import math
 import os
 from pathlib import Path
 import re
+import tempfile
 from uuid import UUID, uuid4
 
 from .bootstrap_files import private_json
 from .client import APIError
 from .delivery import DeliveryError
-from .native_contract import digest, receipt_summary, validate_native_artifact
+from .native_contract import (
+    digest,
+    receipt_passed,
+    receipt_summary,
+    validate_native_artifact,
+)
 from .native_evidence import digest as valid_digest
 from .merge_github import MergeGitHub, MergeRepair, MergeWait
 from .native_workspace import atomic_bytes
@@ -82,7 +88,7 @@ def scenario_document(value):
         isinstance(value.get("agent_version"), str) and bool(value["agent_version"]),
         "Pin the selected native CLI version.",
     )
-    identifier(value.get("connection_id"))
+    positive(value.get("connection_id"))
     valid_digest(value.get("configuration_revision"))
     valid_digest(value.get("source_revision"), git=True)
     tasks = value.get("tasks")
@@ -416,6 +422,97 @@ def verify_generations(contexts, run):
     )
 
 
+def criterion_texts(values):
+    require(
+        isinstance(values, list) and bool(values), "Missing frozen acceptance criteria."
+    )
+    result = [
+        (
+            value.get("description", value.get("text"))
+            if isinstance(value, dict)
+            else value
+        )
+        for value in values
+    ]
+    require(
+        all(isinstance(value, str) and bool(value) for value in result),
+        "Invalid frozen acceptance criterion text.",
+    )
+    return set(result)
+
+
+def verify_task_requirements(
+    entries, run, collected, scenario, context, plan, authority
+):
+    selected = [
+        task
+        for task in scenario["tasks"]
+        if task["issue_number"] == collected["issue_number"]
+    ]
+    require(
+        len(selected) == 1, "Factory run differs from the selected acceptance issue."
+    )
+    task = selected[0]
+    source = context["document"]["source"]
+    require(
+        source == run["source_snapshot"]
+        and digest(source.get("body")) == task["body_digest"],
+        "Frozen native context did not execute the selected acceptance issue body.",
+    )
+    repository = context["document"]["repository"]
+    workspace = collected["delivery"]["workspace"]
+    require(
+        context["document"]["run_id"] == run["id"]
+        and all(
+            repository.get(key) == workspace.get(key)
+            for key in ("repository_id", "repository", "base_branch", "base_revision")
+        ),
+        "Frozen native context belongs to another run, repository or inspected base.",
+    )
+    current = [
+        entry for entry in entries if entry["document"]["context_id"] == context["id"]
+    ]
+    intakes = [
+        entry["document"] for entry in current if entry["document"]["role"] == "intake"
+    ]
+    require(
+        bool(intakes) and intakes[-1]["payload"]["verdict"] == "accept",
+        "Missing accepted current intake.",
+    )
+    specification = next(
+        entry["document"]
+        for entry in current
+        if entry["id"] == plan["document"]["factory_specification_id"]
+    )
+    criteria = set(task["acceptance_criteria"])
+    require(
+        criteria <= criterion_texts(intakes[-1]["payload"]["criteria"])
+        and criteria <= criterion_texts(specification["payload"]["criteria"]),
+        "Current intake or specification dropped a frozen acceptance criterion.",
+    )
+    routing = next(
+        entry["document"]["payload"]
+        for entry in current
+        if entry["document"]["role"] == "routing"
+        and entry["document"]["round"] == authority["round"]
+    )
+    surfaces = set(task.get("surfaces", []))
+    require(
+        surfaces <= set(intakes[-1]["payload"].get("surfaces", []))
+        and surfaces <= set(routing.get("surfaces", [])),
+        "Current intake or routing dropped a frozen acceptance surface.",
+    )
+    required = {"reviewer-code"}
+    if "security" in surfaces:
+        required.add("reviewer-security")
+    if "ui" in surfaces:
+        required.update({"reviewer-ux", "reviewer-ui"})
+    require(
+        required <= set(authority["required_reviewers"]),
+        "Frozen acceptance surfaces lack their required reviewers.",
+    )
+
+
 def check_factory_chain(entries, native_entries, run, collected, scenario, documents):
     from .factory_delivery import checked_factory_workspace
 
@@ -474,6 +571,9 @@ def check_factory_chain(entries, native_entries, run, collected, scenario, docum
         isinstance(authority, dict),
         "Acceptance requires enabled factory publication authority.",
     )
+    verify_task_requirements(
+        entries, run, collected, scenario, context, plan, authority
+    )
     native_by_id = {str(entry["id"]): entry for entry in native_entries}
     native_operations = {entry["operation_id"]: entry for entry in native_entries}
     agent_operations = set()
@@ -519,6 +619,15 @@ def check_factory_chain(entries, native_entries, run, collected, scenario, docum
             account["credential_id"] == scenario["connection_id"],
             "Role used another selected connection.",
         )
+        frozen = documents["contexts"][document["context_id"]]["document"]["account"]
+        model = run["configuration_snapshot"]["effective"]["factory"]["roles"][
+            document["role"]
+        ]["model"]
+        require(
+            account == {**frozen, "model": model}
+            and account["backend"] == scenario["provider"],
+            "Role account differs from its frozen provider, credential version or configured model.",
+        )
         require(
             session["adapter"] == execution["adapter"]
             and account["model"] == execution["model"]
@@ -528,6 +637,41 @@ def check_factory_chain(entries, native_entries, run, collected, scenario, docum
             and session["manifest"]["context_digest"] == execution["input_digest"],
             "Role input, model or CLI differs from its frozen native session.",
         )
+        receipt = result["data"]["receipt"]
+        require(
+            receipt["run_id"] == run["id"]
+            and session["manifest"]["run_id"] == run["id"]
+            and receipt["source_digest"] == execution["input_source_digest"],
+            "Role protected input belongs to another run or source.",
+        )
+        if document["role"] == "build":
+            imports = [
+                entry["data"]
+                for entry in native_entries
+                if entry["kind"] == "native_workspace"
+                and entry["data"].get("source_digest") == document["source_digest"]
+                and entry["data"].get("agent_intent_id") == execution["intent_id"]
+                and entry["data"].get("context_id") == document["context_id"]
+                and entry["data"].get("context_digest") == document["context_digest"]
+                and entry["data"].get("workspace", {}).get("tree_sha")
+                == document["tree_sha"]
+                and entry["data"].get("workspace", {}).get("commit_sha")
+                == document["head_sha"]
+                and entry["data"].get("workspace", {}).get("base_revision")
+                == document["base_sha"]
+            ]
+            require(
+                bool(imports)
+                and imports[-1]["export_digest"] == receipt["export_digest"],
+                "Builder output lacks its actual imported native workspace receipt.",
+            )
+        else:
+            require(
+                receipt["source_digest"]
+                == receipt["export_digest"]
+                == document["source_digest"],
+                "Read-only role output differs from its inspected candidate source.",
+            )
         descriptor = intent["data"]["data"].get("factory")
         expected_dispatch = {
             key: document[key]
@@ -708,8 +852,8 @@ def verify_checks(github, collected, scenario):
     return github.checks(workspace, number, {"checks": scenario["required_checks"]})
 
 
-def verify_browser(collected, chain, supplied, worker):
-    from .browser_receipts import validate_worker_report
+def verify_browser(collected, chain, supplied, worker, capabilities):
+    from .browser_receipts import import_worker_capture, validate_worker_report
 
     require(
         isinstance(supplied, dict) and worker is not None,
@@ -718,11 +862,15 @@ def verify_browser(collected, chain, supplied, worker):
     report = supplied.get("report", {})
     binding = report.get("worker_binding", {})
     status = worker.status(identifier(binding.get("operation_id")))
+    receipt = receipt_summary(status)
     require(
-        status.get("state") == "exited"
-        and status.get("descendants_terminated") is True
-        and status.get("execution_identity") == binding.get("execution_identity"),
-        "Browser operation is not confirmed terminal on its original worker.",
+        receipt_passed(receipt)
+        and receipt["execution_identity"] == binding.get("execution_identity")
+        and receipt["run_id"] == collected["run_id"]
+        and receipt["source_digest"]
+        == receipt["export_digest"]
+        == chain["source_digest"],
+        "Browser operation did not pass on its original run, worker and unchanged source.",
     )
     workspace = collected["delivery"]["workspace"]
     image = collected["delivery"]["runtime"]["image_digest"]
@@ -734,10 +882,35 @@ def verify_browser(collected, chain, supplied, worker):
         "application_image": image,
         "browser_image": image,
     }
+    profiles = [
+        profile
+        for profile in capabilities.get("profiles", [])
+        if profile.get("profile_id") == "browser-ui"
+    ]
+    require(
+        len(profiles) == 1
+        and binding.get("profile_id") == "browser-ui"
+        and binding.get("profile_digest") == profiles[0].get("profile_digest")
+        and profiles[0].get("image") == image,
+        "Browser capture differs from its registered immutable browser profile.",
+    )
     require(
         binding.get("run_id") == collected["run_id"],
         "Browser capture belongs to another run.",
     )
+    authenticated_report, archive = worker.browser_result(binding["operation_id"])
+    require(
+        authenticated_report == report,
+        "Supplied browser report differs from the authenticated original export.",
+    )
+    with tempfile.TemporaryDirectory(prefix="factory-browser-") as temporary:
+        import_worker_capture(
+            authenticated_report,
+            archive,
+            binding=expected,
+            worker_binding=binding,
+            artifact_root=Path(temporary),
+        )
     return validate_worker_report(
         report,
         binding=expected,
@@ -861,7 +1034,11 @@ def collect(
         frames = []
         if "ui" in task.get("surfaces", []):
             frames = verify_browser(
-                observed, chain, (browser_evidence or {}).get(run_id), worker
+                observed,
+                chain,
+                (browser_evidence or {}).get(run_id),
+                worker,
+                capabilities,
             )
         record = {
             **observed,

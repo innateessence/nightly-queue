@@ -29,7 +29,7 @@ scenario JSON in the runner's operator-input volume:
   "base_branch": "main",
   "provider": "codex",
   "agent_version": "<actual pinned CLI version>",
-  "connection_id": "<selected connection UUID>",
+  "connection_id": 90,
   "configuration_revision": "<authenticated configuration SHA256>",
   "source_revision": "<deployed factory implementation Git SHA>",
   "repair_limit": 2,
@@ -51,6 +51,8 @@ Use actual saved and provider identities. Do not reuse already implemented statu
 filter examples or documentation-only work. `source_revision` identifies the
 deployed factory implementation qualification; the task repository's inspected
 base and candidate identities are collected separately from each actual run.
+`connection_id` is the selected positive numeric credential ID from the native
+account contract. The collector checks its frozen version and each role's model.
 
 ```sh
 python -m vibearr_runner.factory_acceptance prepare \
