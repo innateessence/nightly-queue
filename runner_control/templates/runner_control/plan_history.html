@@ -6,6 +6,7 @@
 <section class="panel list-panel" aria-label="Run history">
   <form method="get" class="queue-filters"><label class="sr-only" for="run-state">Filter attempts by state</label><select id="run-state" name="state"><option value="">All attempts</option>{% for value, label in states %}<option value="{{ value }}"{% if value == state_filter %} selected{% endif %}>{{ label }}</option>{% endfor %}</select><button class="button-filter" type="submit">{% include "_icon.html" with name="filter" %}Filter</button></form>
   {% if runs %}
+  <div class="list-toolbar"><p class="field-hint">Scroll the table horizontally to see review and delivery outcomes on smaller screens.</p></div>
   <div class="table-scroll" tabindex="0" role="region" aria-label="Run history table">
     <table class="data-table history-table">
       <thead><tr><th scope="col">State</th><th scope="col" class="title-column">Work item / attempt</th><th scope="col">Outcome</th><th scope="col">Validation</th><th scope="col">Started</th><th scope="col">Runner</th></tr></thead>
