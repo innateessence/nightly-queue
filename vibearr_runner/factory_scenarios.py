@@ -173,7 +173,45 @@ def authenticate_checkpoint(
     return digest(value)
 
 
-def validate_validation_binding(intent, validation, receipts):
+def verify_operation_manifest(worker, manifest, *, status=None):
+    operation = identifier(manifest.get("operation_id"))
+    status = worker.status(operation) if status is None else status
+    receipt = receipt_summary(status)
+    protected = worker.termination_receipt(operation)
+    require(
+        type(protected.get("schema_version")) is int
+        and protected["schema_version"] == 1
+        and protected.get("operation_id") == operation
+        and protected.get("run_id") == manifest["run_id"] == receipt["run_id"]
+        and protected.get("instance_id") == receipt["execution_identity"]["instance_id"]
+        and protected.get("state") == "exited"
+        and protected.get("resources_terminated") is True
+        and protected.get("manifest_digest") == digest(manifest),
+        "Scenario manifest differs from the authenticated original worker manifest.",
+    )
+    sealed = digest(
+        {
+            "manifest": manifest,
+            "result": status["result"],
+            "boot": status["worker_boot"],
+        }
+    )
+    require(
+        protected.get("receipt_digest") == status.get("receipt_digest") == sealed,
+        "Scenario sealed worker receipt differs from its original manifest, result or boot.",
+    )
+
+
+def authenticate_manifest(worker, manifest, receipt):
+    status = worker.status(identifier(manifest.get("operation_id")))
+    require(
+        receipt_summary(status) == receipt,
+        "Scenario manifest result differs from protected termination.",
+    )
+    verify_operation_manifest(worker, manifest, status=status)
+
+
+def validate_validation_binding(intent, validation, receipts, *, worker=None):
     require(
         isinstance(intent, dict) and intent.get("kind") == "validation",
         "Scenario validation lacks its original immutable intent.",
@@ -204,6 +242,8 @@ def validate_validation_binding(intent, validation, receipts):
             == validation["source_digest"],
             "Scenario validation receipt differs from original source or operation.",
         )
+        if worker is not None:
+            authenticate_manifest(worker, manifest, receipt)
 
 
 class History:
@@ -372,7 +412,7 @@ class History:
 
     def validation(self, value):
         intent = self.intents.get(value["intent_id"])
-        validate_validation_binding(intent, value, self.receipts)
+        validate_validation_binding(intent, value, self.receipts, worker=self.worker)
         require(
             intent["context_id"] == self.context["id"]
             and intent["context_digest"] == self.context["digest"]
@@ -525,6 +565,7 @@ class History:
                 receipt is not None,
                 "Original scenario operation termination remains unknown.",
             )
+            authenticate_manifest(self.worker, session["manifest"], receipt)
             require(
                 receipt["execution_identity"] == session["execution_identity"],
                 "Scenario worker identity changed.",
