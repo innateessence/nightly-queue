@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from .runner_recovery import recover
+from .runner_recovery import archive_connections, recover
 
 
 class RunnerRestoreRootGateTests(unittest.TestCase):
@@ -92,6 +92,19 @@ class RunnerConnectionRestoreTests(unittest.TestCase):
         self.assertEqual(
             (self.connections / "second").read_text(), "preserve separately"
         )
+
+    def test_racing_empty_archive_is_never_overwritten(self):
+        def race(source, target):
+            self.archived.mkdir(mode=0o700)
+            archive_connections(source, target)
+
+        with patch(
+            "deploy.docker.runner_recovery.archive_connections", side_effect=race
+        ):
+            with self.assertRaises(FileExistsError):
+                self.restore()
+        self.assertTrue(self.ledger.is_file())
+        self.assertEqual(list(self.archived.iterdir()), [])
 
     def test_linked_connection_directory_is_rejected(self):
         self.connections.rename(self.state / "other")
