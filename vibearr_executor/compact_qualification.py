@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from .artifacts import pack
 from .client import Client, ExecutorRejected
-from .compact_protocol import PREFIX
+from .compact_protocol import PREFIX, qualification_targets as service_targets
 from .contracts import Conflict, Rejected, canonical, digest
 from .runtime import durable
 from .slot_processes import task_states
@@ -52,7 +52,7 @@ for name in ['/logins','/control','/var/lib/vibearr','/run/vibearr/runner','/run
         pass
     else:
         raise AssertionError('trusted state exposed: ' + name)
-for host,port in [('127.0.0.1',8791),('runner',8792),('runner',3128),('runner',3130),('app',8000),('postgres',5432),('169.254.169.254',80),('1.1.1.1',443)]:
+for host,port in [('127.0.0.1',8791),('__RUNNER__',8792),('__RUNNER__',3128),('__RUNNER__',3130),('__APP__',8000),('__POSTGRES__',5432),('169.254.169.254',80),('1.1.1.1',443)]:
     try:
         socket.create_connection((host,port),timeout=0.5).close()
     except OSError:
@@ -173,7 +173,18 @@ def lost_start(runtime, operation):
         raise Rejected("A retry after a lost response changed the running operation.")
 
 
-def qualify(runtime):
+def qualification_targets(value):
+    value = service_targets(value)
+    if value["runner"] not in {
+        entry[4][0] for entry in socket.getaddrinfo("runner", 8792, socket.AF_INET)
+    }:
+        raise Rejected(
+            "Qualification runner address differs from the live trusted service."
+        )
+    return dict(value)
+
+
+def qualify(runtime, targets=None):
     if not runtime.qualification_lock.acquire(blocking=False):
         raise Conflict("Another qualification owns the worker.")
     report_path = runtime.directory / "compact-qualification.json"
@@ -181,12 +192,13 @@ def qualify(runtime):
     try:
         if runtime.active or runtime.fenced:
             raise Conflict("Stop or reconcile active work before qualification.")
+        targets = qualification_targets(targets)
         identity = runtime.execution_identity()
         if identity.get("runtime") != RUNTIME:
             raise Rejected(
                 "Compact qualification requires the separate compact worker."
             )
-        with socket.create_connection(("runner", 8792), timeout=5):
+        with socket.create_connection((targets["runner"], 8792), timeout=5):
             pass
         control = Client("http://127.0.0.1:8791", runtime.control_token).capabilities()
         if control.get("worker_boot") != runtime.boot:
@@ -202,8 +214,11 @@ def qualify(runtime):
         runtime.qualifying = True
         owns_operation = True
         receipts = []
+        code = PROBE
+        for name, address in targets.items():
+            code = code.replace("__" + name.upper() + "__", address)
         for _attempt in range(2):
-            receipts.append(run_probe(runtime, PROBE))
+            receipts.append(run_probe(runtime, code))
             receipts.append(run_probe(runtime, DATABASE_PROBE, database=True))
         operation = prepare(runtime, "wait", seconds=3)
         runtime.start(operation)
@@ -309,6 +324,7 @@ def qualify(runtime):
                 for value in receipts
             ],
             "restart_receipt": restart_receipt,
+            "targets": targets,
             "resources": {
                 "memory_max": Path("/sys/fs/cgroup/memory.max").read_text().strip(),
                 "memory_peak": Path("/sys/fs/cgroup/memory.peak").read_text().strip(),
