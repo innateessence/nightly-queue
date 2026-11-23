@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 import fcntl
 import json
+import os
 from pathlib import Path
+import stat
 import tempfile
 import threading
 import unittest
@@ -13,7 +15,9 @@ from vibearr_runner.compact_connections import (
     CompactConnections,
     ConnectionServer,
     MediationClient,
+    prepare_state_directory,
 )
+from vibearr_runner.journal import Journal, JournalError
 
 from .compact_connections import WorkerConnections
 from .contracts import Conflict, Rejected, canonical, digest
@@ -33,6 +37,52 @@ def login_files(account="selected-account", access="selected-access-token"):
             },
         }
     }
+
+
+class RunnerStateBootstrapTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+
+    def test_existing_public_directory_becomes_private_for_controller_journal(self):
+        state = self.root / "state"
+        state.mkdir(mode=0o755)
+        state.chmod(0o755)
+        with self.assertRaises(JournalError):
+            Journal(state)
+        prepare_state_directory(state)
+        self.assertEqual(stat.S_IMODE(state.stat().st_mode), 0o700)
+        self.assertEqual(state.stat().st_uid, os.getuid())
+        with Journal(state) as journal:
+            self.assertIsNone(journal.load()["operation"])
+
+    def test_state_symlink_is_rejected_without_changing_target(self):
+        target = self.root / "target"
+        target.mkdir()
+        target.chmod(0o755)
+        state = self.root / "state"
+        state.symlink_to(target, target_is_directory=True)
+        with self.assertRaises(Rejected):
+            prepare_state_directory(state)
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o755)
+
+    def test_state_symlink_parent_is_rejected_without_creating_child(self):
+        target = self.root / "target"
+        target.mkdir()
+        parent = self.root / "parent"
+        parent.symlink_to(target, target_is_directory=True)
+        with self.assertRaises(Rejected):
+            prepare_state_directory(parent / "state")
+        self.assertFalse((target / "state").exists())
+
+    def test_state_regular_file_is_rejected_without_changing_mode(self):
+        state = self.root / "state"
+        state.write_text("existing")
+        state.chmod(0o644)
+        with self.assertRaises(OSError):
+            prepare_state_directory(state)
+        self.assertEqual(stat.S_IMODE(state.stat().st_mode), 0o644)
 
 
 class Worker:
@@ -618,7 +668,7 @@ class WorkerConnectionTests(ConnectionTests):
             "os.environ",
             {
                 "VIBEARR_OLLAMA_URL": "http://172.20.0.2:3130/v1",
-                "VIBEARR_EGRESS_GRANT": "bounded-operation-grant",
+                "VIBEARR_EGRESS_GRANT": "bounded-operation-grant-0123456789",
             },
             clear=True,
         ):
@@ -629,7 +679,7 @@ class WorkerConnectionTests(ConnectionTests):
             options,
             {
                 "baseURL": "http://172.20.0.2:3130/v1",
-                "headers": {"X-Vibearr-Grant": "bounded-operation-grant"},
+                "headers": {"X-Vibearr-Grant": "bounded-operation-grant-0123456789"},
             },
         )
         self.assertNotIn("apiKey", json.dumps(configuration))
