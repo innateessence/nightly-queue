@@ -180,6 +180,8 @@ if [[ $mode == full || $mode == candidate ]]; then
   compose exec -T worker python -I -m vibearr_executor.compact_browser_qualify --commit "${binding[0]}" --tree "${binding[1]}" --source-digest "${binding[2]}" < "$scratch/source.tar" > "$output/candidate-browser.log" 2>&1 || browser_result=$?
   docker cp "$container:/control/candidate-browser" "$output/candidate-browser" > "$output/candidate-browser-export.log" 2>&1
   ((browser_result == 0)) || exit "$browser_result"
+  compose exec -T worker python -I -m vibearr_executor.compact_proof_export > "$output/proof-export.log" 2>&1
+  docker cp "$container:/control/engineering-proofs" "$output/engineering-proofs" > "$output/proof-copy.log" 2>&1
 fi
 if [[ $mode == full || $mode == operations ]]; then
   if [[ -n $commit ]]; then
