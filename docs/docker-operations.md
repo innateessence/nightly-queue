@@ -92,6 +92,8 @@ Drain active work before qualification. Start a fixed non-model witness, interru
 the worker container, then qualify its new boot without making model calls:
 
 ```sh
+export VIBEARR_RUNNER_IMAGE_ID=$(docker inspect "$(docker compose ps -q runner)" --format '{{.Image}}')
+export VIBEARR_WORKER_IMAGE_ID=$(docker inspect "$(docker compose ps -q worker)" --format '{{.Image}}')
 docker compose exec -T worker python -I -m vibearr_executor.compact_worker restart-witness
 docker compose kill -s SIGKILL worker
 docker compose up -d --wait worker runner
