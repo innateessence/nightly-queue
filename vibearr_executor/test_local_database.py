@@ -73,7 +73,9 @@ class LocalDatabaseTests(unittest.TestCase):
 
     def test_reset_cleans_stale_state_even_when_started_is_false(self):
         (self.root / "old-phase").write_text("old")
-        self.database.reset("operation")
+        with patch.object(self.database, "owned_processes", return_value=[]) as inspect:
+            self.database.reset("operation")
+        inspect.assert_called()
         self.assertEqual(list(self.root.iterdir()), [])
 
     def test_invalid_pid_state_fences_and_preserves_storage(self):
