@@ -2,6 +2,11 @@ import json
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.template.loader import render_to_string
+from django.test import RequestFactory, TestCase
+
+from projects.forms import ProjectForm
+from projects.models import Project
 
 from .configuration import (
     configuration_document,
@@ -106,6 +111,18 @@ class FactoryConfigurationTests(ConfiguredProjectTestCase):
         self.assertNotIn('value="clear"', rendered)
         self.assertIn('{"enabled": false}', form["factory"].help_text)
 
+    def test_runner_field_help_is_escaped_and_bounded(self):
+        runner_form = ProjectRunnerSettingsForm(prefix="runner")
+        runner_form.fields["factory"].help_text = "<script>" + "a" * 1000
+        rendered = render_to_string(
+            "projects/_form.html",
+            {"form": ProjectForm(), "runner_form": runner_form},
+            request=RequestFactory().get("/projects/"),
+        )
+        self.assertIn("&lt;script&gt;", rendered)
+        self.assertNotIn("<script>", rendered)
+        self.assertNotIn("a" * 501, rendered)
+
     def test_other_override_sources_retain_clear_value(self):
         form = ProjectRunnerSettingsForm({"setup_commands_mode": "clear"})
         self.assertIn('value="clear"', str(form["setup_commands_mode"]))
@@ -204,3 +221,22 @@ class FactoryConfigurationTests(ConfiguredProjectTestCase):
         effective["implementation_backend"] = ""
         effective["implementation_model"] = ""
         self.assertFalse(effective_factory_configuration({}, effective)["enabled"])
+
+
+class FactoryConfigurationPageTests(TestCase):
+    def setUp(self):
+        self.project = Project.objects.create(
+            name="Factory settings", repository_url="https://github.com/example/factory"
+        )
+
+    def test_project_add_page_displays_factory_disable_hint(self):
+        response = self.client.get("/projects/")
+        self.assertContains(response, 'id="id_runner-factory_helptext"')
+        self.assertContains(response, "To disable factory execution for this project")
+        self.assertContains(response, "{&quot;enabled&quot;: false}")
+
+    def test_project_edit_page_displays_factory_disable_hint(self):
+        response = self.client.get(f"/projects/{self.project.pk}/edit/")
+        self.assertContains(response, 'id="id_runner-factory_helptext"')
+        self.assertContains(response, "To disable factory execution for this project")
+        self.assertContains(response, "{&quot;enabled&quot;: false}")
