@@ -126,7 +126,10 @@ def recover(identity, secret_root, state_root):
             ) from error
         marker = retain(private_file(secrets, "restore-required.json"))
         required = json.loads(os.read(marker, 65537))
-        if required != {"backup_id": identity, "new_runner_identity_required": True}:
+        if (
+            required != {"backup_id": identity, "new_runner_identity_required": True}
+            or required.get("new_runner_identity_required") is not True
+        ):
             raise ValueError("Select the exact pending runner restore marker.")
         history = retain(history_directory(state, "restore-history"))
         selected = retain(history_directory(history, identity))
