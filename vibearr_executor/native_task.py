@@ -10,7 +10,7 @@ from .integrated_profiles import VERSIONS
 from .managed_login import install_login
 
 
-def command(provider, model, home):
+def command(provider, model, home, *, factory_role=None):
     if provider == "codex":
         directory = home / ".codex"
         os.environ["CODEX_HOME"] = str(directory)
@@ -56,29 +56,9 @@ def command(provider, model, home):
         arguments.extend(["--enable", "code_mode_host", "-"])
         return arguments
     if provider == "claude":
-        os.environ.update(
-            CLAUDE_CONFIG_DIR=str(home / ".claude"),
-            DISABLE_AUTOUPDATER="1",
-            DISABLE_TELEMETRY="1",
-            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
-        )
-        return [
-            "/usr/local/bin/claude",
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--model",
-            model,
-            "--permission-mode",
-            "bypassPermissions",
-            "--setting-sources",
-            "user",
-            "--strict-mcp-config",
-            "--mcp-config",
-            '{"mcpServers":{}}',
-            "--disable-slash-commands",
-        ]
+        from .claude_task import command as claude_command
+
+        return claude_command(model, home, factory_role=factory_role)
     if provider != "opencode":
         raise ValueError("Unsupported coding agent.")
     relay = os.environ.get("VIBEARR_OLLAMA_URL", "http://127.0.0.1:3130/v1")
@@ -179,7 +159,7 @@ def main():
             VIBEARR_POSTGRES_USER="task",
             VIBEARR_POSTGRES_PASSWORD=database.password or "",
         )
-    arguments = command(provider, model, home)
+    arguments = command(provider, model, home, factory_role=context.get("factory_role"))
     process = subprocess.Popen(arguments, stdin=subprocess.PIPE)
     assert process.stdin is not None
     process.stdin.write(context["prompt"].encode())
