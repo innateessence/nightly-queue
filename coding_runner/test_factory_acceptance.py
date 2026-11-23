@@ -958,6 +958,10 @@ class WorkerConstructionTests(unittest.TestCase):
         with (
             patch.dict(os.environ, self.environment, clear=True),
             patch("vibearr_executor.client.socket.getaddrinfo", return_value=address),
+            patch(
+                "vibearr_executor.control_token.read_control_token",
+                return_value="y" * 64,
+            ) as read_token,
             patch.object(
                 Client,
                 "request",
@@ -965,7 +969,9 @@ class WorkerConstructionTests(unittest.TestCase):
             ),
         ):
             worker = factory.read_only_worker()
+        read_token.assert_called_once_with(self.token)
         self.assertIs(type(worker._client), Client)
+        self.assertEqual(worker._client.token, "y" * 64)
         self.assertEqual(worker._client.url, "http://worker:8791")
         self.assertEqual(worker._client.timeout, 15)
         for method in ("prepare", "start", "stop", "pause", "resume", "request"):
