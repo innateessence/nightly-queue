@@ -92,7 +92,7 @@ export_volume() {
   local volume=$1 destination=$2
   if ! docker volume inspect "$volume" >/dev/null 2>&1; then return; fi
   mkdir -p "$destination"
-  docker run --rm --network none --read-only --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges:true --user 0:0 --volume "$volume:/data:ro" --entrypoint tar "$VIBEARR_TOOLS_IMAGE" -C /data -cf - . | tar -xf - -C "$destination"
+  docker run --rm --network none --read-only --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges:true --user 0:0 --memory 128m --pids-limit 16 --cpus 1 --volume "$volume:/data:ro" --entrypoint tar "$VIBEARR_TOOLS_IMAGE" -C /data -cf - . | tar -xf - -C "$destination"
 }
 cleanup() {
   local result=$?
@@ -167,12 +167,12 @@ VIBEARR_WORKER_IMAGE_ID=$(docker image inspect "$VIBEARR_WORKER_IMAGE" --format 
 export VIBEARR_RUNNER_IMAGE_ID VIBEARR_WORKER_IMAGE_ID
 recipe=$scratch/source
 cd "$recipe"
-compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit > "$output/compose-audit.log"
-compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp:rw,nosuid,nodev,size=8m --entrypoint python "$VIBEARR_TOOLS_IMAGE" -c 'import os,sys,unittest; from pathlib import Path; Path("/tmp/compose.json").write_bytes(sys.stdin.buffer.read()); os.environ["VIBEARR_COMPOSE_CONFIG"]="/tmp/compose.json"; result=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromName("vibearr.test_compose")); sys.exit(not result.wasSuccessful())' > "$output/compose-tests.log" 2>&1
+compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit > "$output/compose-audit.log"
+compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=8m --entrypoint python "$VIBEARR_TOOLS_IMAGE" -c 'import os,sys,unittest; from pathlib import Path; Path("/tmp/compose.json").write_bytes(sys.stdin.buffer.read()); os.environ["VIBEARR_COMPOSE_CONFIG"]="/tmp/compose.json"; result=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromName("vibearr.test_compose")); sys.exit(not result.wasSuccessful())' > "$output/compose-tests.log" 2>&1
 compose up -d --wait > "$output/start.log" 2>&1
 mapfile -t ids < <(compose ps -q)
 ((${#ids[@]} == 4))
-docker inspect "${ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit --inspect > "$output/runtime-inspection.json"
+docker inspect "${ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit --inspect > "$output/runtime-inspection.json"
 docker stats --no-stream --no-trunc --format '{{json .}}' "${ids[@]}" > "$output/idle-resources.jsonl"
 observe_phase startup
 if [[ $mode == full || $mode == unit ]]; then
@@ -208,7 +208,7 @@ if [[ $mode == full || $mode == boundary || $mode == candidate || $mode == opera
   compose exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 runner python -I - < deploy/docker/controller_witness.py > "$output/controller-after.json" 2>&1
 fi
 if [[ $mode == full || $mode == candidate ]]; then
-  mapfile -t binding < <(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -c 'import json,sys; v=json.load(sys.stdin); print(v["commit_sha"]); print(v["tree_sha"]); print(v["source_digest"])' < "$output/source.json")
+  mapfile -t binding < <(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -c 'import json,sys; v=json.load(sys.stdin); print(v["commit_sha"]); print(v["tree_sha"]); print(v["source_digest"])' < "$output/source.json")
   candidate_result=0
   compose exec -T worker python -I -m vibearr_executor.integrated_validate --commit "${binding[0]}" --tree "${binding[1]}" --source-digest "${binding[2]}" < "$scratch/source.tar" > "$output/candidate.log" 2>&1 || candidate_result=$?
   container=$(compose ps -q worker)
@@ -228,7 +228,7 @@ if [[ $mode == full || $mode == operations ]]; then
     docker build --file deploy/docker/Browser.Dockerfile --tag "$VIBEARR_BROWSER_IMAGE" . > "$output/browser-build.log" 2>&1
     application_image=$(docker image inspect "$VIBEARR_APP_IMAGE" --format '{{.Id}}')
     browser_image=$(docker image inspect "$VIBEARR_BROWSER_IMAGE" --format '{{.Id}}')
-    VIBEARR_BROWSER_SOURCE_BINDING=$(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.browser_binding --application-image "$application_image" --browser-image "$browser_image" < "$output/source.json")
+    VIBEARR_BROWSER_SOURCE_BINDING=$(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.browser_binding --application-image "$application_image" --browser-image "$browser_image" < "$output/source.json")
     export VIBEARR_BROWSER_SOURCE_BINDING
   fi
   bash deploy/docker/operations.sh browser > "$output/browser.log" 2>&1
@@ -239,7 +239,7 @@ if [[ $mode == full || $mode == operations ]]; then
   observe_phase beforebackup
   compose stop app runner worker > "$output/quiesce.log" 2>&1
   bash deploy/docker/operations.sh backup --quiesced > "$output/backup.log" 2>&1
-  backup_id=$(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.records backup_id < "$output/backup.log")
+  backup_id=$(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.records backup_id < "$output/backup.log")
   docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 0:0 --memory 128m --pids-limit 16 --cpus 1 --volume "$VIBEARR_BACKUP_VOLUME:/backups:ro" --entrypoint python "$VIBEARR_TOOLS_IMAGE" -I -c 'import json,sys; from pathlib import Path; from uuid import UUID; value=sys.argv[1]; assert str(UUID(value)) == value; path=Path("/backups") / value / "manifest.json"; assert path.is_file() and not path.is_symlink() and path.stat().st_size <= 1048576; print(json.dumps(json.loads(path.read_bytes()),sort_keys=True))' "$backup_id" > "$output/backup-manifest.json"
   for action in restore-files restore-database restore-bootstrap; do
     COMPOSE_PROJECT_NAME=$restore_project VIBEARR_DATA_PROJECT=$restore_project VIBEARR_RUNNER_NAME=restored-check-runner bash deploy/docker/operations.sh "$action" "$backup_id" > "$output/$action.log" 2>&1
