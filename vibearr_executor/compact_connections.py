@@ -3,6 +3,7 @@
 from datetime import datetime
 import json
 import math
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -24,6 +25,7 @@ class WorkerConnections:
         self.client = client or MediationClient(origin, token)
         self.origin, self.now = origin, now
         self.runtime = None
+        self.return_lock = threading.RLock()
 
     def bind(self, runtime):
         self.runtime = runtime
@@ -185,6 +187,10 @@ class WorkerConnections:
         return result
 
     def finish(self, operation_id, home, record):
+        with self.return_lock:
+            return self._finish(operation_id, home, record)
+
+    def _finish(self, operation_id, home, record):
         path = self._path(operation_id)
         if not path.exists():
             return
@@ -224,6 +230,10 @@ class WorkerConnections:
         )
 
     def revoke(self, operation_id):
+        with self.return_lock:
+            return self._revoke(operation_id)
+
+    def _revoke(self, operation_id):
         if not self._path(operation_id).exists():
             return
         state = self._state(operation_id)

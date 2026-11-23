@@ -894,6 +894,59 @@ class WorkerConnectionTests(ConnectionTests):
         self.assertEqual(self.manager._login("codex", 1), self.files)
         self.assertTrue((self.root / "logins/execution-lease.json").exists())
 
+    def test_prelaunch_finish_serializes_concurrent_revocation(self):
+        operation_id = self.worker.scope["operation_id"]
+        self.connections.validate_secret(
+            operation_id, json.dumps(self.prepare()), self.record
+        )
+        self.record["task_launch_intent"] = False
+        returned, release, revoking = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+        errors = []
+        request = self.connections.client.request
+
+        def wait_return(path, data):
+            result = request(path, data)
+            returned.set()
+            if not release.wait(5):
+                raise RuntimeError("Return acknowledgment was not released.")
+            return result
+
+        def finish():
+            try:
+                self.connections.finish(operation_id, self.runtime.home, self.record)
+            except Exception as exc:
+                errors.append(exc)
+
+        def revoke():
+            revoking.set()
+            try:
+                self.connections.revoke(operation_id)
+            except Exception as exc:
+                errors.append(exc)
+
+        with patch.object(
+            self.connections.client, "request", side_effect=wait_return
+        ) as calls:
+            finishing = threading.Thread(target=finish)
+            finishing.start()
+            self.assertTrue(returned.wait(5))
+            revocation = threading.Thread(target=revoke)
+            revocation.start()
+            self.assertTrue(revoking.wait(5))
+            release.set()
+            finishing.join(5)
+            revocation.join(5)
+            self.assertFalse(finishing.is_alive())
+            self.assertFalse(revocation.is_alive())
+            self.assertEqual(calls.call_count, 1)
+        self.assertEqual(errors, [])
+        self.assertFalse(self.connections._path(operation_id).exists())
+        self.assertFalse((self.root / "logins/execution-lease.json").exists())
+
 
 class ClaudeRefreshTests(unittest.TestCase):
     setUp = ConnectionTests.setUp

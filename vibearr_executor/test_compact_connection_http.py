@@ -146,6 +146,46 @@ class CompactConnectionHTTPTests(unittest.TestCase):
             )
         self.assertTrue((manager.login_root / "execution-lease.json").exists())
 
+    def test_actual_http_cancels_prelaunch_without_losing_selected_login(self):
+        client, manager, connections = self.stack()
+        operation = self.prepare(client).manifest["operation_id"]
+        preparing = threading.Event()
+
+        def blocked_preparation(_operation_id, _profile, _record):
+            preparing.set()
+            if not self.runtime.cancel.wait(5):
+                raise RuntimeError("Preparation did not receive cancellation.")
+            raise Rejected("Operation cancelled before task launch.")
+
+        with (
+            patch.object(
+                self.runtime, "prepare_phase", side_effect=blocked_preparation
+            ),
+            patch.object(self.runtime, "reset"),
+            patch("vibearr_executor.slots.terminate_children"),
+            patch("vibearr_executor.slots.subprocess.Popen") as launch,
+        ):
+            try:
+                self.assertEqual(client.start(operation)["state"], "running")
+                self.assertTrue(preparing.wait(5))
+                self.assertIs(
+                    self.runtime.record(operation)["task_launch_intent"], False
+                )
+                self.assertEqual(client.status(operation)["state"], "running")
+                stopped = client.stop(operation)
+                self.assertEqual(stopped["state"], "exited")
+                self.assertTrue(stopped["descendants_terminated"])
+                self.assertTrue(stopped["result"]["canceled"])
+                launch.assert_not_called()
+            finally:
+                self.runtime.cancel.set()
+                if self.runtime.thread is not None:
+                    self.runtime.thread.join(5)
+        self.assertEqual(manager._login("codex", 1), login_files())
+        self.assertFalse(connections._path(operation).exists())
+        self.assertFalse((manager.login_root / "execution-lease.json").exists())
+        self.assertFalse(self.runtime.fenced)
+
     def test_prepared_cancellation_uses_real_worker_stop_and_returns_original_login(
         self,
     ):
