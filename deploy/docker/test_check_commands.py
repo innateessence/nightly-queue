@@ -171,3 +171,31 @@ python() { if [[ $* == '-m vibearr_runner.verify' ]]; then mkdir permission-prob
             self.assertEqual((copied / "source-marker").read_text(), "same source")
             self.assertTrue((copied / "permission-probe").is_dir())
             self.assertFalse((source / "permission-probe").exists())
+
+    def test_backup_manifest_reader_has_only_read_override_on_one_private_mount(self):
+        text = Path(__file__).with_name("checks.sh").read_text()
+        line = next(
+            line
+            for line in text.splitlines()
+            if '> "$output/backup-manifest.json"' in line
+        )
+        arguments = shlex.split(line)
+        added = [
+            arguments[index + 1]
+            for index, value in enumerate(arguments)
+            if value == "--cap-add"
+        ]
+        mounts = [
+            arguments[index + 1]
+            for index, value in enumerate(arguments)
+            if value == "--volume"
+        ]
+        self.assertEqual(added, ["DAC_OVERRIDE"])
+        self.assertEqual(mounts, ["$VIBEARR_BACKUP_VOLUME:/backups:ro"])
+        self.assertEqual(arguments[arguments.index("--cap-drop") + 1], "ALL")
+        self.assertEqual(arguments[arguments.index("--network") + 1], "none")
+        self.assertIn("--read-only", arguments)
+        self.assertEqual(arguments[arguments.index("--user") + 1], "0:0")
+        self.assertEqual(arguments[arguments.index("--memory") + 1], "128m")
+        self.assertEqual(arguments[arguments.index("--pids-limit") + 1], "16")
+        self.assertEqual(arguments[arguments.index("--cpus") + 1], "1")
