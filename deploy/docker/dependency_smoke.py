@@ -2,12 +2,14 @@
 
 from datetime import datetime, timedelta, timezone
 import json
+from pathlib import Path
 import time
 from uuid import uuid4
 
 from vibearr_executor.artifacts import pack
 from vibearr_executor.integrated_validate import validation_connection
 from vibearr_executor.contracts import canonical, digest
+from vibearr_executor.runtime import durable
 from vibearr_executor.validation_profile import (
     PACKAGE_HOSTS,
     ValidationProfile,
@@ -66,21 +68,20 @@ def main():
         }
     )
     client.upload("context", context)
-    client.prepare(
-        {
-            "schema_version": 1,
-            "run_id": run_id,
-            "operation_id": operation,
-            "profile_id": fixed.profile_id,
-            "profile_digest": fixed.digest,
-            "source_digest": digest(source),
-            "context_digest": digest(context),
-            "phase": "validation",
-            "limits": fixed.data()["limits"],
-            "deadline": deadline,
-            "network_hosts": [],
-        }
-    )
+    manifest = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "operation_id": operation,
+        "profile_id": fixed.profile_id,
+        "profile_digest": fixed.digest,
+        "source_digest": digest(source),
+        "context_digest": digest(context),
+        "phase": "validation",
+        "limits": fixed.data()["limits"],
+        "deadline": deadline,
+        "network_hosts": [],
+    }
+    client.prepare(manifest)
     client.start(operation)
     while client.status(operation)["state"] == "running":
         if datetime.now(timezone.utc) >= datetime.fromisoformat(deadline):
@@ -96,6 +97,12 @@ def main():
             "Dependency validation smoke failed: "
             + client.logs(operation, 0, 8192).decode(errors="replace")
         )
+    proof = {
+        "build": {**result, "run_id": run_id},
+        "parent_profile": parent.data(),
+        "operation": {**observed, "manifest": manifest},
+    }
+    durable(Path("/control/dependency-smoke-proof.json"), canonical(proof))
     client.purge_dependencies(build_id, run_id=run_id)
     print(
         json.dumps(
