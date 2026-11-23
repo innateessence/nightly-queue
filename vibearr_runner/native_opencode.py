@@ -1,6 +1,7 @@
 """Strict event handling for the pinned phase-local OpenCode CLI."""
 
 import json
+import math
 import re
 
 from .native_codex import MAX_EVENTS, MAX_OUTPUT
@@ -20,6 +21,13 @@ def invalid_constant(_value):
     raise ValueError("Nonfinite JSON value.")
 
 
+def finite_number(value):
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("Nonfinite JSON number.")
+    return number
+
+
 def connection(secret):
     from vibearr_executor.ollama_relay import external_endpoint
 
@@ -27,7 +35,10 @@ def connection(secret):
         raise NativeSessionError("OpenCode connection exceeds its input limit.")
     try:
         value = json.loads(
-            secret, object_pairs_hook=unique_object, parse_constant=invalid_constant
+            secret,
+            object_pairs_hook=unique_object,
+            parse_constant=invalid_constant,
+            parse_float=finite_number,
         )
     except (ValueError, UnicodeError, RecursionError):
         raise NativeSessionError("OpenCode connection is malformed.") from None
@@ -69,7 +80,10 @@ def consume(parser, line):
         raise NativeSessionError("OpenCode event output exceeds its limit.")
     try:
         event = json.loads(
-            line, object_pairs_hook=unique_object, parse_constant=invalid_constant
+            line,
+            object_pairs_hook=unique_object,
+            parse_constant=invalid_constant,
+            parse_float=finite_number,
         )
     except (ValueError, UnicodeError, RecursionError):
         raise NativeSessionError("OpenCode emitted malformed JSON output.") from None

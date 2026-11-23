@@ -151,6 +151,14 @@ class OpenCodeFactoryEventTests(unittest.TestCase):
         with self.assertRaises(NativeSessionError):
             parser.feed(b'{"type":"step_finish"', final=True)
 
+    def test_exponent_overflow_cannot_complete_a_session(self):
+        parser = NativeEvents("opencode")
+        with self.assertRaises(NativeSessionError):
+            parser.feed(
+                b'{"type":"step_finish","sessionID":"ses_one","part":{"reason":"stop","tokens":{}},"cost":1e9999}\n'
+            )
+        self.assertFalse(parser.completed)
+
     def test_events_are_bounded_even_when_payloads_are_small(self):
         parser = NativeEvents("opencode")
         with self.assertRaises(NativeSessionError):
