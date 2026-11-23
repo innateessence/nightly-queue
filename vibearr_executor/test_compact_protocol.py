@@ -15,7 +15,7 @@ from .compact_protocol import PREFIX
 from .compact_worker import CompactHandler, CompactWorkerRuntime
 from .contracts import canonical, digest
 from .integrated import IntegratedHandler, IntegratedRuntime
-from .slot_http import SlotServer
+from .server import Server
 from .slots import SlotRuntime
 
 
@@ -66,7 +66,7 @@ class CompactWriteProtocolTests(unittest.TestCase):
 
     @contextmanager
     def endpoint(self, runtime, handler):
-        with SlotServer(("127.0.0.1", 0), handler) as server:
+        with Server(("127.0.0.1", 0), handler) as server:
             server.runtime, server.token = runtime, "a" * 48
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
