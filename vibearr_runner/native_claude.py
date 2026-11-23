@@ -56,10 +56,10 @@ def validate_usage(value):
 
 
 def consume_claude(parser, line):
-    if not line.strip():
-        return
     if len(line) > MAX_LINE:
         raise NativeSessionError("Native Claude event exceeds its byte limit.")
+    if not line.strip():
+        return
     if getattr(parser, "_claude_terminal", False):
         raise NativeSessionError(
             "Native Claude emitted output after its terminal result."

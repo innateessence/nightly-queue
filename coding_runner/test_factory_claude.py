@@ -21,7 +21,7 @@ from vibearr_runner.native_conformance import (
     FactoryNativeAdapter,
     parse_role_result,
 )
-from vibearr_runner.native_codex import MAX_EVENTS, MAX_OUTPUT
+from vibearr_runner.native_codex import MAX_EVENTS, MAX_LINE, MAX_OUTPUT
 from vibearr_runner.native_sessions import NativeSessionError
 from vibearr_runner.policy import default_execution_policy
 
@@ -247,6 +247,10 @@ class ClaudeFactoryEventTests(unittest.TestCase):
     def test_oversized_output_is_rejected(self):
         with self.assertRaises(NativeSessionError):
             NativeEvents("claude").feed(b"x" * (MAX_OUTPUT + 1), final=True)
+
+    def test_whitespace_line_cannot_bypass_the_event_byte_limit(self):
+        with self.assertRaises(NativeSessionError):
+            NativeEvents("claude").feed(b" " * (MAX_LINE + 1) + b"\n", final=True)
 
     def test_event_limit_includes_the_session_started_event(self):
         parser = NativeEvents("claude")
