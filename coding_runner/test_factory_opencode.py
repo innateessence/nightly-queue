@@ -1,3 +1,4 @@
+import importlib.util
 import hashlib
 import json
 import os
@@ -7,11 +8,15 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from vibearr_executor.artifacts import pack, result_manifest
 
-from vibearr_executor.native_task import command
-from vibearr_runner.native_cli import NativeCLIAdapter, NativeEvents
 from vibearr_runner.native_sessions import NativeSessionError
+
+
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor.artifacts import pack, result_manifest
+    from vibearr_executor.native_task import command
+    from vibearr_runner.native_cli import NativeCLIAdapter, NativeEvents
 
 
 def stream(*events):
@@ -22,6 +27,9 @@ def event(kind, part=None, session="ses_factory"):
     return {"type": kind, "sessionID": session, "part": part or {}}
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class OpenCodeFactoryEventTests(unittest.TestCase):
     def test_complete_role_text_is_separate_from_display_preview(self):
         payload = json.dumps({"summary": "a" * 6000})
@@ -175,6 +183,9 @@ class OpenCodeFactoryEventTests(unittest.TestCase):
             )
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class OpenCodeFactoryOutcomeTests(unittest.TestCase):
     def setUp(self):
         self.source = pack({"source.txt": (0o644, b"original")})
@@ -230,6 +241,9 @@ class OpenCodeFactoryOutcomeTests(unittest.TestCase):
             self.adapter.outcome(self.session, self.source)
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class OpenCodeFactoryConfigurationTests(unittest.TestCase):
     def prepare(self, directory, role=None):
         if role:
@@ -423,6 +437,9 @@ class OpenCodeFactoryConfigurationTests(unittest.TestCase):
                 command("opencode", model, Path(directory))
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class OpenCodeFactoryConnectionTests(unittest.TestCase):
     def test_connection_cannot_override_the_selected_model(self):
         adapter = NativeCLIAdapter(None, "opencode")
