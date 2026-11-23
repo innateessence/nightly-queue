@@ -7,6 +7,18 @@ authenticated worker status. It never starts a controller, provider session,
 browser or service, publishes an issue, merges a PR, enables auto-merge, closes an
 issue, or changes repository rules.
 
+Run the observer as the controller's UID `10001`, including checkpoint capture,
+so its private journal and `/proc` process environment can be inspected:
+
+```sh
+docker compose exec --user 10001:10001 runner \
+  python -m vibearr_runner.factory_acceptance --help
+```
+
+The queue token is read from the configured private credential file. Worker reads
+use the configured worker URL and validated control-token file directly; observer
+construction needs no controller mediation environment or manifest directory.
+
 The implementation and synthetic unit tests are harness evidence. Actual paid
 provider execution, four-container qualification, failure scenarios and two human
 merges remain release prerequisites. No live acceptance was performed by adding
@@ -169,8 +181,9 @@ private state, and immutable case identities:
 ```
 
 Use the same identity fields for every case. Checkpoints are objects returned by
-`factory_scenarios.capture_checkpoint(journal_path, worker=authenticated_client,
-operation_id=acceptance_operation_id)`, running inside the trusted runner. The
+`factory_scenarios.capture_checkpoint(journal_path, worker=read_only_worker(),
+operation_id=acceptance_operation_id)`, using `read_only_worker` from
+`vibearr_runner.factory_acceptance` inside the trusted runner as UID `10001`. The
 finite producer reads the owned private journal, actual controller process and
 worker statuses; it acquires no controller lock and starts no work. Save its JSON
 privately. Retry capture if the controller changes its journal during the read.

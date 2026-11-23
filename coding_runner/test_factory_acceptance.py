@@ -4,7 +4,9 @@ from datetime import timedelta
 from importlib.util import find_spec
 import io
 import json
+import os
 from pathlib import Path
+import socket
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -931,6 +933,57 @@ class HumanMergeTests(unittest.TestCase):
             factory.observe_human_merge(
                 SimpleNamespace(pull=lambda *_: self.pull), self.collected
             )
+
+
+@unittest.skipUnless(SDK_AVAILABLE, "Executor SDK is required for worker construction.")
+class WorkerConstructionTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.token = Path(temporary.name) / "control-token"
+        self.token.write_text("x" * 64)
+        self.token.chmod(0o600)
+        self.environment = {
+            "VIBEARR_RUNTIME_PROTOCOL": "compact-worker-v1",
+            "VIBEARR_EXECUTOR_URL": "http://worker:8791",
+            "VIBEARR_EXECUTOR_TOKEN_FILE": str(self.token),
+            "VIBEARR_MEDIATION_TOKEN_FILE": "/run/vibearr/worker/mediation-token",
+            "VIBEARR_MEDIATION_CONTROLLER_TOKEN_FILE": "/var/lib/vibearr/mediation-controller-token",
+        }
+
+    def test_compose_environment_constructs_only_a_base_read_worker(self):
+        from vibearr_executor.client import Client
+
+        address = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("172.20.0.3", 8791))]
+        with (
+            patch.dict(os.environ, self.environment, clear=True),
+            patch("vibearr_executor.client.socket.getaddrinfo", return_value=address),
+            patch.object(
+                Client,
+                "request",
+                side_effect=AssertionError("Constructor sent a request"),
+            ),
+        ):
+            worker = factory.read_only_worker()
+        self.assertIs(type(worker._client), Client)
+        self.assertEqual(worker._client.url, "http://worker:8791")
+        self.assertEqual(worker._client.timeout, 15)
+        for method in ("prepare", "start", "stop", "pause", "resume", "request"):
+            self.assertFalse(hasattr(worker, method))
+
+    def test_worker_construction_preserves_control_token_permission_checks(self):
+        from vibearr_executor.contracts import Rejected
+
+        self.token.chmod(0o644)
+        with patch.dict(os.environ, self.environment, clear=True):
+            with self.assertRaisesRegex(Rejected, "ownership, mode or mount"):
+                factory.read_only_worker()
+
+    def test_worker_construction_requires_the_registered_compact_runtime(self):
+        self.environment["VIBEARR_RUNTIME_PROTOCOL"] = "integrated-runner-v1"
+        with patch.dict(os.environ, self.environment, clear=True):
+            with self.assertRaisesRegex(ValueError, "registered compact worker"):
+                factory.read_only_worker()
 
 
 @unittest.skipUnless(
