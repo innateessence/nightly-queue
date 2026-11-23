@@ -31,9 +31,10 @@ environment=(-e "VIBEARR_POSTGRES_DB=${facts[1]}" -e "VIBEARR_POSTGRES_USER=${fa
 case "$action" in
   backup)
     [[ $identity == --quiesced ]] || { echo 'Stop app, runner and worker, then supply backup --quiesced.' >&2; exit 2; }
+    running=$(docker compose ps --status running --services)
     while IFS= read -r service; do
       [[ $service == postgres || -z $service ]] || { echo 'Stop all app, runner and worker state writers before backup.' >&2; exit 1; }
-    done < <(docker compose ps --status running --services)
+    done <<< "$running"
     docker volume create "$backup_volume" >/dev/null
     docker run "${limits[@]}" --network none --volume "$backup_volume:/backups" --entrypoint python3.12 "$backup_image" -I -c 'import os; os.chmod("/backups",0o700)'
     mounts=(--volume "$backup_volume:/var/lib/vibearr-backups")
@@ -44,7 +45,8 @@ case "$action" in
     ;;
   restore-files)
     [[ $identity =~ ^[a-f0-9-]{36}$ ]] || exit 2
-    [[ -z $(docker compose ps -aq) ]] || { echo 'Restore file targets must be a new deployment without containers.' >&2; exit 1; }
+    existing=$(docker compose ps -aq)
+    [[ -z $existing ]] || { echo 'Restore file targets must be a new deployment without containers.' >&2; exit 1; }
     docker volume inspect "$source_volume" >/dev/null
     mounts=(--volume "$source_volume:/backup-source:ro")
     for index in "${!volumes[@]}"; do
@@ -62,7 +64,8 @@ case "$action" in
     ;;
   restore-bootstrap)
     [[ $identity =~ ^[a-f0-9-]{36}$ ]] || exit 2
-    [[ -z $(docker compose ps -q worker) ]] || { echo 'Retire restored worker authority before starting its container.' >&2; exit 1; }
+    existing=$(docker compose ps -q worker)
+    [[ -z $existing ]] || { echo 'Retire restored worker authority before starting its container.' >&2; exit 1; }
     docker run "${limits[@]}" --network none --volume "${facts[12]}:/restore/worker-secrets" --volume "${facts[13]}:/restore/worker-control" --entrypoint python3.12 "$backup_image" -I -m deploy.docker.worker_recovery "$identity"
     docker run --rm --network "${facts[3]}" --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10001 --memory 512m --pids-limit 64 --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=64m "${environment[@]}" -e POSTGRES_HOST=postgres --volume "${facts[7]}:/run/vibearr/application:ro" --volume "${facts[8]}:/run/vibearr/database:ro" --volume "${facts[9]}:/run/vibearr/runner" --volume "${facts[10]}:/var/lib/vibearr" --entrypoint python "${facts[4]}" -m deploy.docker.entrypoint python manage.py docker_bootstrap_runner "${facts[5]}" --restored-backup "$identity"
     ;;
