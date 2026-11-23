@@ -1,5 +1,6 @@
 """Claude's pinned stream and argv contracts, without provider requests."""
 
+import importlib.util
 import hashlib
 from datetime import datetime, timedelta, timezone
 import json
@@ -13,9 +14,6 @@ from uuid import uuid4
 
 from coding_runner.test_native_conformance import RecordedExecutor
 
-from vibearr_executor.claude_task import ALTERNATE_AUTH, READ_ONLY_ROLES
-from vibearr_executor.native_task import command
-from vibearr_runner.native_cli import NativeCLIAdapter, NativeEvents
 from vibearr_runner.native_conformance import (
     FACTORY_ROLES,
     FactoryNativeAdapter,
@@ -24,6 +22,13 @@ from vibearr_runner.native_conformance import (
 from vibearr_runner.native_codex import MAX_EVENTS, MAX_LINE, MAX_OUTPUT
 from vibearr_runner.native_sessions import NativeSessionError
 from vibearr_runner.policy import default_execution_policy
+
+
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor.claude_task import ALTERNATE_AUTH, READ_ONLY_ROLES
+    from vibearr_executor.native_task import command
+    from vibearr_runner.native_cli import NativeCLIAdapter, NativeEvents
 
 
 SESSION = "dcb7bcf8-6abc-49ba-9cc7-0c223bff2b75"
@@ -45,6 +50,9 @@ def transcript(*events):
     return b"\n".join(json.dumps(event).encode() for event in events) + b"\n"
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class ClaudeFactoryIntegrationTests(unittest.TestCase):
     def test_every_claude_role_uses_the_common_adapter_and_protected_outcome(self):
         for role in FACTORY_ROLES:
@@ -83,6 +91,9 @@ class ClaudeFactoryIntegrationTests(unittest.TestCase):
                 self.assertEqual(outcome["role_result"], {"verdict": "pass"})
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class ClaudeFactoryEventTests(unittest.TestCase):
     def test_common_factory_parser_consumes_the_complete_claude_result(self):
         payload = {"verdict": "pass", "findings": ["evidence " * 1000]}
@@ -327,6 +338,9 @@ class ClaudeFactoryEventTests(unittest.TestCase):
                 adapter.outcome(session, source)
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class ClaudeFactoryCommandTests(unittest.TestCase):
     def arguments(self, role=None, **environment):
         if role is not None:
