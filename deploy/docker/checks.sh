@@ -57,8 +57,10 @@ restored() { COMPOSE_PROJECT_NAME=$restore_project VIBEARR_DATA_PROJECT=$restore
 qualify_worker() {
   local orchestrate=${1:-compose}
   local targets
+  local selected_listing
   local selected_ids=()
-  mapfile -t selected_ids < <("$orchestrate" ps -q runner app postgres)
+  selected_listing=$("$orchestrate" ps -q runner app postgres) || return
+  mapfile -t selected_ids <<< "$selected_listing"
   targets=$(docker inspect "${selected_ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -I -c '
 import ipaddress,json,sys
 containers=json.load(sys.stdin)
@@ -78,13 +80,15 @@ for container in containers:
 if set(targets) != set(networks) or len(projects) != 1:
     raise ValueError("Qualification requires one complete selected Compose project")
 print(json.dumps(targets,sort_keys=True))
-')
+') || return
   "$orchestrate" exec -T -e "VIBEARR_QUALIFICATION_TARGETS=$targets" worker python -I -m vibearr_executor.compact_worker qualify
 }
 observe_phase() {
   local phase=$1
+  local phase_listing
   local phase_ids=()
-  mapfile -t phase_ids < <(docker ps -q --no-trunc --filter "label=com.docker.compose.project=$project" --filter status=running)
+  phase_listing=$(docker ps -q --no-trunc --filter "label=com.docker.compose.project=$project" --filter status=running) || return
+  mapfile -t phase_ids <<< "$phase_listing"
   ((${#phase_ids[@]} == 4)) || { echo "Expected four running services after $phase." >&2; return 1; }
   printf '%s\n' "${phase_ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -I -c 'import json,re,sys; ids=sys.stdin.read().splitlines(); assert len(set(ids)) == 4 and all(re.fullmatch("[a-f0-9]{64}", value) for value in ids); print(json.dumps({"phase":sys.argv[1],"containers":ids},sort_keys=True))' "$phase" >> "$output/phase-counts.jsonl"
 }
@@ -170,7 +174,8 @@ cd "$recipe"
 compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit > "$output/compose-audit.log"
 compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=8m --entrypoint python "$VIBEARR_TOOLS_IMAGE" -c 'import os,sys,unittest; from pathlib import Path; Path("/tmp/compose.json").write_bytes(sys.stdin.buffer.read()); os.environ["VIBEARR_COMPOSE_CONFIG"]="/tmp/compose.json"; result=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromName("vibearr.test_compose")); sys.exit(not result.wasSuccessful())' > "$output/compose-tests.log" 2>&1
 compose up -d --wait > "$output/start.log" 2>&1
-mapfile -t ids < <(compose ps -q)
+id_listing=$(compose ps -q) || exit $?
+mapfile -t ids <<< "$id_listing"
 ((${#ids[@]} == 4))
 docker inspect "${ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit --inspect > "$output/runtime-inspection.json"
 docker stats --no-stream --no-trunc --format '{{json .}}' "${ids[@]}" > "$output/idle-resources.jsonl"
@@ -208,7 +213,8 @@ if [[ $mode == full || $mode == boundary || $mode == candidate || $mode == opera
   compose exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 runner python -I - < deploy/docker/controller_witness.py > "$output/controller-after.json" 2>&1
 fi
 if [[ $mode == full || $mode == candidate ]]; then
-  mapfile -t binding < <(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -c 'import json,sys; v=json.load(sys.stdin); print(v["commit_sha"]); print(v["tree_sha"]); print(v["source_digest"])' < "$output/source.json")
+  binding_listing=$(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -c 'import json,sys; v=json.load(sys.stdin); print(v["commit_sha"]); print(v["tree_sha"]); print(v["source_digest"])' < "$output/source.json") || exit $?
+  mapfile -t binding <<< "$binding_listing"
   candidate_result=0
   compose exec -T worker python -I -m vibearr_executor.integrated_validate --commit "${binding[0]}" --tree "${binding[1]}" --source-digest "${binding[2]}" < "$scratch/source.tar" > "$output/candidate.log" 2>&1 || candidate_result=$?
   container=$(compose ps -q worker)
