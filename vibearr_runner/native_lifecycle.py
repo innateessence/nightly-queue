@@ -467,7 +467,7 @@ class NativeLifecycle:
                 "Native journal belongs to another claimed run."
             )
         if self.native.get("ownership_lost"):
-            self.resources.reconcile(self.run_id, self.executor, stop=True)
+            self.stop_resources()
             raise ReconciliationRequired(
                 "Native execution stopped after ownership loss; explicit reconciliation is required."
             )
@@ -1329,6 +1329,13 @@ class NativeLifecycle:
         )
         return "reporting_pending"
 
+    def stop_resources(self):
+        if self.native.get("factory"):
+            from .factory_recovery import FactoryRecovery
+
+            return FactoryRecovery(self, self.native["factory"]).stop()
+        return self.resources.reconcile(self.run_id, self.executor, stop=True)
+
     def terminate(self):
         from .native_contract import termination_record, intent_operations
         from .native_merge import NativeMerge
@@ -1342,7 +1349,7 @@ class NativeLifecycle:
             return
 
         ProcessTracker(self.journal, self.state).recover()
-        observations = self.resources.reconcile(self.run_id, self.executor, stop=True)
+        observations = self.stop_resources()
         expected = {
             operation
             for intent in self.native.get("intents", {}).values()
