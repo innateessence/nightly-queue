@@ -71,6 +71,13 @@ def verify_worker(identity):
         "instance_id": observed["instance_id"],
         "worker_boot": observed["worker_boot"],
         "qualified": observed["qualified"],
+        "image_digest": observed["image_digest"],
+        "binding_digest": observed["binding_digest"],
+        "qualification_digest": observed["qualification_digest"],
+        "retired_instance_id": (history / "instance").read_text().strip(),
+        "retired_worker_boot": json.loads(
+            (history / "compact-qualification.json").read_bytes()
+        )["worker_boot"],
     }
 
 

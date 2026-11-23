@@ -1,9 +1,12 @@
 """Export selected protected model-free receipts without private control material."""
 
 import json
+import os
 from pathlib import Path
 
 from .contracts import canonical
+from .client import Client
+from .control_token import read_control_token
 from .runtime import durable
 
 
@@ -33,11 +36,21 @@ def main():
     output = ROOT / "engineering-proofs"
     output.mkdir(mode=0o700, exist_ok=False)
     boundary = json.loads((ROOT / "compact-qualification.json").read_bytes())
+    token = read_control_token(Path(os.environ["VIBEARR_EXECUTOR_TOKEN_FILE"]))
+    capabilities = Client("http://127.0.0.1:8791", token).capabilities()
+    durable(output / "capabilities.json", canonical(capabilities))
+    durable(output / "worker-boundary.json", canonical(boundary))
     witness = json.loads((ROOT / "restart-witness.json").read_bytes())
     restart = operation(witness["operation_id"])
     durable(
         output / "worker-restart.json",
-        canonical({"operation": restart, "restart_receipt": restart["receipt_digest"]}),
+        canonical(
+            {
+                "operation": restart,
+                "restart_receipt": restart["receipt_digest"],
+                "boundary": boundary,
+            }
+        ),
     )
     records = [operation(value["operation_id"]) for value in boundary["receipts"]]
     oom = [value for value in records if value["result"]["exit_code"] == -9]
