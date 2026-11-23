@@ -473,6 +473,28 @@ class FactorySpecSessionTests(unittest.TestCase):
         self.assertEqual(self.executor.started, [identity])
         self.assertEqual(self.queue.finishes, [])
 
+    def test_prepared_merge_mode_role_cannot_start_after_restart(self):
+        self.state["run"]["run"]["configuration_snapshot"]["execution_policy"][
+            "delivery_mode"
+        ] = "merge"
+        self.step()
+        engine = self.engine()
+        engine.require_human_dispatch = (
+            lambda: None
+        )  # Emulate preparation by the prior release.
+        intent = engine.intent
+
+        def saved_intent(payload, key):
+            intent(payload, key)
+            raise ExecutorUnavailable("Fixture crashed after intent acknowledgement.")
+
+        engine.intent = saved_intent
+        with self.assertRaises(ReconciliationRequired):
+            engine.step(self.state)
+        self.advance(lambda: bool(self.queue.finishes))
+        self.assertEqual(self.executor.started, [])
+        self.assertIn("human must merge", self.queue.finishes[-1]["error_summary"])
+
 
 class FactoryRoleContractTests(unittest.TestCase):
     def test_specification_can_add_but_not_rewrite_accepted_criteria(self):

@@ -267,6 +267,8 @@ def validate_context(value):
     }
     if isinstance(value, dict) and "factory" in value:
         expected.add("factory")
+        if "factory_generation" in value:
+            expected.add("factory_generation")
     fields(value, expected)
     if (
         type(value["schema_version"]) is not int
@@ -312,6 +314,8 @@ def validate_context(value):
         from .factory_roles import validate_context as validate_factory_context
 
         validate_factory_context(value["factory"], value["runtime_binding_digest"])
+    if "factory_generation" in value:
+        validate_factory_generation(value["factory_generation"])
     return copied(value, 4 * 1024 * 1024)
 
 
@@ -329,6 +333,7 @@ def context_document(
     acceptance_criteria,
     fetched_at=None,
     factory=None,
+    factory_generation=None,
 ):
     return validate_context(
         {
@@ -349,8 +354,43 @@ def context_document(
             "fetched_at": fetched_at or datetime.now(timezone.utc).isoformat(),
             "acceptance_criteria": acceptance_criteria,
             **({"factory": factory} if factory is not None else {}),
+            **(
+                {"factory_generation": factory_generation}
+                if factory_generation is not None
+                else {}
+            ),
         }
     )
+
+
+def validate_factory_generation(value):
+    fields(
+        value,
+        {
+            "previous_context_id",
+            "previous_context_digest",
+            "previous_workspace_id",
+            "attempt",
+            "old_base",
+            "new_base",
+            "reason",
+        },
+    )
+    identifier(value["previous_context_id"])
+    identifier(value["previous_workspace_id"])
+    sha(value["previous_context_digest"])
+    for key in ("old_base", "new_base"):
+        sha(value[key], git=True)
+    if (
+        type(value["attempt"]) is not int
+        or not 1 <= value["attempt"] <= 2
+        or value["reason"] != "base_update"
+        or value["old_base"] == value["new_base"]
+    ):
+        raise NativeContractError(
+            "Factory base refresh requires a bounded new base generation."
+        )
+    return value
 
 
 @checked

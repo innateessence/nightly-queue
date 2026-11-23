@@ -409,6 +409,12 @@ def validate_context_binding(run, value, base_commit, resolved_base_branch):
                 raise RunConflict(
                     "An active native attempt cannot rewrite frozen instructions/policy."
                 )
+        if factory_enabled:
+            from .factory_native import generation_binding
+
+            generation_binding(run, document, previous)
+    elif "factory_generation" in document:
+        raise RunConflict("Initial factory context cannot claim a prior generation.")
     if not run.item.base_branch:
         QueueItem.objects.filter(pk=run.item_id, base_branch="").update(
             base_branch=resolved_base_branch
@@ -945,7 +951,8 @@ def validate_workspace_binding(run, value):
     if value["export_digest"] != result.payload["receipt"]["export_digest"]:
         raise RunConflict("Native workspace differs from the verified agent export.")
     check_workspace(run, value["workspace"], ctx)
-    if value["attempt"]:
+    generation_attempt = ctx.document.get("factory_generation", {}).get("attempt", 0)
+    if value["attempt"] != generation_attempt:
         previous = workspace_fact(run, intent["data"]["workspace_id"], ctx).payload
         if (
             value["workspace"]["base_revision"]

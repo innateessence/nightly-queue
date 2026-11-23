@@ -9,7 +9,7 @@ from django.test import TestCase, override_settings
 
 from coding_runner.test_factory_spec_sessions import BASE_ROLES, RoleExecutor
 from credentials.test_models import TEST_KEY
-from vibearr_executor.artifacts import digest
+from vibearr_executor.artifacts import digest, pack
 from vibearr_runner import native_contract as contract
 from vibearr_runner.factory_roles import freeze_context
 from vibearr_runner.native_codex import CODEX_VERSION
@@ -26,8 +26,7 @@ from .plan_services import save_context, save_plan
 from .services import RunConflict, finish_run
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
-class FactoryNativeTests(native_fixture.NativeProtocolMixin, TestCase):
+class FactoryNativeFixture(native_fixture.NativeProtocolMixin):
     def setUp(self):
         super().setUp()
         self.executor = RoleExecutor(self.profile)
@@ -98,17 +97,32 @@ class FactoryNativeTests(native_fixture.NativeProtocolMixin, TestCase):
         )
 
     def save_context(self, document=None):
+        document = document or self.context_document()
         self.context = save_context(
             runner=self.runner,
             run_id=self.run.pk,
             claim_token=self.claim,
             operation_id=uuid4(),
-            document=document or self.context_document(),
-            base_commit="c" * 40,
-            resolved_base_branch="main",
-            reason="",
+            document=document,
+            base_commit=document["repository"]["base_revision"],
+            resolved_base_branch=document["repository"]["base_branch"],
+            reason="Refresh the remote base" if self.run.contexts.exists() else "",
         )
         return self.context
+
+    def common(self):
+        return {
+            "context_id": str(self.context.pk),
+            "context_digest": self.context.digest,
+            "policy_digest": self.run.configuration_snapshot["policy_digest"],
+            "attempt": self.context.document.get("factory_generation", {}).get(
+                "attempt", 0
+            ),
+        }
+
+    def complete_agent(self):
+        if not hasattr(self, "workspace_entry"):
+            super().complete_agent()
 
     def role_intent(self, role="intake", *, specification=None, workspace=None):
         profile = self.executor.role_profiles[role]
@@ -121,7 +135,7 @@ class FactoryNativeTests(native_fixture.NativeProtocolMixin, TestCase):
             "source_digest": (
                 workspace.payload["source_digest"]
                 if workspace
-                else digest(self.original)
+                else self.context.document["source_digest"]
             ),
             "context_digest": "1" * 64,
             "phase": "agent",
@@ -142,7 +156,7 @@ class FactoryNativeTests(native_fixture.NativeProtocolMixin, TestCase):
         )
         descriptor = {
             "role": role,
-            "round": 1,
+            "round": self.common()["attempt"] + 1,
             "prompt_digest": "f" * 64,
             "input_digest": manifest["context_digest"],
             "specification_id": str(specification.pk) if specification else None,
@@ -161,6 +175,8 @@ class FactoryNativeTests(native_fixture.NativeProtocolMixin, TestCase):
         )
         self.intent_ids.append(str(intent.operation_id))
         session = NativeSession.from_data(intent.payload["data"]["session"])
+        self.agent_intent = intent
+        self.session = session
         observed = self.observed(
             session.manifest["operation_id"], self.original, self.changed
         )
@@ -181,28 +197,30 @@ class FactoryNativeTests(native_fixture.NativeProtocolMixin, TestCase):
                 },
             ),
         )
-        return self.write(
+        self.workspace = {
+            "repository_id": 123,
+            "repository": "example/configured",
+            "branch": self.item.branch_name,
+            "base_branch": "main",
+            "base_revision": self.context.document["repository"]["base_revision"],
+            "tree_sha": ("8" if self.common()["attempt"] else "4") * 40,
+            "commit_sha": ("9" if self.common()["attempt"] else "5") * 40,
+        }
+        self.workspace_entry = self.write(
             "native_workspace",
             contract.workspace_record(
                 context_id=str(self.context.pk),
                 context_digest=self.context.digest,
-                attempt=0,
+                attempt=self.common()["attempt"],
                 agent_intent_id=str(intent.operation_id),
-                workspace={
-                    "repository_id": 123,
-                    "repository": "example/configured",
-                    "branch": self.item.branch_name,
-                    "base_branch": "main",
-                    "base_revision": "c" * 40,
-                    "tree_sha": "4" * 40,
-                    "commit_sha": "5" * 40,
-                },
+                workspace=self.workspace,
                 source_digest=digest(self.changed),
                 export_digest=digest(self.changed),
                 requirements_digest=self.profile.dependency_digest,
                 factory_paths=["file.py"],
             ),
         )
+        return self.workspace_entry
 
     def complete_role(self, role, payload):
         intent = self.write("native_intent", self.role_intent(role))
@@ -234,14 +252,14 @@ class FactoryNativeTests(native_fixture.NativeProtocolMixin, TestCase):
             "run_id": str(self.run.pk),
             "operation_id": str(uuid4()),
             "role": role,
-            "round": 1,
+            "round": self.common()["attempt"] + 1,
             "context_id": str(self.context.pk),
             "context_digest": self.context.digest,
             "specification_id": None,
             "specification_digest": "",
-            "source_digest": digest(self.original),
-            "tree_sha": "d" * 40,
-            "base_sha": "c" * 40,
+            "source_digest": self.context.document["source_digest"],
+            "tree_sha": self.context.document["repository"]["base_tree_sha"],
+            "base_sha": self.context.document["repository"]["base_revision"],
             "head_sha": "",
             "configuration_digest": contract.digest(self.run.configuration_snapshot),
             "payload": payload,
@@ -275,14 +293,16 @@ class FactoryNativeTests(native_fixture.NativeProtocolMixin, TestCase):
         return self.complete_role("specification", self.specification)
 
     def plan_document(self, specification):
+        payload = specification.document["payload"]
         return contract.plan_document(
             context_id=str(self.context.pk),
             context_digest=self.context.digest,
             problem=self.context.document["source"]["title"],
-            approach=self.specification["scope"]
-            + "\n\n"
-            + "\n".join(self.specification["verification"]),
-            acceptance_criteria=[self.criterion],
+            approach=payload["scope"] + "\n\n" + "\n".join(payload["verification"]),
+            acceptance_criteria=[
+                value if isinstance(value, str) else value["description"]
+                for value in payload["criteria"]
+            ],
             factory_specification={
                 "id": str(specification.pk),
                 "digest": specification.digest,
@@ -299,6 +319,9 @@ class FactoryNativeTests(native_fixture.NativeProtocolMixin, TestCase):
             reason="Actual specification",
         )
 
+
+@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+class FactoryNativeTests(FactoryNativeFixture, TestCase):
     def test_intake_can_be_saved_before_any_plan(self):
         self.save_context()
         intent = self.write("native_intent", self.role_intent())
@@ -526,6 +549,165 @@ class FactoryNativeTests(native_fixture.NativeProtocolMixin, TestCase):
         )
         with self.assertRaisesMessage(RunConflict, "Only a factory builder"):
             self.write("native_workspace", document)
+
+
+@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+class FactoryGenerationTests(FactoryNativeFixture, TestCase):
+    def setUp(self):
+        super().setUp()
+        concrete = {
+            "id": "concrete-task",
+            "description": "Return the requested concrete result for file.py",
+        }
+        self.intake["criteria"].append(concrete)
+        self.specification["criteria"].append(copy.deepcopy(concrete))
+        specification = self.complete_specification()
+        self.previous_plan = self.save_plan(self.plan_document(specification))
+        self.previous_workspace = self.complete_candidate(self.previous_plan)
+        self.previous_context = self.context
+        self.new_source = pack(
+            {
+                "requirements.txt": (0o644, b"example==1.0\n"),
+                "file.py": (0o644, b"new base\n"),
+            }
+        )
+
+    def generation_document(self):
+        document = copy.deepcopy(self.previous_context.document)
+        document["source_digest"] = digest(self.new_source)
+        document["repository"].update(base_revision="6" * 40, base_tree_sha="7" * 40)
+        document["factory_generation"] = {
+            "previous_context_id": str(self.previous_context.pk),
+            "previous_context_digest": self.previous_context.digest,
+            "previous_workspace_id": str(self.previous_workspace.operation_id),
+            "attempt": 1,
+            "old_base": "c" * 40,
+            "new_base": "6" * 40,
+            "reason": "base_update",
+        }
+        return document
+
+    def post_generation(self, document=None, *, remote="6" * 40, operation_id=None):
+        document = document or self.generation_document()
+        with patch("runner_control.merge_services.provider") as provider:
+            provider.return_value.base_sha.return_value = remote
+            response = self.post(
+                "runner_contexts",
+                {
+                    "claim_token": str(self.claim),
+                    "operation_id": str(operation_id or uuid4()),
+                    "document": document,
+                    "base_commit": document["repository"]["base_revision"],
+                    "resolved_base_branch": "main",
+                    "reason": "Observed changed remote base",
+                },
+            )
+        if response.status_code == 200:
+            self.context = self.run.contexts.last()
+            self.original = self.new_source
+        return response
+
+    def test_new_base_runs_new_intake_specification_plan_and_builder(self):
+        self.terminate()
+        response = self.post_generation()
+        self.assertEqual(response.status_code, 200, response.content)
+        intake = self.complete_role("intake", self.intake)
+        specification = self.complete_role("specification", self.specification)
+        plan = self.save_plan(self.plan_document(specification))
+        candidate = self.complete_candidate(plan)
+        self.assertEqual(intake.round, 2)
+        self.assertEqual(specification.round, 2)
+        self.assertNotEqual(plan.pk, self.previous_plan.pk)
+        self.assertEqual(candidate.payload["attempt"], 1)
+        self.assertEqual(candidate.payload["workspace"]["base_revision"], "6" * 40)
+        self.assertEqual(candidate.payload["context_id"], str(self.context.pk))
+
+    def test_lost_generation_ack_replays_original_context_after_reference_moves(self):
+        self.terminate()
+        document = self.generation_document()
+        operation_id = uuid4()
+        first = self.post_generation(document, operation_id=operation_id)
+        second = self.post_generation(document, operation_id=operation_id)
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(first.json()["context"]["id"], second.json()["context"]["id"])
+        self.assertEqual(self.run.contexts.count(), 2)
+
+    def test_new_intake_cannot_drop_previous_concrete_criterion_before_specification(
+        self,
+    ):
+        self.terminate()
+        response = self.post_generation()
+        self.assertEqual(response.status_code, 200, response.content)
+        narrowed = {**self.intake, "criteria": self.intake["criteria"][:1]}
+        self.complete_role("intake", narrowed)
+        with self.assertRaisesMessage(ValidationError, "accepted criteria"):
+            self.write("native_intent", self.role_intent("specification"))
+        self.assertEqual(self.run.evidence.filter(kind="native_intent").count(), 4)
+
+    def test_new_plan_cannot_drop_previous_concrete_criterion(self):
+        self.terminate()
+        response = self.post_generation()
+        self.assertEqual(response.status_code, 200, response.content)
+        self.complete_role("intake", self.intake)
+        narrowed = {
+            **self.specification,
+            "criteria": self.specification["criteria"][:1],
+        }
+        specification = self.complete_role("specification", narrowed)
+        with self.assertRaisesMessage(ValidationError, "accepted criteria"):
+            self.save_plan(self.plan_document(specification))
+        self.assertEqual(self.run.plans.count(), 1)
+
+    def test_new_base_requires_explicit_generation(self):
+        self.terminate()
+        document = self.generation_document()
+        document.pop("factory_generation")
+        response = self.post_generation(document)
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertIn("explicit bounded base generation", response.json()["error"])
+
+    def test_new_base_requires_current_previous_context(self):
+        self.terminate()
+        document = self.generation_document()
+        document["factory_generation"]["previous_context_id"] = str(uuid4())
+        response = self.post_generation(document)
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertIn("current context", response.json()["error"])
+
+    def test_new_base_cannot_rewrite_frozen_task_source(self):
+        self.terminate()
+        document = self.generation_document()
+        document["source"]["body"] = "Replace the requested task with another task"
+        response = self.post_generation(document)
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertIn("immutable source", response.json()["error"])
+
+    def test_new_base_must_match_independently_observed_remote(self):
+        self.terminate()
+        response = self.post_generation(remote="a" * 40)
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertIn("current remote base", response.json()["error"])
+
+    def test_new_base_cannot_skip_shared_repair_attempt(self):
+        self.terminate()
+        document = self.generation_document()
+        document["factory_generation"]["attempt"] = 2
+        response = self.post_generation(document)
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertIn("consecutive shared repair allowance", response.json()["error"])
+
+    def test_new_base_requires_confirmed_full_termination(self):
+        response = self.post_generation()
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertFalse(self.run.contexts.filter(sequence=2).exists())
+
+    def test_published_generation_requires_explicit_new_attempt(self):
+        self.complete_delivery()
+        self.terminate()
+        response = self.post_generation()
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertIn("Published factory work", response.json()["error"])
 
 
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
