@@ -24,7 +24,9 @@ project=${VIBEARR_CHECK_PROJECT:-vibearr-check-${GITHUB_RUN_ID:-local}-${RANDOM}
 [[ $project =~ ^(vibearr-check|nq-auto-qualification)-[a-z0-9-]+$ && ${#project} -le 50 ]] || { echo 'Choose a disposable vibearr-check-* or nq-auto-qualification-* project of at most 50 characters.' >&2; exit 2; }
 restore_project=${project}-restore
 for selected in "$project" "$restore_project"; do
-  [[ -z $(docker ps -aq --filter "label=com.docker.compose.project=$selected") && -z $(docker volume ls -q --filter "name=^${selected}_") ]] || { echo 'Check project already has state; choose another name.' >&2; exit 2; }
+  existing_containers=$(docker ps -aq --filter "label=com.docker.compose.project=$selected") || exit $?
+  existing_volumes=$(docker volume ls -q --filter "name=^${selected}_") || exit $?
+  [[ -z $existing_containers && -z $existing_volumes ]] || { echo 'Check project already has state; choose another name.' >&2; exit 2; }
 done
 scratch=$(mktemp -d /tmp/vibearr-check.XXXXXXXX)
 output=${VIBEARR_CHECK_OUTPUT:-/tmp/$project-reports}
@@ -165,7 +167,8 @@ done
 VIBEARR_WORKER_BASE_IMAGE_ID=$(docker image inspect "$VIBEARR_WORKER_BASE_IMAGE" --format '{{.Id}}')
 export VIBEARR_WORKER_BASE_IMAGE_ID
 docker build --file "$scratch/source/vibearr_executor/Worker.Dockerfile" --build-arg "RUNTIME_IMAGE=$VIBEARR_WORKER_BASE_IMAGE" --build-arg "RUNTIME_IMAGE_ID=$VIBEARR_WORKER_BASE_IMAGE_ID" --tag "$VIBEARR_WORKER_IMAGE" "$scratch/source" > "$output/worker-build.log" 2>&1
-[[ $(docker image inspect "$VIBEARR_WORKER_BASE_IMAGE" --format '{{.Id}}') == "$VIBEARR_WORKER_BASE_IMAGE_ID" ]] || { echo 'Worker toolchain image changed during build.' >&2; exit 1; }
+worker_base_after=$(docker image inspect "$VIBEARR_WORKER_BASE_IMAGE" --format '{{.Id}}') || exit $?
+[[ $worker_base_after == "$VIBEARR_WORKER_BASE_IMAGE_ID" ]] || { echo 'Worker toolchain image changed during build.' >&2; exit 1; }
 VIBEARR_RUNNER_IMAGE_ID=$(docker image inspect "$VIBEARR_RUNNER_IMAGE" --format '{{.Id}}')
 VIBEARR_WORKER_IMAGE_ID=$(docker image inspect "$VIBEARR_WORKER_IMAGE" --format '{{.Id}}')
 export VIBEARR_RUNNER_IMAGE_ID VIBEARR_WORKER_IMAGE_ID
@@ -203,13 +206,16 @@ if [[ $mode == full || $mode == boundary || $mode == candidate || $mode == opera
   compose exec -T worker python -I -m vibearr_executor.compact_worker qualify-roles > "$output/role-qualification.json" 2>&1
   observe_phase boundary
   compose exec -T worker python -I < deploy/docker/dependency_smoke.py > "$output/dependency-smoke.json" 2>&1
-  docker cp "$(compose ps -q worker):/control/dependency-smoke-proof.json" "$output/dependency-smoke-proof.json" > "$output/dependency-smoke-export.log" 2>&1
+  worker_container=$(compose ps -q worker) || exit $?
+  docker cp "$worker_container:/control/dependency-smoke-proof.json" "$output/dependency-smoke-proof.json" > "$output/dependency-smoke-export.log" 2>&1
   observe_phase dependency
-  docker inspect "$(compose ps -q runner)" --format '{{json .}}' > "$output/runner-before.json"
+  runner_container=$(compose ps -q runner) || exit $?
+  docker inspect "$runner_container" --format '{{json .}}' > "$output/runner-before.json"
   compose exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 runner python -I - < deploy/docker/controller_witness.py > "$output/controller-before.json" 2>&1
   compose kill -s SIGKILL runner > "$output/runner-restart.log" 2>&1
   start_runtime >> "$output/runner-restart.log" 2>&1
-  docker inspect "$(compose ps -q runner)" --format '{{json .}}' > "$output/runner-after.json"
+  runner_container=$(compose ps -q runner) || exit $?
+  docker inspect "$runner_container" --format '{{json .}}' > "$output/runner-after.json"
   compose exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 runner python -I - < deploy/docker/controller_witness.py > "$output/controller-after.json" 2>&1
 fi
 if [[ $mode == full || $mode == candidate ]]; then
