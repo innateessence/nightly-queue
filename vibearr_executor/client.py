@@ -48,16 +48,28 @@ class Client:
             in {"agent-worker", "setup-worker", "validation-worker", "worker-gateway"}
             and parsed.port == 8791
         )
-        if slot:
+        compact = (
+            os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "compact-worker-v1"
+            and parsed.hostname == "worker"
+            and parsed.port == 8791
+        )
+        if os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "compact-worker-v1" and not (
+            compact or loopback
+        ):
+            raise Rejected("Use the registered compact worker origin.")
+        if slot or compact:
             addresses = socket.getaddrinfo(parsed.hostname, parsed.port, socket.AF_INET)
             if not addresses or any(
-                not ipaddress.ip_address(value[4][0]).is_private for value in addresses
+                not ipaddress.ip_address(value[4][0]).is_private
+                or ipaddress.ip_address(value[4][0]).is_loopback
+                or ipaddress.ip_address(value[4][0]).is_link_local
+                for value in addresses
             ):
                 raise Rejected(
                     "Docker worker control must resolve on private container networks."
                 )
         if parsed.scheme not in {"http", "https"} or (
-            parsed.scheme == "http" and not loopback and not slot
+            parsed.scheme == "http" and not loopback and not slot and not compact
         ):
             raise Rejected("Use HTTPS or loopback executor control.")
         if (
@@ -71,6 +83,12 @@ class Client:
         if len(token) < 32:
             raise Rejected("Executor control token is missing.")
         self.url, self.token, self.timeout = url.rstrip("/"), token, timeout
+        self.expected_runtime = (
+            "compact-worker-v1"
+            if os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "compact-worker-v1"
+            else ""
+        )
+        self.compact = self.expected_runtime == "compact-worker-v1"
         self.opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}), NoRedirect()
         )
@@ -86,12 +104,32 @@ class Client:
                 "Set VIBEARR_EXECUTOR_URL and VIBEARR_EXECUTOR_TOKEN_FILE for authenticated executor control."
             )
         path = Path(os.environ["VIBEARR_EXECUTOR_TOKEN_FILE"])
-        if path.stat().st_mode & 0o077:
-            raise Rejected("Executor token file must be private.")
-        client = cls(os.environ["VIBEARR_EXECUTOR_URL"], path.read_text().strip())
+        if os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "compact-worker-v1":
+            from .control_token import read_control_token
+
+            token = read_control_token(path)
+        else:
+            if path.stat().st_mode & 0o077:
+                raise Rejected("Executor token file must be private.")
+            token = path.read_text().strip()
+        client = cls(os.environ["VIBEARR_EXECUTOR_URL"], token)
         client.integrated = (
             os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "integrated-runner-v1"
         )
+        if os.environ.get(
+            "VIBEARR_RUNTIME_PROTOCOL"
+        ) == "compact-worker-v1" and os.environ.get(
+            "VIBEARR_MEDIATION_CONTROLLER_TOKEN_FILE"
+        ):
+            from vibearr_runner.compact_connections import CompactClient
+            from .control_token import read_control_token
+
+            selected = Path(os.environ["VIBEARR_MEDIATION_CONTROLLER_TOKEN_FILE"])
+            return CompactClient(
+                client,
+                os.environ["VIBEARR_MEDIATION_URL"],
+                read_control_token(selected),
+            )
         return client
 
     def request(self, path: str, data: dict | None = None) -> dict:
@@ -138,7 +176,12 @@ class Client:
             ) from exc
 
     def capabilities(self) -> dict:
-        return self.request("/v1/capabilities")
+        value = self.request("/v1/capabilities")
+        if self.expected_runtime and value.get("runtime") != self.expected_runtime:
+            raise ExecutorUnavailable(
+                "Executor boundary differs from the registered runtime."
+            )
+        return value
 
     def prepare_dependencies(self, manifest: dict) -> dict:
         return self.request("/v1/dependency-builds/prepare", manifest)
@@ -176,7 +219,19 @@ class Client:
         )
 
     def prepare(self, manifest: dict) -> dict:
-        return self.request("/v1/prepare", manifest)
+        value = self.request("/v1/prepare", manifest)
+        self.require_current_boundary(value)
+        return value
+
+    def require_current_boundary(self, value):
+        if (
+            self.expected_runtime
+            and value.get("execution_identity", {}).get("runtime")
+            != self.expected_runtime
+        ):
+            raise ExecutorUnavailable(
+                "New operation belongs to another runtime boundary."
+            )
 
     def operation(
         self, operation_id: str, action: str, data: dict | None = None
@@ -198,7 +253,24 @@ class Client:
         return self.request(f"/v1/operations/{operation_id}/{action}", data or {})
 
     def start(self, operation_id: str) -> dict:
-        return self.operation(operation_id, "start")
+        value = self.operation(operation_id, "start")
+        self.require_current_boundary(value)
+        return value
+
+    def browser_result(self, operation_id):
+        identifier(operation_id)
+        result = self.request(f"/v4/browser/{operation_id}/result", {})
+        content = base64.b64decode(result["content"], validate=True)
+        if (
+            len(content) > 16 * 1024 * 1024
+            or result.get("bytes") != len(content)
+            or result.get("sha256") != digest(content)
+        ):
+            raise ExecutorUnavailable("Browser output digest or size differs.")
+        self.require_current_boundary(result)
+        if result.get("operation_id") != operation_id:
+            raise ExecutorUnavailable("Browser output belongs to another operation.")
+        return result["report"], content
 
     def status(self, operation_id: str) -> dict:
         return self.operation(operation_id, "status")
