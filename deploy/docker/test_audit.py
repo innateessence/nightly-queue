@@ -113,6 +113,11 @@ class RuntimeInspectionTests(unittest.TestCase):
     def test_partial_stack_cannot_pass_actual_container_audit(self):
         self.assertIn("exactly one app", str(inspect_stack([self.container])["errors"]))
 
+    def test_foreign_secret_volume_cannot_be_hidden_by_its_logical_suffix(self):
+        self.container["Mounts"][1]["Name"] = "production_worker-secrets"
+        errors = str(inspect_containers([self.container])["errors"])
+        self.assertIn("private volume belongs to a different project", errors)
+
     def test_duplicate_worker_cannot_replace_a_missing_service(self):
         containers = [deepcopy(self.container) for _ in range(4)]
         self.assertIn("exactly one app", str(inspect_stack(containers)["errors"]))

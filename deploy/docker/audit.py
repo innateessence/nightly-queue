@@ -193,7 +193,18 @@ def inspect_containers(containers):
             }
             errors.extend(isolation(service, networks, volumes, added))
             for mount in container["Mounts"]:
-                if mount.get("Name") == prefix + "worker-secrets" and mount["RW"]:
+                volume = mount.get("Name", "")
+                logical = volume.rsplit("_", 1)[-1]
+                if (
+                    service in {"runner", "worker"}
+                    and volume
+                    and logical != "runner-data"
+                    and volume != prefix + logical
+                ):
+                    errors.append(
+                        f"{name}: private volume belongs to a different project"
+                    )
+                if logical == "worker-secrets" and mount["RW"]:
                     errors.append(f"{name}: worker channel secrets are writable")
         facts.append(
             {
