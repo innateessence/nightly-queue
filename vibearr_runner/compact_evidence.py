@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import re
 from uuid import UUID
 
@@ -73,6 +74,17 @@ def protected_operation(record, worker, *, exit_code=0):
         raise ValueError(
             "Protected operation did not complete successfully with confirmed cleanup."
         )
+    times = (result.get("started_at"), result.get("ended_at"))
+    if (
+        any(
+            type(value) not in (int, float)
+            or not 0 < value < 253402300800
+            or not math.isfinite(value)
+            for value in times
+        )
+        or times[0] > times[1]
+    ):
+        raise ValueError("Protected operation has invalid sealed start/end chronology.")
     if (
         result["operation_id"] != manifest["operation_id"]
         or record["operation_id"] != manifest["operation_id"]
