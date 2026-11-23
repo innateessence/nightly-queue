@@ -33,7 +33,9 @@ from vibearr_runner.policy import ExecutionPolicy, default_execution_policy
 
 
 def transcript(provider, payload=None, *, session=None):
-    session = session or str(uuid4())
+    session = session or (
+        "ses_" + uuid4().hex if provider == "opencode" else str(uuid4())
+    )
     text = json.dumps(payload or {"verdict": "pass", "findings": []})
     if provider == "codex":
         events = [
@@ -359,7 +361,9 @@ class NativeRoleResultTests(unittest.TestCase):
             if provider == "codex":
                 events.insert(1, {"type": "thread.started", field: str(uuid4())})
             else:
-                events[-1][field] = str(uuid4())
+                events[-1][field] = (
+                    "ses_" + uuid4().hex if provider == "opencode" else str(uuid4())
+                )
             content = b"\n".join(json.dumps(event).encode() for event in events)
             with self.subTest(provider=provider), self.assertRaises(NativeSessionError):
                 parse_role_result(provider, content)
@@ -461,11 +465,12 @@ class FactoryNativeAdapterTests(unittest.TestCase):
 
     def test_every_existing_native_provider_passes_the_same_role_outcome_checks(self):
         for provider in VERSIONS:
-            with self.subTest(provider=provider):
-                session = self.prepare(provider)
-                self.complete(session)
-                outcome = self.adapter.outcome(session, self.executor.source)
-                self.assertEqual(outcome["role_result"]["verdict"], "pass")
+            for role in FACTORY_ROLES:
+                with self.subTest(provider=provider, role=role):
+                    session = self.prepare(provider, role=role)
+                    self.complete(session)
+                    outcome = self.adapter.outcome(session, self.executor.source)
+                    self.assertEqual(outcome["role_result"]["verdict"], "pass")
 
     def test_repeated_start_reuses_the_original_operation(self):
         session = self.prepare()
