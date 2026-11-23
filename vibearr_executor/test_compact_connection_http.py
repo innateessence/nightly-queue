@@ -108,6 +108,8 @@ class CompactConnectionHTTPTests(unittest.TestCase):
         session = self.prepare(client)
         operation = session.manifest["operation_id"]
         record = self.runtime.record(operation)
+        record["task_launch_intent"] = True
+        self.runtime.save(record)
         envelope = json.loads(
             (self.runtime.path(operation) / "backend-secret").read_text()
         )
