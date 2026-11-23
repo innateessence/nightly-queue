@@ -243,6 +243,41 @@ class ReadOnlyQueue:
         return self.request("GET", "/api/v1/runner/runs/active/")
 
 
+class ReadOnlyWorker:
+    def __init__(self, client):
+        self._client = client
+
+    def capabilities(self):
+        return self._client.capabilities()
+
+    def status(self, operation_id):
+        return self._client.status(operation_id)
+
+    def termination_receipt(self, operation_id):
+        return self._client.termination_receipt(operation_id)
+
+    def browser_result(self, operation_id):
+        return self._client.browser_result(operation_id)
+
+
+def read_only_worker():
+    from vibearr_executor.client import Client
+    from vibearr_executor.control_token import read_control_token
+
+    require(
+        os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == RUNTIME,
+        "Observe the registered compact worker runtime.",
+    )
+    url = os.environ.get("VIBEARR_EXECUTOR_URL")
+    filename = os.environ.get("VIBEARR_EXECUTOR_TOKEN_FILE")
+    require(
+        bool(url) and bool(filename),
+        "Configure the registered worker URL and control token file.",
+    )
+    token = read_control_token(Path(filename))
+    return ReadOnlyWorker(Client(url, token, timeout=15))
+
+
 def factory_artifacts(queue, run_id):
     from .factory_contract import validate_artifact
 
@@ -1378,7 +1413,6 @@ def main(argv=None):
             )
         else:
             from .queue_acceptance import client
-            from vibearr_executor.client import Client as ExecutorClient
 
             require(
                 args.github_token_file is not None,
@@ -1396,7 +1430,7 @@ def main(argv=None):
                 failures = (
                     private_json(args.failure_evidence) if args.failure_evidence else {}
                 )
-                worker = ExecutorClient.from_environment()
+                worker = read_only_worker()
                 pin_failure_evidence(
                     state, failures, worker=worker, journal_path=args.controller_journal
                 )
