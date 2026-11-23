@@ -2,6 +2,7 @@
 
 import argparse
 from contextlib import ExitStack
+import ctypes
 import fcntl
 import json
 import os
@@ -11,6 +12,7 @@ from uuid import UUID
 
 
 DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+RENAME_NOREPLACE = 1
 
 
 def private_directory(descriptor, uid, gid):
@@ -87,6 +89,21 @@ def connection_directory(parent):
     return descriptor
 
 
+def archive_connections(source, target):
+    rename = ctypes.CDLL(None, use_errno=True).renameat2
+    rename.argtypes = (
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    rename.restype = ctypes.c_int
+    if rename(source, b"connections", target, b"connections", RENAME_NOREPLACE) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
 def recover(identity, secret_root, state_root):
     if str(UUID(identity)) != identity or os.geteuid() != 0:
         raise ValueError(
@@ -128,9 +145,7 @@ def recover(identity, secret_root, state_root):
             current = os.stat("connections", dir_fd=state, follow_symlinks=False)
             if (before.st_dev, before.st_ino) != (current.st_dev, current.st_ino):
                 raise ValueError("Restored connection state changed before archival.")
-            os.rename(
-                "connections", "connections", src_dir_fd=state, dst_dir_fd=selected
-            )
+            archive_connections(state, selected)
             os.fsync(selected)
             os.fsync(state)
         return {
