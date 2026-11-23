@@ -89,10 +89,16 @@ class WorkerAuthorityRestoreTests(unittest.TestCase):
         )
         self.root_identity.start()
         self.addCleanup(self.root_identity.stop)
+        ownership = patch("deploy.docker.worker_recovery.os.chown")
+        self.ownership = ownership.start()
+        self.addCleanup(ownership.stop)
 
     def test_restore_retires_old_authority_and_preserves_archive(self):
         observed = recover(self.identity, self.secrets, self.control)
         self.assertTrue(observed["retired"])
+        self.ownership.assert_called()
+        for call in self.ownership.call_args_list:
+            self.assertEqual(call.args[1:], (10001, 10001))
         self.assertFalse(self.marker.exists())
         self.assertNotEqual(
             (self.secrets / "control-token").read_text().strip(), "a" * 64
