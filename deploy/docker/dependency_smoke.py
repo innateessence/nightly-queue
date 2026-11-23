@@ -2,12 +2,11 @@
 
 from datetime import datetime, timedelta, timezone
 import json
-from pathlib import Path
 import time
 from uuid import uuid4
 
 from vibearr_executor.artifacts import pack
-from vibearr_executor.client import Client
+from vibearr_executor.integrated_validate import validation_connection
 from vibearr_executor.contracts import canonical, digest
 from vibearr_executor.validation_profile import (
     PACKAGE_HOSTS,
@@ -17,15 +16,7 @@ from vibearr_executor.validation_profile import (
 
 
 def main():
-    private = Path("/run/vibearr/runner")
-    client = Client(
-        "http://127.0.0.1:8791",
-        (private / "control-token").read_text().strip(),
-        timeout=180,
-    )
-    parent = ValidationProfile.parse(
-        json.loads((private / "validation-profile.json").read_bytes())
-    )
+    client, parent = validation_connection()
     run_id, build_id, operation = (str(uuid4()) for _ in range(3))
     deadline = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
     source = pack(
