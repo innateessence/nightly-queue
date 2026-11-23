@@ -161,6 +161,12 @@ if [[ $mode == full || $mode == boundary || $mode == candidate || $mode == opera
   compose exec -T worker python -I -m vibearr_executor.compact_worker qualify > "$output/requalified.json" 2>&1
   compose exec -T worker python -I -m vibearr_executor.compact_worker qualify-roles > "$output/role-qualification.json" 2>&1
   compose exec -T worker python -I < deploy/docker/dependency_smoke.py > "$output/dependency-smoke.json" 2>&1
+  docker inspect "$(compose ps -q runner)" --format '{{json .}}' > "$output/runner-before.json"
+  compose exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 runner python -I - < deploy/docker/controller_witness.py > "$output/controller-before.json" 2>&1
+  compose kill -s SIGKILL runner > "$output/runner-restart.log" 2>&1
+  start_runtime >> "$output/runner-restart.log" 2>&1
+  docker inspect "$(compose ps -q runner)" --format '{{json .}}' > "$output/runner-after.json"
+  compose exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 runner python -I - < deploy/docker/controller_witness.py > "$output/controller-after.json" 2>&1
 fi
 if [[ $mode == full || $mode == candidate ]]; then
   mapfile -t binding < <(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -c 'import json,sys; v=json.load(sys.stdin); print(v["commit_sha"]); print(v["tree_sha"]); print(v["source_digest"])' < "$output/source.json")
