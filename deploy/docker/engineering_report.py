@@ -44,6 +44,16 @@ def lines(path):
     return [json.loads(line) for line in path.read_text().splitlines() if line]
 
 
+def restored_boundary(path):
+    wrapper = read(path)
+    if not isinstance(wrapper, dict) or set(wrapper) != {"report", "sha256"}:
+        raise ValueError("Restored boundary response has an invalid envelope.")
+    report = wrapper["report"]
+    if not isinstance(report, dict) or wrapper["sha256"] != digest(report):
+        raise ValueError("Restored boundary response digest differs.")
+    return report
+
+
 def payloads(root):
     proofs = root / "engineering-proofs"
     restored = observation(root / "restore-database.log", "database_restored", True)
@@ -56,7 +66,7 @@ def payloads(root):
         "runner": read(root / "restored-authority.json"),
         "worker": read(root / "restored-worker-authority.json"),
         "restored_capabilities": read(root / "restored-capabilities.json"),
-        "restored_boundary": read(root / "restored-boundary.json"),
+        "restored_boundary": restored_boundary(root / "restored-boundary.json"),
     }
     restart = {
         name.replace("-", "_"): read(root / (name + ".json"))
