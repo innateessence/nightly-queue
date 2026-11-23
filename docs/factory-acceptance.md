@@ -112,6 +112,11 @@ rereads original authenticated worker statuses. Old integrated-runner/fleet
 receipts cannot qualify compact-worker execution. Required CI binds the exact
 head, trusted App/workflow, pinned workflow bytes, current run/attempt, tested
 base and completion; skipped, canceled, stale and failed checks do not qualify.
+The authenticated termination API also binds every agent and validation manifest
+to its original canonical digest and sealed result/boot receipt, including original
+deadlines, limits, arguments and registered profile. Normalized result receipt
+digests and sealed worker receipt digests have different inputs and are verified
+separately.
 
 The engineering input follows `compact_evidence.validate_compact_report`: exact
 deployed source revision, four service/container/image identities, current
@@ -138,6 +143,10 @@ terminal failure and no publication. Cancellation requires protected requested,
 confirmed and canceled-operation timing. Missing capability requires trusted
 observed capability absence, recomputed routing, terminal failure and no
 unauthorized role dispatch. It also checks failed branches have no provider PR.
+The missing-capability case covers post-build required-capability absence or
+loss, such as an optional security/UI role missing when trusted routing requires
+it. Initial core preflight rejection has no saved intake/workspace and requires
+separate preflight qualification evidence.
 
 Supply a versioned failure input with the acceptance operation UUID from its
 private state, and immutable case identities:

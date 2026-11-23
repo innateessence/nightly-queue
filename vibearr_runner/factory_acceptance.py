@@ -456,6 +456,27 @@ def criterion_texts(values):
     return set(result)
 
 
+def frozen_task_deadline(run):
+    seconds = run["configuration_snapshot"]["global"].get("task_timeout_seconds")
+    require(
+        type(seconds) in {int, float} and math.isfinite(seconds) and seconds > 0,
+        "Missing frozen task deadline allowance.",
+    )
+    return timestamp(run["created_at"]).timestamp() + seconds
+
+
+def verify_operation_deadline(manifest, receipt, task_deadline):
+    deadline = timestamp(manifest["deadline"]).timestamp()
+    require(
+        0 < deadline <= task_deadline,
+        "Original dispatch exceeded the frozen absolute task deadline.",
+    )
+    require(
+        not receipt_passed(receipt) or receipt["ended_at"] <= task_deadline,
+        "Successful operation exceeded the frozen absolute task deadline.",
+    )
+
+
 def verify_task_requirements(
     entries, run, collected, scenario, context, plan, authority
 ):
@@ -542,6 +563,7 @@ def check_factory_chain(entries, native_entries, run, collected, scenario, docum
         and policy["repair_limit"] == scenario["repair_limit"],
         "Frozen delivery or repair policy differs.",
     )
+    task_deadline = frozen_task_deadline(run)
     artifacts = [entry["document"] for entry in entries]
     require(bool(artifacts), "No factory artifacts were saved.")
     rounds = sorted({document["round"] for document in artifacts})
@@ -629,6 +651,11 @@ def check_factory_chain(entries, native_entries, run, collected, scenario, docum
             "Role execution differs from the genuine native result.",
         )
         session = intent["data"]["data"]["session"]
+        deadline = timestamp(session["manifest"]["deadline"]).timestamp()
+        require(
+            0 < deadline <= task_deadline and execution["ended_at"] <= task_deadline,
+            "Role dispatch or execution exceeded the frozen absolute task deadline.",
+        )
         account = session["account"]
         require(
             account["credential_id"] == scenario["connection_id"],
@@ -714,6 +741,7 @@ def check_factory_chain(entries, native_entries, run, collected, scenario, docum
             descriptor == expected_dispatch
             and intent["data"]["context_id"] == document["context_id"]
             and intent["data"]["context_digest"] == document["context_digest"]
+            and intent["data"]["policy_digest"] == frozen_context["policy_digest"]
             and intent["data"]["attempt"] == document["round"] - 1,
             "Role lacks the exact six-field dispatch, context or shared repair attempt.",
         )
@@ -863,10 +891,14 @@ def verify_stack(report, capabilities, source_revision):
     return validate_compact_report(report, capabilities)
 
 
-def verify_native_receipts(entries, worker, *, documents, artifacts):
-    from .factory_scenarios import validate_validation_binding
+def verify_native_receipts(entries, worker, *, run, documents, artifacts):
+    from .factory_scenarios import (
+        validate_validation_binding,
+        verify_operation_manifest,
+    )
 
     require(worker is not None, "Authenticated original worker status is required.")
+    task_deadline = frozen_task_deadline(run)
     receipts = {}
     for entry in entries:
         if entry["kind"] != "native_termination":
@@ -882,9 +914,11 @@ def verify_native_receipts(entries, worker, *, documents, artifacts):
     require(
         len(receipts) <= 128, "Original native operation history exceeds its bound."
     )
+    statuses = {}
     for operation_id, receipt in receipts.items():
+        statuses[operation_id] = worker.status(operation_id)
         require(
-            receipt_summary(worker.status(operation_id)) == receipt,
+            receipt_summary(statuses[operation_id]) == receipt,
             "Saved termination differs from the authenticated original worker receipt.",
         )
     intents = {
@@ -892,6 +926,26 @@ def verify_native_receipts(entries, worker, *, documents, artifacts):
         for entry in entries
         if entry["kind"] == "native_intent"
     }
+    for intent in intents.values():
+        if intent["kind"] == "agent":
+            manifests = [intent["data"]["session"]["manifest"]]
+        elif intent["kind"] == "validation":
+            manifests = [
+                operation["manifest"] for operation in intent["data"]["operations"]
+            ]
+        else:
+            continue
+        for manifest in manifests:
+            require(
+                manifest["operation_id"] in statuses,
+                "Native dispatch lacks its authenticated original termination.",
+            )
+            verify_operation_manifest(
+                worker, manifest, status=statuses[manifest["operation_id"]]
+            )
+            verify_operation_deadline(
+                manifest, receipts[manifest["operation_id"]], task_deadline
+            )
     for entry in entries:
         if entry["kind"] == "native_agent":
             receipt = entry["data"]["receipt"]
@@ -907,7 +961,12 @@ def verify_native_receipts(entries, worker, *, documents, artifacts):
             intent is not None and intent["kind"] == "validation",
             "Validation lacks its original immutable dispatch.",
         )
-        validate_validation_binding(intent, validation, receipts)
+        validate_validation_binding(intent, validation, receipts, worker=worker)
+        for operation in intent["data"]["operations"]:
+            manifest = operation["manifest"]
+            verify_operation_deadline(
+                manifest, receipts[manifest["operation_id"]], task_deadline
+            )
         checks = [
             artifact["document"]
             for artifact in artifacts
@@ -1195,7 +1254,7 @@ def collect(
             artifacts, entries, run, observed, scenario, documents
         )
         verify_native_receipts(
-            entries, worker, documents=documents, artifacts=artifacts
+            entries, worker, run=run, documents=documents, artifacts=artifacts
         )
         merged = observe_human_merge(github, observed)
         checks = verify_checks(github, observed, scenario)
