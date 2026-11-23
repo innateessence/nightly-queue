@@ -83,6 +83,20 @@ def bind_source(run, document, context):
             )
         intent = evidence(run, workspace["agent_intent_id"], "native_intent")
         bind_dispatched_specification(intent, document)
+        descriptor = intent["data"]["factory"]
+        attempt = document["round"] - 1
+        if (
+            intent["kind"] != "agent"
+            or intent["context_id"] != document["context_id"]
+            or intent["context_digest"] != document["context_digest"]
+            or descriptor["role"] != "build"
+            or descriptor["round"] != document["round"]
+            or intent["attempt"] != attempt
+            or workspace["attempt"] != attempt
+        ):
+            raise RunConflict(
+                "Factory candidate differs from its original build role/round."
+            )
         return workspace
     actual = tuple(
         document[key] for key in ("source_digest", "tree_sha", "base_sha", "head_sha")
@@ -179,6 +193,7 @@ def bind_checks(run, document):
         or intent["context_id"] != document["context_id"]
         or intent["context_digest"] != document["context_digest"]
         or intent["data"]["workspace_id"] != str(workspace_id)
+        or intent["attempt"] != document["round"] - 1
     ):
         raise RunConflict("Factory checks differ from their saved outcome/context.")
 

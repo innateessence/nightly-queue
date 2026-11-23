@@ -1,6 +1,7 @@
 import copy
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import timedelta
 from threading import Barrier
 from uuid import uuid4
@@ -13,6 +14,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from credentials.test_models import TEST_KEY
+from vibearr_executor.artifacts import pack
+from vibearr_executor.contracts import digest as source_digest
 from vibearr_runner import factory_contract as contract
 from vibearr_runner import native_contract as native
 from work_queue.models import QueueItem
@@ -31,6 +34,11 @@ from .test_support import CONTROLLER_SECRET
 class FactoryFixture(NativeProtocolMixin):
     bootstrap_role = ""
     factory_checks = False
+    factory_repair = False
+    native_attempt = 0
+
+    def common(self):
+        return dict(super().common(), attempt=self.native_attempt)
 
     def complete_agent(self):
         if not hasattr(self, "workspace_entry"):
@@ -50,10 +58,12 @@ class FactoryFixture(NativeProtocolMixin):
         self.complete_agent()
         if self.factory_checks:
             self.complete_validation()
+        if self.factory_repair:
+            self.complete_repair()
         plan = self.run.plans.last()
         self.agent_intent.payload["data"]["factory"] = {
             "role": self.bootstrap_role or "build",
-            "round": 1,
+            "round": self.native_attempt + 1,
             "prompt_digest": "f" * 64,
             "input_digest": self.session.manifest["context_digest"],
             "specification_id": None if self.bootstrap_role else str(plan.pk),
@@ -62,16 +72,81 @@ class FactoryFixture(NativeProtocolMixin):
         self.agent_intent.save(update_fields=["payload"])
         self.run.refresh_from_db()
 
-    def document(self, *, role="build", round=1):
+    def complete_repair(self):
+        self.initial_agent_intent = self.agent_intent
+        self.initial_workspace_entry = self.workspace_entry
+        original = self.changed
+        repaired = pack(
+            {
+                "requirements.txt": (0o644, b"example==1.0\n"),
+                "file.py": (0o644, b"repaired\n"),
+            }
+        )
+        manifest = dict(
+            self.session.manifest,
+            operation_id=str(uuid4()),
+            source_digest=source_digest(original),
+            context_digest="2" * 64,
+        )
+        self.session = replace(self.session, manifest=manifest)
+        self.native_attempt = 1
+        self.agent_intent = self.write(
+            "native_intent",
+            native.agent_intent(
+                **self.common(),
+                session=self.session,
+                workspace_id=str(self.workspace_entry.operation_id),
+            ),
+        )
+        self.intent_ids.append(str(self.agent_intent.operation_id))
+        observed = self.observed(manifest["operation_id"], original, repaired)
+        self.operations.append(observed)
+        outcome = {
+            "result": observed["result"],
+            "artifact": observed["result"]["artifact"],
+            "source": repaired,
+            "successful": True,
+            "session_id": "ses_repaired-provider-identity",
+            "agent_version": self.session.agent_version,
+        }
+        self.write(
+            "native_agent",
+            native.agent_result(
+                intent_id=str(self.agent_intent.operation_id),
+                session=self.session,
+                outcome=outcome,
+                observed=observed,
+            ),
+        )
+        self.changed = repaired
+        self.workspace = dict(self.workspace, tree_sha="6" * 40, commit_sha="7" * 40)
+        self.workspace_entry = self.write(
+            "native_workspace",
+            native.workspace_record(
+                context_id=str(self.context.pk),
+                context_digest=self.context.digest,
+                attempt=self.native_attempt,
+                agent_intent_id=str(self.agent_intent.operation_id),
+                workspace=self.workspace,
+                source_digest=source_digest(repaired),
+                export_digest=source_digest(repaired),
+                requirements_digest=self.profile.dependency_digest,
+            ),
+        )
+        self.complete_validation()
+
+    def document(self, *, role="build", round=None):
         plan = self.run.plans.last()
-        result = self.run.evidence.get(kind="native_agent")
+        result = self.run.evidence.get(
+            kind="native_agent", payload__intent_id=str(self.agent_intent.operation_id)
+        )
         receipt = result.payload["receipt"]
         value = {
             "schema_version": 1,
             "run_id": str(self.run.pk),
             "operation_id": str(uuid4()),
             "role": role,
-            "round": round,
+            "round": round if round is not None else self.native_attempt + 1,
             "context_id": str(self.context.pk),
             "context_digest": self.context.digest,
             "specification_id": str(plan.pk),
@@ -108,6 +183,12 @@ class FactoryFixture(NativeProtocolMixin):
                 "risk": "low",
                 "surfaces": [],
                 "rule_digest": "a" * 64,
+            }
+        if role == "checks":
+            value.pop("execution")
+            value["payload"] = {
+                "validation_id": str(self.validation.operation_id),
+                "state": "passed",
             }
         if role in {"intake", "specification"}:
             repository = self.context.document["repository"]
@@ -246,6 +327,33 @@ class FactoryArtifactTests(FactoryFixture, TestCase):
             with self.subTest(field=field), self.assertRaises(RunConflict):
                 self.save(document)
 
+    def test_routing_service_rejects_round_two_from_round_one_build(self):
+        self.assertEqual(self.agent_intent.payload["data"]["factory"]["round"], 1)
+        with self.assertRaisesMessage(RunConflict, "original build role/round"):
+            self.save(self.document(role="routing", round=2))
+        self.assertFalse(FactoryArtifact.objects.exists())
+
+    def test_candidate_requires_original_build_role(self):
+        self.agent_intent.payload["data"]["factory"]["role"] = "reviewer-code"
+        self.agent_intent.save(update_fields=["payload"])
+        with self.assertRaisesMessage(RunConflict, "original build role/round"):
+            self.save(self.document(role="routing"))
+
+    def test_candidate_requires_native_build_attempt_to_match_round(self):
+        self.agent_intent.payload["data"]["factory"]["round"] = 2
+        self.agent_intent.save(update_fields=["payload"])
+        with self.assertRaisesMessage(RunConflict, "original build role/round"):
+            self.save(self.document(role="routing", round=2))
+
+    def test_candidate_requires_workspace_attempt_to_match_round(self):
+        workspace = copy.deepcopy(self.workspace_entry.payload)
+        workspace["attempt"] = 1
+        self.run.evidence.create(
+            operation_id=uuid4(), kind="native_workspace", payload=workspace
+        )
+        with self.assertRaisesMessage(RunConflict, "original build role/round"):
+            self.save(self.document(role="routing"))
+
     def test_missing_native_result_cannot_attest_a_build(self):
         document = self.document()
         document["execution"]["result_id"] = str(uuid4())
@@ -358,7 +466,19 @@ class FactoryArtifactTests(FactoryFixture, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         entry = response.json()["artifact"]
         for round in range(1, 13):
-            self.save(self.document(role="routing", round=round))
+            document = self.document(role="routing", round=round)
+            FactoryArtifact.objects.create(
+                run=self.run,
+                context=self.context,
+                specification=self.run.plans.last(),
+                sequence=round + 1,
+                operation_id=document["operation_id"],
+                document=document,
+                digest=native.digest(document),
+                reason="Pagination fixture",
+                role="routing",
+                round=round,
+            )
         url = reverse("runner_factory_artifacts", args=[self.run.pk])
         page = self.client.get(url).json()
         self.assertEqual(len(page["artifacts"]), 10)
@@ -414,13 +534,20 @@ class FactoryChecksTests(FactoryFixture, TestCase):
     factory_checks = True
 
     def checks_document(self):
-        document = self.document(role="routing")
-        document["role"] = "checks"
-        document["payload"] = {
-            "validation_id": str(self.validation.operation_id),
-            "state": "passed",
-        }
-        return document
+        return self.document(role="checks")
+
+    def test_checks_http_rejects_round_two_from_round_one_build_and_validation(self):
+        self.assertEqual(self.agent_intent.payload["data"]["factory"]["round"], 1)
+        self.assertEqual(self.validation_intent.payload["attempt"], 0)
+        response = self.post_document(self.document(role="checks", round=2))
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertFalse(FactoryArtifact.objects.exists())
+
+    def test_checks_require_validation_attempt_to_match_round(self):
+        self.validation_intent.payload["attempt"] = 1
+        self.validation_intent.save(update_fields=["payload"])
+        with self.assertRaisesMessage(RunConflict, "saved outcome/context"):
+            self.save(self.checks_document())
 
     def test_checks_bind_saved_validation_to_current_candidate_and_specification(self):
         entry = self.save(self.checks_document())
@@ -451,6 +578,33 @@ class FactoryChecksTests(FactoryFixture, TestCase):
         )
         with self.assertRaisesMessage(RunConflict, "saved outcome/context"):
             self.save(self.checks_document())
+
+
+@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+class FactoryRepairRoundTests(FactoryFixture, TestCase):
+    factory_repair = True
+
+    def test_second_build_and_validation_accept_round_two_artifacts(self):
+        self.assertEqual(self.initial_agent_intent.payload["attempt"], 0)
+        self.assertEqual(self.agent_intent.payload["attempt"], 1)
+        self.assertEqual(self.agent_intent.payload["data"]["factory"]["round"], 2)
+        self.assertEqual(self.workspace_entry.payload["attempt"], 1)
+        self.assertEqual(self.validation_intent.payload["attempt"], 1)
+        self.assertNotEqual(
+            self.initial_workspace_entry.payload["source_digest"],
+            self.workspace_entry.payload["source_digest"],
+        )
+        build = self.save()
+        self.assertEqual(build.round, 2)
+        routing = self.save(self.document(role="routing"))
+        self.assertEqual(routing.round, 2)
+        response = self.post_document(self.document(role="checks"))
+        self.assertEqual(response.status_code, 200, response.content)
+        checks = FactoryArtifact.objects.get(
+            operation_id=response.json()["artifact"]["operation_id"]
+        )
+        self.assertEqual(checks.round, 2)
+        self.assertEqual(checks.specification_id, build.specification_id)
 
 
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
