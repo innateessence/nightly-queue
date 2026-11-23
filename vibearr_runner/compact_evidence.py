@@ -388,11 +388,15 @@ def validate_payload(name, payload, source, worker, images, containers=None):
             != payload["controller_after"]["runner_id"]
         ):
             raise ValueError
-        if (
-            after["RestartCount"] <= before["RestartCount"]
-            or after["State"]["Running"] is not True
-        ):
+        if after["State"]["Running"] is not True:
             raise ValueError
+        if any(
+            type(observed["RestartCount"]) is not int or observed["RestartCount"] < 0
+            for observed in (before, after)
+        ):
+            raise ValueError(
+                "Runner restart counters must be nonnegative integer observations."
+            )
         for observed in (payload["controller_before"], payload["controller_after"]):
             if (
                 observed["kind"] != "actual-controller-process"
