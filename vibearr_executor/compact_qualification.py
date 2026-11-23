@@ -163,7 +163,7 @@ def lost_start(runtime, operation):
         connection.shutdown(socket.SHUT_WR)
     client = Client("http://127.0.0.1:8791", runtime.control_token)
     deadline = time.monotonic() + 10
-    while client.status(operation).get("state") == "prepared":
+    while client.status(operation).get("state") != "running":
         if time.monotonic() >= deadline:
             raise Rejected("Lost-response start was not durably reconciled.")
         time.sleep(0.05)
