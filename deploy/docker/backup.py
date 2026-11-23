@@ -11,6 +11,8 @@ import subprocess
 from uuid import UUID, uuid4
 
 from .backup_files import (
+    COMPACT_VOLUMES,
+    VOLUMES,
     capture,
     checksum,
     inventory,
@@ -21,6 +23,21 @@ from .backup_files import (
 
 
 ROOT = Path("/var/lib/vibearr-backups")
+RUNTIME = "compact-worker-v1"
+
+
+def backup_volumes(manifest):
+    if manifest.get("schema_version") == 2:
+        if manifest.get("runtime") != "integrated-runner-v1":
+            raise ValueError("Legacy backup runtime is invalid.")
+        return VOLUMES
+    if (
+        manifest.get("schema_version") != 3
+        or manifest.get("runtime") != RUNTIME
+        or manifest.get("state_volumes") != list(COMPACT_VOLUMES)
+    ):
+        raise ValueError("Compact backup state-volume mapping is invalid.")
+    return COMPACT_VOLUMES
 
 
 def write_json(path, value):
@@ -118,7 +135,7 @@ def backup(quiesced):
         )
     connection(source)
     require_idle()
-    records = inventory(source)
+    records = inventory(source, COMPACT_VOLUMES)
     state_size = sum(value["bytes"] for value in records) + len(records) * 8192
     database_size = int(sql("SELECT pg_database_size(current_database())"))
     required = state_size + database_size * 2 + 256 * 1024**2
@@ -143,15 +160,16 @@ def backup(quiesced):
         check=True,
         timeout=3600,
     )
-    records = capture(source, directory / "state.tar")
+    records = capture(source, directory / "state.tar", COMPACT_VOLUMES)
     write_json(directory / "inventory.json", records)
     if before != fingerprint():
         raise ValueError(
             "Database changed during backup; stop all state writers first."
         )
     manifest = {
-        "schema_version": 2,
-        "runtime": "integrated-runner-v1",
+        "schema_version": 3,
+        "runtime": RUNTIME,
+        "state_volumes": list(COMPACT_VOLUMES),
         "backup_id": identity,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "database": {
@@ -188,11 +206,8 @@ def verified_backup(identity):
     if directory.is_symlink() or not directory.is_dir():
         raise ValueError("Select a complete backup directory without links.")
     manifest = read_json(directory / "manifest.json")
-    if (
-        manifest.get("schema_version") != 2
-        or manifest.get("runtime") != "integrated-runner-v1"
-        or manifest.get("backup_id") != identity
-    ):
+    backup_volumes(manifest)
+    if manifest.get("backup_id") != identity:
         raise ValueError("Backup manifest does not bind this snapshot.")
     if set(manifest.get("artifacts", {})) != {
         "database.dump",
@@ -214,20 +229,30 @@ def verified_backup(identity):
 
 def restore_files(identity):
     directory, manifest = verified_backup(identity)
+    volumes = backup_volumes(manifest)
+    if volumes != COMPACT_VOLUMES:
+        raise ValueError(
+            "Restore legacy integrated snapshots with their original tools before an explicit compact migration."
+        )
     if any(Path("/restore-database").iterdir()):
         raise ValueError("Restore requires an empty dedicated PostgreSQL volume.")
     records = read_json(directory / "inventory.json")
     required = require_capacity(
-        Path("/restore"), records, manifest["database"].get("physical_bytes")
+        Path("/restore"), records, manifest["database"].get("physical_bytes"), volumes
     )
     if shutil.disk_usage("/restore-database").free < required:
         raise ValueError(
             "PostgreSQL restore storage cannot fit this snapshot and its reserve."
         )
-    restore(directory / "state.tar", records, Path("/restore"))
+    restore(directory / "state.tar", records, Path("/restore"), volumes)
     marker = Path("/restore/runner-secrets/restore-required.json")
     write_json(marker, {"backup_id": identity, "new_runner_identity_required": True})
     os.chown(marker, 10001, 10001)
+    worker_marker = Path("/restore/worker-secrets/restore-required.json")
+    write_json(
+        worker_marker, {"backup_id": identity, "new_worker_identity_required": True}
+    )
+    os.chown(worker_marker, 10001, 10001)
     print(
         json.dumps(
             {
