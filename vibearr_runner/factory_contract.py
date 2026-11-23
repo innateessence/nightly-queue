@@ -11,6 +11,7 @@ from . import native_contract as native
 MAX_ARTIFACT_BYTES = 256 * 1024
 MAX_DEPTH = 20
 MAX_ROUND = 100
+MAX_EXECUTION_TIMESTAMP = 253402300799
 REVIEWERS = {"reviewer-code", "reviewer-security", "reviewer-ux", "reviewer-ui"}
 AGENT_ROLES = {"intake", "specification", "build", "decision"} | REVIEWERS
 ROLES = AGENT_ROLES | {"checks", "routing"}
@@ -153,7 +154,10 @@ def execution(value):
         raise FactoryContractError(str(exc)) from None
     for key in ("started_at", "ended_at"):
         number = value[key]
-        if type(number) not in {int, float} or not math.isfinite(number) or number < 0:
+        if (
+            type(number) not in {int, float}
+            or not 0 <= number <= MAX_EXECUTION_TIMESTAMP
+        ):
             raise FactoryContractError(
                 "Record actual finite native execution timestamps."
             )
@@ -162,12 +166,15 @@ def execution(value):
 
 
 def validate_role_intent(value):
-    if not isinstance(value, dict) or set(value) != {
+    expected = {
         "role",
         "round",
         "prompt_digest",
         "input_digest",
-    }:
+    }
+    if isinstance(value, dict) and "specification_id" in value:
+        expected.update({"specification_id", "specification_digest"})
+    if not isinstance(value, dict) or set(value) != expected:
         raise FactoryContractError("Record the exact factory role dispatch descriptor.")
     if value["role"] not in AGENT_ROLES:
         raise FactoryContractError("Only native agent roles have dispatch descriptors.")
@@ -177,6 +184,15 @@ def validate_role_intent(value):
         )
     sha(value["prompt_digest"])
     sha(value["input_digest"])
+    if "specification_id" in value:
+        if value["specification_id"] is None:
+            if value["specification_digest"] != "":
+                raise FactoryContractError(
+                    "Unbound factory dispatch cannot name a specification digest."
+                )
+        else:
+            identifier(value["specification_id"])
+            sha(value["specification_digest"])
     return deepcopy(value)
 
 

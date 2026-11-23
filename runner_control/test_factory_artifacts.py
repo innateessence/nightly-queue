@@ -1,6 +1,7 @@
 import copy
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from threading import Barrier
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ from django.db import close_old_connections, connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from credentials.test_models import TEST_KEY
 from vibearr_runner import factory_contract as contract
@@ -18,13 +20,22 @@ from work_queue.services import requeue_items
 
 from .factory_models import FactoryArtifact
 from .factory_services import save_artifact
-from .models import Run, RunnerIdentity
+from .models import Run, RunRetention, RunnerIdentity
+from .plan_services import save_plan
+from .retention import eligible, purge_run
 from .services import RunConflict, RunNotFound
 from .test_native_protocol import NativeProtocolMixin
 from .test_support import CONTROLLER_SECRET
 
 
 class FactoryFixture(NativeProtocolMixin):
+    bootstrap_role = ""
+    factory_checks = False
+
+    def complete_agent(self):
+        if not hasattr(self, "workspace_entry"):
+            super().complete_agent()
+
     def setUp(self):
         super().setUp()
         self.worker_identity = {
@@ -34,12 +45,19 @@ class FactoryFixture(NativeProtocolMixin):
             "worker_boot": str(uuid4()),
             "binding_digest": "e" * 64,
         }
+        if self.bootstrap_role:
+            self.changed = self.original
         self.complete_agent()
+        if self.factory_checks:
+            self.complete_validation()
+        plan = self.run.plans.last()
         self.agent_intent.payload["data"]["factory"] = {
-            "role": "build",
+            "role": self.bootstrap_role or "build",
             "round": 1,
             "prompt_digest": "f" * 64,
             "input_digest": self.session.manifest["context_digest"],
+            "specification_id": None if self.bootstrap_role else str(plan.pk),
+            "specification_digest": "" if self.bootstrap_role else plan.digest,
         }
         self.agent_intent.save(update_fields=["payload"])
         self.run.refresh_from_db()
@@ -91,6 +109,30 @@ class FactoryFixture(NativeProtocolMixin):
                 "surfaces": [],
                 "rule_digest": "a" * 64,
             }
+        if role in {"intake", "specification"}:
+            repository = self.context.document["repository"]
+            value.update(
+                specification_id=None,
+                specification_digest="",
+                source_digest=self.context.document["source_digest"],
+                tree_sha=repository["base_tree_sha"],
+                base_sha=repository["base_revision"],
+                head_sha="",
+            )
+            value["payload"] = {
+                "scope": "Requested work",
+                "criteria": ["Works"],
+                "exclusions": [],
+                "verification": ["Run a real check"],
+            }
+            if role == "intake":
+                value["payload"].update(
+                    verdict="accept",
+                    rationale="Clear request",
+                    questions=[],
+                    risk="low",
+                    surfaces=[],
+                )
         return value
 
     def save(
@@ -216,6 +258,52 @@ class FactoryArtifactTests(FactoryFixture, TestCase):
         with self.assertRaises(RunConflict):
             self.save()
 
+    def test_historical_unbound_dispatch_cannot_authorize_new_candidate_artifacts(self):
+        descriptor = self.agent_intent.payload["data"]["factory"]
+        descriptor.pop("specification_id")
+        descriptor.pop("specification_digest")
+        self.agent_intent.save(update_fields=["payload"])
+        self.assertEqual(contract.validate_role_intent(descriptor), descriptor)
+        with self.assertRaisesMessage(RunConflict, "dispatch-time specification"):
+            self.save()
+
+    def test_completed_native_execution_cannot_be_rebound_to_a_revised_plan(self):
+        original_intent = copy.deepcopy(self.agent_intent.payload)
+        original = self.run.plans.last()
+        replacement = save_plan(
+            runner=self.runner,
+            run_id=self.run.pk,
+            claim_token=self.claim,
+            operation_id=uuid4(),
+            document=dict(
+                original.document,
+                approach="A materially revised implementation approach",
+            ),
+            reason="Revise the implementation approach",
+        )
+        self.run.refresh_from_db()
+        self.assertLess(self.agent_intent.created_at, replacement.created_at)
+        with self.assertRaisesMessage(RunConflict, "dispatch-time specification"):
+            self.save()
+        self.assertEqual(self.post_document().status_code, 409)
+        self.agent_intent.refresh_from_db()
+        self.assertEqual(self.agent_intent.payload, original_intent)
+        self.assertFalse(FactoryArtifact.objects.exists())
+
+    def test_routing_cannot_rebind_an_old_candidate_to_a_revised_plan(self):
+        original = self.run.plans.last()
+        save_plan(
+            runner=self.runner,
+            run_id=self.run.pk,
+            claim_token=self.claim,
+            operation_id=uuid4(),
+            document=dict(original.document, approach="New acceptance implementation"),
+            reason="Revise plan",
+        )
+        self.run.refresh_from_db()
+        with self.assertRaisesMessage(RunConflict, "dispatch-time specification"):
+            self.save(self.document(role="routing"))
+
     def test_native_worker_or_session_cannot_be_changed(self):
         for field in ("model", "session_id", "agent_version", "input_source_digest"):
             document = self.document()
@@ -298,6 +386,14 @@ class FactoryArtifactTests(FactoryFixture, TestCase):
         document["payload"]["summary"] = "x" * (contract.MAX_ARTIFACT_BYTES + 1)
         self.assertEqual(self.post_document(document).status_code, 400)
 
+    def test_huge_execution_timestamps_return_http_validation_errors(self):
+        for key in ("started_at", "ended_at"):
+            document = self.document()
+            document["execution"][key] = 10**1000
+            with self.subTest(key=key):
+                self.assertEqual(self.post_document(document).status_code, 400)
+        self.assertFalse(FactoryArtifact.objects.exists())
+
     def test_deep_and_invalid_round_artifacts_are_rejected(self):
         for round in (True, 0, -1, 101):
             with self.subTest(round=round), self.assertRaises(ValidationError):
@@ -311,6 +407,145 @@ class FactoryArtifactTests(FactoryFixture, TestCase):
             nested = child
         with self.assertRaises(ValidationError):
             self.save(document)
+
+
+@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+class FactoryChecksTests(FactoryFixture, TestCase):
+    factory_checks = True
+
+    def checks_document(self):
+        document = self.document(role="routing")
+        document["role"] = "checks"
+        document["payload"] = {
+            "validation_id": str(self.validation.operation_id),
+            "state": "passed",
+        }
+        return document
+
+    def test_checks_bind_saved_validation_to_current_candidate_and_specification(self):
+        entry = self.save(self.checks_document())
+        self.assertEqual(entry.role, "checks")
+        self.assertEqual(entry.specification_id, self.run.plans.last().pk)
+
+    def test_checks_cannot_rebind_an_old_candidate_to_a_revised_plan(self):
+        original = self.run.plans.last()
+        save_plan(
+            runner=self.runner,
+            run_id=self.run.pk,
+            claim_token=self.claim,
+            operation_id=uuid4(),
+            document=dict(
+                original.document, approach="A revised implementation approach"
+            ),
+            reason="Revise plan after validation",
+        )
+        self.run.refresh_from_db()
+        with self.assertRaisesMessage(RunConflict, "dispatch-time specification"):
+            self.save(self.checks_document())
+
+    def test_checks_require_the_exact_current_workspace_reference(self):
+        self.run.evidence.create(
+            operation_id=uuid4(),
+            kind="native_workspace",
+            payload=self.workspace_entry.payload,
+        )
+        with self.assertRaisesMessage(RunConflict, "saved outcome/context"):
+            self.save(self.checks_document())
+
+
+@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+class FactoryBootstrapTests(FactoryFixture, TestCase):
+    bootstrap_role = "intake"
+
+    def test_bootstrap_intake_explicitly_binds_no_prior_specification(self):
+        entry = self.save(self.document(role="intake"))
+        self.assertIsNone(entry.specification_id)
+        self.assertEqual(entry.document["specification_digest"], "")
+
+    def test_bootstrap_requires_explicit_dispatch_specification_pair(self):
+        descriptor = self.agent_intent.payload["data"]["factory"]
+        descriptor.pop("specification_id")
+        descriptor.pop("specification_digest")
+        self.agent_intent.save(update_fields=["payload"])
+        with self.assertRaises(RunConflict):
+            self.save(self.document(role="intake"))
+
+
+@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+class FactorySpecificationBootstrapTests(FactoryFixture, TestCase):
+    bootstrap_role = "specification"
+
+    def test_bootstrap_specification_explicitly_binds_no_prior_specification(self):
+        entry = self.save(self.document(role="specification"))
+        self.assertIsNone(entry.specification_id)
+        self.assertEqual(entry.document["specification_digest"], "")
+
+
+@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+class FactoryRetentionTests(FactoryFixture, TestCase):
+    def finish(self, *, state="completed", acknowledged=True):
+        now = timezone.now()
+        Run.objects.filter(pk=self.run.pk).update(
+            state=state,
+            active_slot=1 if state == "active" else None,
+            finished_at=now - timedelta(days=365),
+        )
+        self.run.refresh_from_db()
+        RunRetention.objects.create(
+            run=self.run, reporting_acknowledged_at=now if acknowledged else None
+        )
+        return now
+
+    def test_eligible_factory_run_purges_documents_and_retains_digest_summary(self):
+        artifact = self.save(self.document(role="routing"))
+        now = self.finish()
+        self.assertTrue(eligible(self.run))
+        result = purge_run(self.run.pk, now)
+        self.assertEqual(result.documents_removed, 3)
+        self.assertFalse(self.run.factory_artifacts.exists())
+        self.assertFalse(self.run.plans.exists())
+        self.assertFalse(self.run.contexts.exists())
+        summary = self.run.evidence.get(kind="factory_retention").payload
+        self.assertEqual(summary["count"], 1)
+        self.assertEqual(
+            summary["digest"],
+            native.digest(
+                [
+                    {
+                        "sequence": 1,
+                        "role": "routing",
+                        "round": 1,
+                        "digest": artifact.digest,
+                    }
+                ]
+            ),
+        )
+        self.assertEqual(purge_run(self.run.pk, now).documents_removed, 3)
+        self.assertEqual(self.run.evidence.filter(kind="factory_retention").count(), 1)
+
+    def test_active_factory_run_remains_protected(self):
+        artifact = self.save()
+        now = self.finish(state="active")
+        with self.assertRaises(RunConflict):
+            purge_run(self.run.pk, now)
+        self.assertTrue(FactoryArtifact.objects.filter(pk=artifact.pk).exists())
+
+    def test_unacknowledged_factory_run_remains_protected(self):
+        artifact = self.save()
+        now = self.finish(acknowledged=False)
+        with self.assertRaises(RunConflict):
+            purge_run(self.run.pk, now)
+        self.assertTrue(FactoryArtifact.objects.filter(pk=artifact.pk).exists())
+
+    def test_pending_approval_preserves_factory_documents(self):
+        artifact = self.save()
+        now = self.finish()
+        self.run.approvals.create(
+            operation_id=uuid4(), action={}, binding_digest="a" * 64
+        )
+        with self.assertRaises(RunConflict):
+            purge_run(self.run.pk, now)
+        self.assertTrue(FactoryArtifact.objects.filter(pk=artifact.pk).exists())
 
 
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)

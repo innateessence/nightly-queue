@@ -38,6 +38,17 @@ def evidence(run, operation_id, kind):
     return entry.payload
 
 
+def bind_dispatched_specification(intent, document):
+    descriptor = intent["data"].get("factory")
+    if not isinstance(descriptor, dict) or any(
+        key not in descriptor or descriptor[key] != document[key]
+        for key in ("specification_id", "specification_digest")
+    ):
+        raise RunConflict(
+            "Factory artifact differs from its dispatch-time specification."
+        )
+
+
 def bind_source(run, document, context):
     if document["role"] in {"intake", "specification"}:
         repository = context.document["repository"]
@@ -70,6 +81,8 @@ def bind_source(run, document, context):
             raise RunConflict(
                 "Factory candidate differs from the current owned native workspace."
             )
+        intent = evidence(run, workspace["agent_intent_id"], "native_intent")
+        bind_dispatched_specification(intent, document)
         return workspace
     actual = tuple(
         document[key] for key in ("source_digest", "tree_sha", "base_sha", "head_sha")
@@ -102,6 +115,8 @@ def bind_execution(run, document, context, workspace):
         "round": document["round"],
         "prompt_digest": execution["prompt_digest"],
         "input_digest": execution["input_digest"],
+        "specification_id": document["specification_id"],
+        "specification_digest": document["specification_digest"],
     }
     if descriptor != expected_descriptor:
         raise RunConflict("Factory artifact differs from its registered role dispatch.")
@@ -151,6 +166,9 @@ def bind_checks(run, document):
     payload = document["payload"]
     validation = evidence(run, payload["validation_id"], "native_validation")
     intent = evidence(run, validation["intent_id"], "native_intent")
+    workspace_id = (
+        run.evidence.filter(kind="native_workspace").latest("pk").operation_id
+    )
     expected = {key: document[key] for key in ("tree_sha", "source_digest")}
     if any(validation[key] != value for key, value in expected.items()):
         raise RunConflict("Factory checks differ from their native validation source.")
@@ -160,6 +178,7 @@ def bind_checks(run, document):
         or intent["kind"] != "validation"
         or intent["context_id"] != document["context_id"]
         or intent["context_digest"] != document["context_digest"]
+        or intent["data"]["workspace_id"] != str(workspace_id)
     ):
         raise RunConflict("Factory checks differ from their saved outcome/context.")
 
