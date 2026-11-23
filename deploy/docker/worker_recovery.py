@@ -16,6 +16,17 @@ from .backup_files import read_json
 TOKENS = ("control-token", "mediation-token")
 
 
+def registered_channel(path, info):
+    return (
+        path.parent == Path("/restore/worker-secrets")
+        and path.name in TOKENS
+        and stat.S_ISREG(info.st_mode)
+        and stat.S_IMODE(info.st_mode) == 0o440
+        and info.st_uid == 0
+        and info.st_gid == 10001
+    )
+
+
 def sync(path):
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
@@ -42,9 +53,10 @@ def token(path):
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor, "rb") as stream:
         info = os.fstat(stream.fileno())
+        private = not info.st_mode & 0o077
         if (
             not stat.S_ISREG(info.st_mode)
-            or info.st_mode & 0o077
+            or not (private or registered_channel(path, info))
             or info.st_size > 4096
         ):
             raise ValueError("Worker token must be a private bounded regular file.")
