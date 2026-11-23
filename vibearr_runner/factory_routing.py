@@ -41,11 +41,28 @@ PATH_RULES = (
     {"pattern": "*.tsx", "surfaces": ["ui"]},
     {"pattern": "*.vue", "surfaces": ["ui"]},
     {"pattern": "credentials/**", "surfaces": ["security"]},
+    {"pattern": "runner_control/**", "surfaces": ["security"]},
+    {"pattern": "vibearr_runner/**", "surfaces": ["security"]},
+    {"pattern": "vibearr_app/**", "surfaces": ["security"]},
     {"pattern": "vibearr_executor/**", "surfaces": ["security"]},
-    {"pattern": "**/*auth*.py", "surfaces": ["security"]},
-    {"pattern": "**/*credential*.py", "surfaces": ["security"]},
-    {"pattern": "**/*security*.py", "surfaces": ["security"]},
-    {"pattern": "**/*middleware*.py", "surfaces": ["security"]},
+    {"pattern": "*auth*.py", "surfaces": ["security"]},
+    {"pattern": "*credential*.py", "surfaces": ["security"]},
+    {"pattern": "*security*.py", "surfaces": ["security"]},
+    {"pattern": "*middleware*.py", "surfaces": ["security"]},
+    {"pattern": "work_queue/services.py", "surfaces": ["security"]},
+    {"pattern": "work_queue/api.py", "surfaces": ["security"]},
+    {"pattern": "work_queue/github.py", "surfaces": ["security"]},
+    {"pattern": "work_queue/import*.py", "surfaces": ["security"]},
+    {"pattern": "requirements*.txt", "surfaces": ["security"]},
+    {"pattern": "pyproject.toml", "surfaces": ["security"]},
+    {"pattern": "uv.lock", "surfaces": ["security"]},
+    {"pattern": "poetry.lock", "surfaces": ["security"]},
+    {"pattern": "Pipfile*", "surfaces": ["security"]},
+    {"pattern": "package.json", "surfaces": ["security"]},
+    {"pattern": "**/package.json", "surfaces": ["security"]},
+    {"pattern": "*package-lock.json", "surfaces": ["security"]},
+    {"pattern": "*pnpm-lock.yaml", "surfaces": ["security"]},
+    {"pattern": "*yarn.lock", "surfaces": ["security"]},
     {"pattern": "Dockerfile*", "surfaces": ["security"]},
     {"pattern": "docker-compose*", "surfaces": ["security"]},
     {"pattern": "deploy/**", "surfaces": ["security"]},
@@ -166,6 +183,10 @@ def normalize_configuration(value):
     result["protected_paths"] = sorted(
         set(PROTECTED_PATHS) | set(map(checked_pattern, protected))
     )
+    if len(result["protected_paths"]) > 100:
+        raise FactoryRoutingError(
+            "Configure at most 100 protected paths including required paths."
+        )
     known = text_list(result["known_paths"], "known path")
     result["known_paths"] = sorted(set(map(checked_pattern, known)))
     unknown = text_list(result["unknown_path_reviewers"], "reviewer", REVIEWERS)
@@ -186,6 +207,10 @@ def normalize_configuration(value):
         {"pattern": pattern, "surfaces": sorted(surfaces)}
         for pattern, surfaces in sorted(normalized.items())
     ]
+    if len(result["path_rules"]) > 100:
+        raise FactoryRoutingError(
+            "Configure at most 100 factory path rules including required routes."
+        )
     digest(result)
     return result
 

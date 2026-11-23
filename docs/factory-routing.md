@@ -34,6 +34,18 @@ risk. Path rules may add reviews but cannot remove the built-in safety routes or
 protected validation paths. A prior round's requirements remain when routing a
 changed candidate under the same frozen settings.
 
+Built-in security routes cover root and nested authentication, credential,
+security and middleware modules; trusted runner/control/app code; queue authority;
+and dependency manifests. Ordinary project model code can still require only code
+review. Replacement rules cannot remove these security routes. The 100-entry
+rule/protected-path limits include required defaults, so accepted frozen settings
+remain valid when normalized again.
+
+Trusted Git diff callers must retain both sides of renames, for example with
+`git diff --name-only --no-renames -z <base> <head> --`, and pass deleted paths to
+the router. Plain `--name-only` with rename detection can omit a security or UI
+source path; the router cannot reconstruct a path the caller discarded.
+
 Routing records contain rule, path-inventory and factory-settings digests. The
 factory lifecycle persists them as immutable role artifacts bound to the current
 run, specification and candidate; the settings digest does not replace the full

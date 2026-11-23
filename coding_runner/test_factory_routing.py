@@ -1,4 +1,8 @@
 from copy import deepcopy
+import os
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
 from vibearr_runner.factory_routing import (
@@ -30,8 +34,49 @@ class FactoryRoutingTests(unittest.TestCase):
             require_factory_capabilities(self.configuration, {})
 
     def test_code_review_is_always_required(self):
-        result = route(self.configuration, self.intake, ["work_queue/services.py"])
+        result = route(self.configuration, self.intake, ["work_queue/models.py"])
         self.assertEqual(result["required_reviewers"], ["reviewer-code"])
+
+    def test_root_authentication_module_requires_security_review(self):
+        result = route(self.configuration, self.intake, ["auth.py"])
+        self.assertIn("reviewer-security", result["required_reviewers"])
+
+    def test_root_credential_module_requires_security_review(self):
+        result = route(self.configuration, self.intake, ["credentials.py"])
+        self.assertIn("reviewer-security", result["required_reviewers"])
+
+    def test_root_security_module_requires_security_review(self):
+        result = route(self.configuration, self.intake, ["security.py"])
+        self.assertIn("reviewer-security", result["required_reviewers"])
+
+    def test_authority_boundaries_override_low_risk_intake(self):
+        paths = [
+            "runner_control/native_services.py",
+            "runner_control/delivery.py",
+            "vibearr_runner/native_preflight.py",
+            "vibearr_runner/factory_routing.py",
+            "vibearr_runner/policy.py",
+            "vibearr_app/settings.py",
+            "work_queue/services.py",
+        ]
+        for path in paths:
+            with self.subTest(path=path):
+                result = route(self.configuration, self.intake, [path])
+                self.assertIn("reviewer-security", result["required_reviewers"])
+
+    def test_dependency_manifests_require_security_review(self):
+        for path in ("requirements.txt", "pyproject.toml", "web/package.json"):
+            with self.subTest(path=path):
+                result = route(self.configuration, self.intake, [path])
+                self.assertIn("reviewer-security", result["required_reviewers"])
+
+    def test_custom_rules_cannot_downgrade_authority_boundaries(self):
+        self.configuration["path_rules"] = []
+        self.configuration["known_paths"] = ["*"]
+        result = route(
+            self.configuration, self.intake, ["runner_control/native_services.py"]
+        )
+        self.assertIn("reviewer-security", result["required_reviewers"])
 
     def test_template_paths_add_both_ui_reviewers(self):
         result = route(
@@ -91,7 +136,7 @@ class FactoryRoutingTests(unittest.TestCase):
     def test_prior_required_reviewers_survive_candidate_edits(self):
         first = route(self.configuration, self.intake, ["templates/base.html"])
         second = route(
-            self.configuration, self.intake, ["work_queue/services.py"], previous=first
+            self.configuration, self.intake, ["work_queue/models.py"], previous=first
         )
         self.assertEqual(second["required_reviewers"], first["required_reviewers"])
 
@@ -141,6 +186,30 @@ class FactoryRoutingTests(unittest.TestCase):
         normalize_configuration(self.configuration)
         self.assertEqual(self.configuration, original)
 
+    def test_custom_rules_cannot_overflow_normalized_rule_budget(self):
+        self.configuration["path_rules"] = [
+            {"pattern": f"custom/{index}", "surfaces": ["security"]}
+            for index in range(100)
+        ]
+        with self.assertRaisesRegex(FactoryRoutingError, "including required routes"):
+            normalize_configuration(self.configuration)
+
+    def test_custom_protected_paths_cannot_overflow_normalized_budget(self):
+        self.configuration["protected_paths"] = [
+            f"custom/{index}" for index in range(100)
+        ]
+        with self.assertRaisesRegex(FactoryRoutingError, "including required paths"):
+            normalize_configuration(self.configuration)
+
+    def test_maximum_normalized_rules_remain_idempotent(self):
+        available = 100 - len(self.configuration["path_rules"])
+        self.configuration["path_rules"] += [
+            {"pattern": f"custom/{index}", "surfaces": ["security"]}
+            for index in range(available)
+        ]
+        normalized = normalize_configuration(self.configuration)
+        self.assertEqual(normalize_configuration(normalized), normalized)
+
     def test_routing_is_independent_of_changed_path_order(self):
         first = route(
             self.configuration,
@@ -157,6 +226,74 @@ class FactoryRoutingTests(unittest.TestCase):
     def test_routed_capability_gate_cannot_skip_code_review(self):
         with self.assertRaisesRegex(FactoryRoutingError, "Code review"):
             require_route_capabilities({"required_reviewers": []}, {})
+
+
+class FactoryGitRoutingTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.repository = Path(directory.name)
+        self.git("init", "-q")
+
+    def git(self, *arguments):
+        command = [
+            "git",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=Factory routing tests",
+            "-c",
+            "user.email=factory-routing@invalid",
+            "-C",
+            str(self.repository),
+            *arguments,
+        ]
+        environment = dict(
+            os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null"
+        )
+        return subprocess.check_output(command, env=environment)
+
+    def rename_inventory(self, original, destination):
+        source = self.repository / original
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("unchanged source retained across an exact rename\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "Original source")
+        base = self.git("rev-parse", "HEAD").decode().strip()
+        target = self.repository / destination
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(target)
+        self.git("add", "-A")
+        self.git("commit", "-qm", "Rename source")
+        collapsed = self.git("diff", "--name-only", "-M", "-z", base, "HEAD", "--")
+        self.assertEqual(collapsed.decode().split("\x00")[:-1], [destination])
+        inventory = self.git(
+            "diff", "--name-only", "--no-renames", "-z", base, "HEAD", "--"
+        )
+        paths = inventory.decode().split("\x00")[:-1]
+        self.assertEqual(set(paths), {original, destination})
+        return paths
+
+    def test_real_git_inventory_preserves_security_rename(self):
+        paths = self.rename_inventory("credentials/auth.py", "work_queue/models.py")
+        result = route({}, {"risk": "low", "surfaces": []}, paths)
+        self.assertIn("reviewer-security", result["required_reviewers"])
+
+    def test_real_git_inventory_preserves_ui_rename(self):
+        paths = self.rename_inventory("templates/base.html", "work_queue/models.py")
+        result = route({}, {"risk": "low", "surfaces": []}, paths)
+        self.assertIn("reviewer-ui", result["required_reviewers"])
+        self.assertIn("reviewer-ux", result["required_reviewers"])
+
+    def test_real_git_inventory_preserves_protected_rename(self):
+        original = ".github/workflows/test.yml"
+        paths = self.rename_inventory(original, "work_queue/models.py")
+        result = route({}, {"risk": "low", "surfaces": []}, paths)
+        self.assertEqual(result["protected_paths"], [original])
+        self.assertEqual(result["risk"], "high")
+        self.assertIn("reviewer-security", result["required_reviewers"])
 
 
 class FactoryPreflightTests(unittest.TestCase):
