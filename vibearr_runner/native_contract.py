@@ -265,6 +265,8 @@ def validate_context(value):
         "fetched_at",
         "acceptance_criteria",
     }
+    if isinstance(value, dict) and "factory" in value:
+        expected.add("factory")
     fields(value, expected)
     if (
         type(value["schema_version"]) is not int
@@ -306,6 +308,10 @@ def validate_context(value):
     profile_from_reference(value["validation_profile"])
     timestamp(value["fetched_at"])
     criteria(value["acceptance_criteria"])
+    if "factory" in value:
+        from .factory_roles import validate_context as validate_factory_context
+
+        validate_factory_context(value["factory"], value["runtime_binding_digest"])
     return copied(value, 4 * 1024 * 1024)
 
 
@@ -322,6 +328,7 @@ def context_document(
     runtime_binding_digest,
     acceptance_criteria,
     fetched_at=None,
+    factory=None,
 ):
     return validate_context(
         {
@@ -341,24 +348,25 @@ def context_document(
             "runtime_binding_digest": runtime_binding_digest,
             "fetched_at": fetched_at or datetime.now(timezone.utc).isoformat(),
             "acceptance_criteria": acceptance_criteria,
+            **({"factory": factory} if factory is not None else {}),
         }
     )
 
 
 @checked
 def validate_plan(value):
-    fields(
-        value,
-        {
-            "schema_version",
-            "execution_kind",
-            "context_id",
-            "context_digest",
-            "problem",
-            "approach",
-            "acceptance_criteria",
-        },
-    )
+    expected = {
+        "schema_version",
+        "execution_kind",
+        "context_id",
+        "context_digest",
+        "problem",
+        "approach",
+        "acceptance_criteria",
+    }
+    if isinstance(value, dict) and "factory_specification_id" in value:
+        expected.update({"factory_specification_id", "factory_specification_digest"})
+    fields(value, expected)
     if (
         type(value["schema_version"]) is not int
         or value["schema_version"] != 2
@@ -370,12 +378,21 @@ def validate_plan(value):
     text(value["problem"], 2000)
     text(value["approach"], 20000)
     criteria(value["acceptance_criteria"])
+    if "factory_specification_id" in value:
+        identifier(value["factory_specification_id"])
+        sha(value["factory_specification_digest"])
     return copied(value, 256 * 1024)
 
 
 @checked
 def plan_document(
-    *, context_id, context_digest, problem, approach, acceptance_criteria
+    *,
+    context_id,
+    context_digest,
+    problem,
+    approach,
+    acceptance_criteria,
+    factory_specification=None,
 ):
     return validate_plan(
         {
@@ -386,6 +403,14 @@ def plan_document(
             "problem": problem,
             "approach": approach,
             "acceptance_criteria": acceptance_criteria,
+            **(
+                {
+                    "factory_specification_id": factory_specification["id"],
+                    "factory_specification_digest": factory_specification["digest"],
+                }
+                if factory_specification is not None
+                else {}
+            ),
         }
     )
 
@@ -450,11 +475,19 @@ def intent_document(kind, *, context_id, context_digest, policy_digest, attempt,
 
 @checked
 def agent_intent(
-    *, context_id, context_digest, policy_digest, attempt, session, workspace_id=None
+    *,
+    context_id,
+    context_digest,
+    policy_digest,
+    attempt,
+    session,
+    workspace_id=None,
+    factory=None,
 ):
     data = {
         "session": session.to_data() if hasattr(session, "to_data") else session,
         "workspace_id": workspace_id,
+        **({"factory": factory} if factory is not None else {}),
     }
     return intent_document(
         "agent",
@@ -570,7 +603,13 @@ def validate_intent(value):
     if kind == "agent":
         from .native_sessions import NativeSession
 
-        fields(data, {"session", "workspace_id"})
+        expected = {"session", "workspace_id"}
+        if isinstance(data, dict) and "factory" in data:
+            from .factory_contract import validate_role_intent
+
+            validate_role_intent(data["factory"])
+            expected.add("factory")
+        fields(data, expected)
         session = NativeSession.from_data(data["session"])
         account(session.account)
         if session.account["backend"] != session.adapter:
@@ -974,6 +1013,18 @@ def validation_result(*, intent_id, session, operations, provenance=None, result
     return validate_native_artifact("native_validation", value)
 
 
+def validate_factory_paths(paths):
+    if not isinstance(paths, list) or not paths or len(paths) > 10000:
+        raise NativeContractError("Record a bounded nonempty factory path inventory.")
+    for path in paths:
+        text(path, 4096)
+        if "\\" in path or any(part in {"", ".", ".."} for part in path.split("/")):
+            raise NativeContractError("Factory paths must be canonical relative paths.")
+    if paths != sorted(set(paths)):
+        raise NativeContractError("Factory paths must be sorted and unique.")
+    return paths
+
+
 @checked
 def workspace_record(
     *,
@@ -985,7 +1036,9 @@ def workspace_record(
     source_digest,
     export_digest,
     requirements_digest,
+    factory_paths=None,
 ):
+    inventory = {} if factory_paths is None else {"factory_paths": factory_paths}
     return validate_native_artifact(
         "native_workspace",
         {
@@ -998,6 +1051,7 @@ def workspace_record(
             "source_digest": source_digest,
             "export_digest": export_digest,
             "requirements_digest": requirements_digest,
+            **inventory,
         },
     )
 
@@ -1179,8 +1233,11 @@ def validate_native_artifact(kind, value):
                 "source_digest",
                 "export_digest",
                 "requirements_digest",
-            },
+            }
+            | ({"factory_paths"} if "factory_paths" in value else set()),
         )
+        if "factory_paths" in value:
+            validate_factory_paths(value["factory_paths"])
         for key in ("context_id", "agent_intent_id"):
             identifier(value[key])
         for key in (

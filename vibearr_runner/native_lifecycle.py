@@ -686,6 +686,7 @@ class NativeLifecycle:
             validation_profile=self.profile,
             runtime_binding_digest=self.executor.capabilities()["binding_digest"],
             acceptance_criteria=criteria,
+            **self.factory_context(),
         )
         pending = self.native.setdefault(
             "context_request", {"operation_id": str(uuid4()), "document": data}
@@ -710,6 +711,10 @@ class NativeLifecycle:
                 "Saved native context is unavailable or differs from the immutable request."
             )
         self.native["context"] = saved
+        if self.snapshot["effective"].get("factory", {}).get("enabled"):
+            self.native["phase"] = "factory"
+            self.save()
+            return "continue"
         plan = plan_document(
             context_id=saved["id"],
             context_digest=saved["digest"],
@@ -741,6 +746,19 @@ class NativeLifecycle:
         self.native["phase"] = "agent"
         self.save()
         return "continue"
+
+    def factory_context(self):
+        configuration = self.snapshot["effective"].get("factory", {})
+        if not configuration.get("enabled"):
+            return {}
+        from .factory_roles import freeze_context
+
+        return {"factory": freeze_context(configuration, self.executor.capabilities())}
+
+    def factory(self):
+        from .factory_lifecycle import FactoryLifecycle
+
+        return FactoryLifecycle(self).step()
 
     def agent_prompt(self):
         parts = [
