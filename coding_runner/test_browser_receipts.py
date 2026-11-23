@@ -1,4 +1,7 @@
 import json
+import random
+import struct
+import zlib
 import os
 from pathlib import Path
 import tempfile
@@ -14,6 +17,30 @@ from vibearr_runner.browser_receipts import (
     validate_receipt,
 )
 from vibearr_runner.merge_acceptance import capture_page, screenshot_receipts
+
+
+def fixture_png(*, reverse=False, width=1440, height=1000):
+    def chunk(kind, payload):
+        return (
+            struct.pack(">I", len(payload))
+            + kind
+            + payload
+            + struct.pack(">I", zlib.crc32(kind + payload))
+        )
+
+    pixels = random.Random(3 if reverse else 2).randbytes(width * 3 * 16)
+    rows = [
+        b"\x00" + pixels[index * width * 3 : (index + 1) * width * 3]
+        for index in range(16)
+    ]
+    raw = b"".join(rows[index % 16] for index in range(height))
+    header = chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + header
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
 
 
 class DockerBrowserReceiptTests(unittest.TestCase):
@@ -35,8 +62,6 @@ class DockerBrowserReceiptTests(unittest.TestCase):
 
     def frame(self, name="desktop", theme="light"):
         path = self.capture / f"queue-{name}-{theme}.png"
-        from vibearr_executor.test_local_services import fixture_png
-
         path.write_bytes(fixture_png())
         return capture_receipt(
             self.binding,
@@ -87,8 +112,6 @@ class DockerBrowserReceiptTests(unittest.TestCase):
             self.validate(frame)
 
     def test_changed_png_cannot_reuse_its_capture_receipt(self):
-        from vibearr_executor.test_local_services import fixture_png
-
         frame = self.frame()
         Path(frame["path"]).write_bytes(fixture_png(reverse=True))
         with self.assertRaisesRegex(ValueError, "differs"):
