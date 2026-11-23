@@ -26,7 +26,7 @@ from .runtime import durable
 from .server import Handler
 from .slot_http import SlotServer
 from .slot_network import configure
-from .slots import SlotRuntime
+from .slots import PreparationCancellation, SlotRuntime
 
 
 MAX_BROWSER = 16 * 1024 * 1024
@@ -222,24 +222,12 @@ class CompactWorkerRuntime(SlotRuntime):
             if self.active or self.fenced:
                 raise Conflict("Worker phase is active or fenced.")
             self.pending_operation = operation_id
-            self.cancel.clear()
-            try:
-                return super().start(operation_id)
-            except Exception:
-                try:
-                    try:
-                        self.end_phase(operation_id)
-                    finally:
-                        try:
-                            if self.database is not None:
-                                self.database.reset(operation_id)
-                        finally:
-                            self.reset()
-                except Exception:
-                    self.fenced = (
-                        "Phase preparation cleanup is unknown; worker remains fenced."
-                    )
-                raise
+            return super().start(operation_id)
+
+    def prepare_database(self, operation_id, deadline):
+        return self.database.prepare(
+            operation_id, cancel=PreparationCancellation(self.cancel, deadline)
+        )
 
     def prepare_source(self, profile, record):
         self.source_modes = {}
@@ -313,6 +301,8 @@ class CompactWorkerRuntime(SlotRuntime):
     def stop(self, operation_id):
         with self.lock:
             prepared = self.record(operation_id)["state"] == "prepared"
+            if operation_id == self.active:
+                self.cancel.set()
         if self.connections is not None:
             try:
                 self.connections.revoke(operation_id)

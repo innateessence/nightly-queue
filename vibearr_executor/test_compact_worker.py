@@ -146,16 +146,26 @@ class CompactWorkerTests(unittest.TestCase):
 
     def test_unknown_prepare_cleanup_fences_reuse(self):
         self.runtime.prepare(self.manifest)
+        durable(
+            self.runtime.path(self.manifest["operation_id"]) / "backend-secret",
+            b"fixture",
+        )
         with (
+            patch("vibearr_executor.slots.terminate_children"),
             patch.object(
-                SlotRuntime, "start", side_effect=RuntimeError("failed prepare")
+                self.runtime, "capabilities", return_value={"qualified": True}
+            ),
+            patch.object(
+                self.runtime,
+                "prepare_phase",
+                side_effect=RuntimeError("failed prepare"),
             ),
             patch.object(
                 self.runtime, "reset", side_effect=RuntimeError("unknown cleanup")
             ),
         ):
-            with self.assertRaisesRegex(RuntimeError, "failed prepare"):
-                self.runtime.start(self.manifest["operation_id"])
+            self.runtime.start(self.manifest["operation_id"])
+            self.runtime.thread.join(timeout=2)
         self.assertIn("unknown", self.runtime.fenced)
 
     def test_browser_output_cannot_be_exported_for_an_agent_operation(self):
