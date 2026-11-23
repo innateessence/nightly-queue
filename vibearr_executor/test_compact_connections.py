@@ -721,6 +721,7 @@ class WorkerConnectionTests(ConnectionTests):
             self.connections.network(operation_id, profile)
         refreshed = login_files(access="new-access-token")
         install_login("codex", refreshed, self.runtime.home)
+        self.record["task_launch_intent"] = True
         self.connections.finish(operation_id, self.runtime.home, self.record)
         self.assertEqual(self.manager._login("codex", 1), refreshed)
         self.assertFalse(self.connections._path(operation_id).exists())
@@ -788,17 +789,110 @@ class WorkerConnectionTests(ConnectionTests):
         with self.assertRaises((KeyError, ValueError)):
             self.connections.finish(operation_id, self.runtime.home, self.record)
         self.assertTrue(self.connections._path(operation_id).exists())
+        self.assertTrue((self.root / "logins/execution-lease.json").exists())
 
     def test_prepared_cancellation_returns_original_login_without_home_access(self):
         operation_id = self.worker.scope["operation_id"]
         self.connections.validate_secret(
             operation_id, json.dumps(self.prepare()), self.record
         )
-        self.runtime.record = lambda _operation_id: {"state": "prepared"}
+        self.record["task_launch_intent"] = False
         self.connections.revoke(operation_id)
         self.connections.finish(operation_id, self.runtime.home, self.record)
         self.assertEqual(self.manager._login("codex", 1), self.files)
         self.assertFalse(self.connections._path(operation_id).exists())
+
+    def test_prelaunch_cancellation_returns_original_login_after_grant_activation(self):
+        operation_id = self.worker.scope["operation_id"]
+        self.connections.validate_secret(
+            operation_id, json.dumps(self.prepare()), self.record
+        )
+        profile = type("Profile", (), {"phase": "agent"})()
+        with patch(
+            "vibearr_executor.compact_connections.address", return_value="172.20.0.2"
+        ):
+            self.connections.network(operation_id, profile)
+        self.record["task_launch_intent"] = False
+        self.connections.revoke(operation_id)
+        self.assertTrue((self.root / "logins/execution-lease.json").exists())
+        self.connections.finish(operation_id, self.runtime.home, self.record)
+        self.assertEqual(self.manager._login("codex", 1), self.files)
+        self.assertFalse((self.root / "logins/execution-lease.json").exists())
+
+    def test_prelaunch_lost_return_keeps_original_payload_and_account_fence(self):
+        operation_id = self.worker.scope["operation_id"]
+        self.connections.validate_secret(
+            operation_id, json.dumps(self.prepare()), self.record
+        )
+        self.record["task_launch_intent"] = False
+        self.connections.revoke(operation_id)
+        with (
+            patch.object(
+                self.connections.client, "request", side_effect=Conflict("Lost return")
+            ),
+            self.assertRaises(Conflict),
+        ):
+            self.connections.finish(operation_id, self.runtime.home, self.record)
+        self.assertEqual(
+            self.connections._state(operation_id)["return"]["files"], self.files
+        )
+        self.assertTrue((self.root / "logins/execution-lease.json").exists())
+        self.connections.finish(operation_id, self.runtime.home, self.record)
+        self.assertFalse((self.root / "logins/execution-lease.json").exists())
+
+    def test_ambiguous_launch_intent_cannot_return_original_login(self):
+        operation_id = self.worker.scope["operation_id"]
+        self.connections.validate_secret(
+            operation_id, json.dumps(self.prepare()), self.record
+        )
+        self.connections.revoke(operation_id)
+        for launch_intent in (True, None, 0, "false"):
+            with self.subTest(launch_intent=launch_intent):
+                self.record["task_launch_intent"] = launch_intent
+                with self.assertRaises((KeyError, ValueError)):
+                    self.connections.finish(
+                        operation_id, self.runtime.home, self.record
+                    )
+                self.assertNotIn("return", self.connections._state(operation_id))
+                self.assertTrue((self.root / "logins/execution-lease.json").exists())
+
+    def test_prelaunch_return_rejects_stale_worker_scope(self):
+        operation_id = self.worker.scope["operation_id"]
+        self.connections.validate_secret(
+            operation_id, json.dumps(self.prepare()), self.record
+        )
+        self.record["task_launch_intent"] = False
+        self.worker.scope["worker_boot"] = str(uuid4())
+        with self.assertRaises(Conflict):
+            self.connections.finish(operation_id, self.runtime.home, self.record)
+        self.assertNotIn("return", self.connections._state(operation_id))
+        self.assertTrue((self.root / "logins/execution-lease.json").exists())
+
+    def test_prelaunch_return_rejects_different_manifest_context(self):
+        operation_id = self.worker.scope["operation_id"]
+        self.connections.validate_secret(
+            operation_id, json.dumps(self.prepare()), self.record
+        )
+        self.record["task_launch_intent"] = False
+        self.record["manifest"]["context_digest"] = "d" * 64
+        with self.assertRaises(Conflict):
+            self.connections.finish(operation_id, self.runtime.home, self.record)
+        self.assertNotIn("return", self.connections._state(operation_id))
+        self.assertTrue((self.root / "logins/execution-lease.json").exists())
+
+    def test_prelaunch_return_rejects_different_selected_account(self):
+        operation_id = self.worker.scope["operation_id"]
+        self.connections.validate_secret(
+            operation_id, json.dumps(self.prepare()), self.record
+        )
+        self.record["task_launch_intent"] = False
+        state = self.connections._state(operation_id)
+        state["original_files"] = login_files(account="other-account")
+        self.connections._path(operation_id).write_bytes(canonical(state))
+        with self.assertRaises(Rejected):
+            self.connections.finish(operation_id, self.runtime.home, self.record)
+        self.assertEqual(self.manager._login("codex", 1), self.files)
+        self.assertTrue((self.root / "logins/execution-lease.json").exists())
 
 
 class ClaudeRefreshTests(unittest.TestCase):

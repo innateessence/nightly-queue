@@ -189,6 +189,11 @@ class WorkerConnections:
         if not path.exists():
             return
         state = self._state(operation_id)
+        if state["scope"] != self._scope(operation_id) or any(
+            record["manifest"][key] != state["scope"][key]
+            for key in ("operation_id", "source_digest", "context_digest")
+        ):
+            raise Conflict("Connection return differs from the worker operation.")
         data = state.get("return")
         if data is None:
             data = {
@@ -198,7 +203,10 @@ class WorkerConnections:
             }
             provider = state["provider"]
             if provider in {"codex", "claude"}:
-                data["files"] = collect(provider, home)
+                if record.get("task_launch_intent") is False:
+                    data["files"] = state["original_files"]
+                else:
+                    data["files"] = collect(provider, home)
             state["return"] = data
             durable(path, canonical(state))
         result = self.client.request("/v4/connections/finish", data)
@@ -219,19 +227,6 @@ class WorkerConnections:
         if not self._path(operation_id).exists():
             return
         state = self._state(operation_id)
-        if (
-            self.runtime.record(operation_id)["state"] == "prepared"
-            and "return" not in state
-        ):
-            data = {
-                "scope": state["scope"],
-                "token": state["grant"]["token"],
-                "terminated": True,
-            }
-            if "original_files" in state:
-                data["files"] = state["original_files"]
-            state["return"] = data
-            durable(self._path(operation_id), canonical(state))
         return self.client.request(
             "/v4/connections/revoke",
             {"scope": state["scope"], "token": state["grant"]["token"]},
