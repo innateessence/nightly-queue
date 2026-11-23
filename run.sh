@@ -14,8 +14,9 @@ docker compose build
 [[ $(docker image inspect "$VIBEARR_WORKER_BASE_IMAGE" --format '{{.Id}}') == "$VIBEARR_WORKER_BASE_IMAGE_ID" ]] || { echo 'Worker toolchain image changed during build.' >&2; exit 1; }
 VIBEARR_RUNNER_IMAGE_ID=''
 VIBEARR_WORKER_IMAGE_ID=''
+image_listing=$(docker compose config --images) || exit $?
 while IFS= read -r image; do
-  selected=$(docker image inspect "$image" --format '{{index .Config.Labels "io.vibearr.role"}} {{.Id}}' 2>/dev/null || true)
+  selected=$(docker image inspect "$image" --format '{{index .Config.Labels "io.vibearr.role"}} {{.Id}}' 2>/dev/null) || continue
   case "$selected" in
     'runner '*)
       [[ -z $VIBEARR_RUNNER_IMAGE_ID ]] || { echo 'More than one runner image was selected.' >&2; exit 1; }
@@ -26,7 +27,7 @@ while IFS= read -r image; do
       VIBEARR_WORKER_IMAGE_ID=${selected#worker }
       ;;
   esac
-done < <(docker compose config --images)
+done <<< "$image_listing"
 [[ -n $VIBEARR_RUNNER_IMAGE_ID ]] || { echo 'Build the registered runner image first.' >&2; exit 1; }
 [[ -n $VIBEARR_WORKER_IMAGE_ID ]] || { echo 'Build the registered worker image first.' >&2; exit 1; }
 export VIBEARR_RUNNER_IMAGE_ID VIBEARR_WORKER_IMAGE_ID
