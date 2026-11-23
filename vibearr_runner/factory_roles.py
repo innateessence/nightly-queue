@@ -117,6 +117,7 @@ def prompt(role, context, configuration, payload=None):
         "Do not publish, merge, close issues, or change runtime settings. Return exactly one finite JSON object matching the required result schema; no Markdown fences or extra commentary.",
         "Preserve every requested acceptance criterion. If the requested outcome is unclear or cannot be retained, ask a concrete question or return an unresolved verdict; never silently narrow it.",
         "Accepted intake must carry every context.acceptance_criteria string verbatim in its criteria, then add the concrete task criteria. Preserve those criterion IDs and descriptions in specification.",
+        "When a previous specification accompanies a base refresh, retain every prior criterion ID and description; the changed base does not narrow accepted work.",
         "For specification, retain every accepted intake criterion ID and description, and add concrete verification steps. Scope exclusions cannot remove accepted work.",
         "For build, map every saved criterion ID to its concrete implemented change; do not use criterion descriptions as IDs or omit accepted criteria.",
         "For UI/UX review, inspect the authenticated screenshot bundle under /input/browser when supplied; missing visual evidence is blocked, not a pass.",

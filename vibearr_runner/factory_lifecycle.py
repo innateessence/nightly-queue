@@ -52,11 +52,15 @@ class FactoryLifecycle:
             )
         stage = self.state["stage"]
         if stage == "intake":
-            artifact = self.run_role("intake", key="intake")
+            previous = self.state.get("previous_specification")
+            payload = {"previous_specification": previous} if previous else None
+            artifact = self.run_role("intake", key="intake", payload=payload)
             if artifact is None:
                 return "running"
             result = artifact["document"]["payload"]
             retain_requested_criteria(self.host.native["context"]["document"], result)
+            if previous and result["verdict"] == "accept":
+                retain_criteria(previous["document"]["payload"], result)
             if result["verdict"] != "accept":
                 outcome = (
                     "needs_info" if result["verdict"] == "needs_info" else "rejected"
@@ -303,6 +307,7 @@ class FactoryLifecycle:
         self.host.save()
         self.host.resources.reserve(self.host.run_id, request["operation_id"])
         if not data.get("session"):
+            self.host.require_human_dispatch()
             grant = self.host.secret("implementation")
             if (
                 grant["credential"]["id"] != account["credential_id"]
@@ -357,6 +362,7 @@ class FactoryLifecycle:
         observed = adapter.reconcile(session)
         self.recovery().observe_role(request["operation_id"], observed)
         if observed["state"] == "not-started":
+            self.host.require_human_dispatch()
             if not self.recovery().before_dispatch(request["operation_id"]):
                 return None
             data["start_intent"] = True

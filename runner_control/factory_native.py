@@ -27,6 +27,80 @@ def context_binding(run, document):
     )
 
 
+def generation_binding(run, document, previous):
+    from .merge_services import latest_workspace, provider, provider_checked
+    from .native_services import all_intents, native_policy, workspace_fact
+
+    generation = document.get("factory_generation")
+    if generation is None:
+        raise RunConflict(
+            "Factory context refresh requires an explicit bounded base generation."
+        )
+    contract.validate_factory_generation(generation)
+    if (
+        generation["previous_context_id"] != str(previous.pk)
+        or generation["previous_context_digest"] != previous.digest
+    ):
+        raise RunConflict("Factory generation must extend the current context.")
+    workspace = workspace_fact(run, generation["previous_workspace_id"], previous)
+    if workspace.pk != latest_workspace(run).pk:
+        raise RunConflict("Factory generation must extend the current candidate.")
+    plan = (
+        run.plans.filter(pk=run.plan_reference, context=previous).first()
+        if run.plan_reference
+        else None
+    )
+    if plan is None:
+        raise RunConflict(
+            "Factory base refresh requires the current candidate specification."
+        )
+    candidate_binding(run, plan, workspace.payload)
+    plan_binding(run, plan.document, previous)
+    expected_attempt = workspace.payload["attempt"] + 1
+    if generation["attempt"] != expected_attempt or expected_attempt > min(
+        2, native_policy(run).repair_limit
+    ):
+        raise RunConflict(
+            "Factory base refresh consumes the consecutive shared repair allowance."
+        )
+    if any(entry.payload["attempt"] >= expected_attempt for entry in all_intents(run)):
+        raise RunConflict(
+            "Factory base refresh cannot reuse an already spent repair attempt."
+        )
+    if (
+        run.evidence.filter(kind="native_delivery").exists()
+        or run.evidence.filter(kind="native_intent", payload__kind="delivery").exists()
+    ):
+        raise RunConflict("Published factory work requires an explicit new attempt.")
+    identity = workspace.payload["workspace"]
+    if (
+        generation["old_base"] != identity["base_revision"]
+        or generation["new_base"] != document["repository"]["base_revision"]
+    ):
+        raise RunConflict("Factory generation differs from its inspected old/new base.")
+    for key in (
+        "repository_id",
+        "repository",
+        "repository_url",
+        "base_branch",
+        "branch",
+    ):
+        if document["repository"][key] != previous.document["repository"][key]:
+            raise RunConflict(
+                "Factory base refresh must preserve the frozen repository identity."
+            )
+    if (
+        document["factory"] != previous.document["factory"]
+        or document["acceptance_criteria"] != previous.document["acceptance_criteria"]
+    ):
+        raise RunConflict(
+            "Factory base refresh must preserve qualified roles and requested criteria."
+        )
+    current_base = provider_checked(lambda: provider(run).base_sha(identity))()
+    if current_base != generation["new_base"]:
+        raise RunConflict("Factory base refresh differs from the current remote base.")
+
+
 def latest_artifact(run, ctx, role, *, round=None):
     artifacts = run.factory_artifacts.filter(context=ctx, role=role)
     if round is not None:
@@ -103,6 +177,15 @@ def repair_trigger(run, ctx, expected, round):
     require_artifact_binding(entries, expected)
 
 
+def retain_generation_criteria(run, ctx, payload):
+    generation = ctx.document.get("factory_generation")
+    if generation is None:
+        return
+    previous = run.contexts.get(pk=generation["previous_context_id"])
+    specification = latest_artifact(run, previous, "specification")
+    retain_criteria(specification.document["payload"], payload)
+
+
 def plan_binding(run, document, ctx):
     settings(run)
     specification = latest_artifact(run, ctx, "specification")
@@ -114,6 +197,7 @@ def plan_binding(run, document, ctx):
         )
     retain_requested_criteria(ctx.document, intake.document["payload"])
     retain_criteria(intake.document["payload"], payload)
+    retain_generation_criteria(run, ctx, payload)
     expected = [
         value if isinstance(value, str) else value.get("description", value.get("text"))
         for value in payload["criteria"]
@@ -199,6 +283,9 @@ def dispatch_binding(run, value, ctx, policy):
                 "Reconcile the original factory role operation; do not replace it."
             )
     expected_source = ctx.document["source_digest"]
+    generation_attempt = ctx.document.get("factory_generation", {}).get("attempt", 0)
+    if value["attempt"] < generation_attempt:
+        raise RunConflict("Factory role precedes its current base generation.")
     if role in {"intake", "specification"}:
         if (
             descriptor["specification_id"] is not None
@@ -207,14 +294,18 @@ def dispatch_binding(run, value, ctx, policy):
             raise RunConflict(
                 "Intake/specification bootstrap must not claim an existing specification."
             )
-        if value["attempt"] != 0 or value["data"]["workspace_id"] is not None:
+        if (
+            value["attempt"] != generation_attempt
+            or value["data"]["workspace_id"] is not None
+        ):
             raise RunConflict(
                 "Intake/specification inspect only the frozen initial source."
             )
         if role == "specification":
-            intake = latest_artifact(run, ctx, "intake", round=1)
+            intake = latest_artifact(run, ctx, "intake", round=round)
             if intake.document["payload"].get("verdict") != "accept":
                 raise RunConflict("Specification requires accepted intake.")
+            retain_generation_criteria(run, ctx, intake.document["payload"])
     else:
         plan = (
             run.plans.filter(pk=run.plan_reference, context=ctx).first()
@@ -234,7 +325,7 @@ def dispatch_binding(run, value, ctx, policy):
             )
         plan_binding(run, plan.document, ctx)
         workspace_id = value["data"]["workspace_id"]
-        if role == "build" and value["attempt"] == 0:
+        if role == "build" and value["attempt"] == generation_attempt:
             if workspace_id is not None:
                 raise RunConflict(
                     "Initial factory build starts from the inspected base."
