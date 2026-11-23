@@ -7,7 +7,11 @@ from .contracts import Rejected
 
 class QualificationTargetTests(unittest.TestCase):
     def setUp(self):
-        self.targets = {"runner": "172.23.0.2", "app": "172.24.0.2", "postgres": "172.25.0.2"}
+        self.targets = {
+            "runner": "172.23.0.2",
+            "app": "172.24.0.2",
+            "postgres": "172.25.0.2",
+        }
         resolver = patch("vibearr_executor.compact_qualification.socket.getaddrinfo")
         self.resolve = resolver.start()
         self.addCleanup(resolver.stop)
