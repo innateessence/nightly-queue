@@ -819,6 +819,20 @@ def _controller_identity():
     os.setuid(10001)
 
 
+def prepare_state_directory(state):
+    state = Path(state).absolute()
+    if state.resolve() != state:
+        raise Rejected("Runner state path cannot contain links.")
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    descriptor = os.open(state, flags)
+    try:
+        os.fchmod(descriptor, 0o700)
+        os.fchown(descriptor, 10001, 10001)
+    finally:
+        os.close(descriptor)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -844,8 +858,7 @@ def main():
     from vibearr_executor.ollama_relay import Handler as RelayHandler, Relay
 
     os.umask(0o077)
-    state.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chown(state, 10001, 10001)
+    prepare_state_directory(state)
     if not token_path.exists():
         durable(token_path, secrets.token_urlsafe(48).encode())
     os.chown(token_path, 10001, 10001)
