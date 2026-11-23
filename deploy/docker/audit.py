@@ -1,15 +1,80 @@
 """Audit operator-rendered Compose facts without exposing an engine API."""
 
 import json
+import re
 import sys
+
+
+SERVICES = {"app", "postgres", "runner", "worker"}
+NETWORKS = {
+    "app": {"database", "runner-api", "app-egress"},
+    "postgres": {"database"},
+    "runner": {"runner-api", "worker-control", "runner-egress"},
+    "worker": {"worker-control"},
+}
+WORKER_LIMITS = {
+    "memory_bytes": 4096 * 1024**2,
+    "memory_swap_bytes": 4096 * 1024**2,
+    "nano_cpus": 2_000_000_000,
+    "pids": 128,
+}
+IMAGE_KEYS = {"runner": "VIBEARR_RUNNER_IMAGE_ID", "worker": "VIBEARR_WORKER_IMAGE_ID"}
+APPLICATION_CREDENTIALS = {
+    "DJANGO_SECRET_KEY",
+    "VIBEARR_CREDENTIAL_KEY",
+    "NQ_CREDENTIAL_KEY",
+    "VIBEARR_POSTGRES_PASSWORD",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_PASSWORD_FILE",
+    "VIBEARR_API_TOKEN",
+    "NQ_API_TOKEN",
+}
+
+
+def environment_errors(name, environment):
+    errors = []
+    keys = set(environment)
+    if name in {"runner", "worker"} and keys & APPLICATION_CREDENTIALS:
+        errors.append(f"{name}: application credentials are forbidden")
+    if name == "worker" and keys & {
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "VIBEARR_RUNNER_API_TOKEN",
+        "VIBEARR_RUNNER_API_TOKEN_FILE",
+    }:
+        errors.append("worker: publication and controller credentials are forbidden")
+    return errors
+
+
+def isolation(name, networks, volumes, capabilities):
+    errors = []
+    if name in NETWORKS and set(networks) != NETWORKS[name]:
+        errors.append(f"{name}: networks differ from the registered service boundary")
+    if name == "worker":
+        if set(volumes) != {"worker-control", "worker-secrets"}:
+            errors.append(
+                "worker: only worker control and dedicated channel secrets may be mounted"
+            )
+    if name == "runner":
+        permitted = {"runner-data", "runner-secrets", "runner-logins", "worker-secrets"}
+        if set(volumes) != permitted:
+            errors.append(
+                "runner: only private journal, login and channel volumes may be mounted"
+            )
+        if set(capabilities) & {"NET_ADMIN", "SETPCAP"}:
+            errors.append("runner: task execution capabilities are forbidden")
+    return errors
 
 
 def audit(config):
     errors = []
-    if set(config["services"]) != {"app", "postgres", "runner"}:
+    if set(config["services"]) != SERVICES:
         errors.append(
-            "The default deployment must contain exactly app, postgres and runner."
+            "The default deployment must contain exactly app, postgres, runner and worker."
         )
+    for network in ("database", "runner-api", "worker-control"):
+        if config.get("networks", {}).get(network, {}).get("internal") is not True:
+            errors.append(f"{network}: trusted service network must be internal")
     for name, service in config["services"].items():
         for field in ("privileged", "pid", "ipc", "network_mode", "devices"):
             value = service.get(field)
@@ -20,15 +85,33 @@ def audit(config):
                 errors.append(f"{name}: runtime mount is not a named volume or tmpfs")
             if "docker.sock" in str(mount):
                 errors.append(f"{name}: engine socket mount")
-        if any(value in {"SYS_ADMIN", "ALL"} for value in service.get("cap_add", [])):
+        capabilities = {
+            value.upper().removeprefix("CAP_") for value in service.get("cap_add", [])
+        }
+        if capabilities & {"SYS_ADMIN", "ALL"}:
             errors.append(f"{name}: forbidden capabilities")
         if service.get("read_only") is not True:
             errors.append(f"{name}: writable image root")
         for key in service.get("environment", {}):
             if key.startswith("DOCKER_"):
                 errors.append(f"{name}: engine environment")
+        errors.extend(environment_errors(name, service.get("environment", {})))
         if service.get("ports") and name != "app":
             errors.append(f"{name}: private service publishes a host port")
+        volumes = {mount["source"] for mount in service.get("volumes", [])}
+        errors.extend(
+            isolation(name, service.get("networks", {}), volumes, capabilities)
+        )
+        if name in {"runner", "worker"}:
+            for mount in service.get("volumes", []):
+                if mount["source"] == "worker-secrets" and not mount.get("read_only"):
+                    errors.append(f"{name}: worker channel secrets must be read-only")
+            image = service.get("environment", {}).get(IMAGE_KEYS[name], "")
+            if not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
+                errors.append(f"{name}: select the actual registered image ID")
+            protocol = service.get("environment", {}).get("VIBEARR_RUNTIME_PROTOCOL")
+            if protocol != "compact-worker-v1":
+                errors.append(f"{name}: select the compact worker boundary")
     return errors
 
 
@@ -72,6 +155,8 @@ def inspect_containers(containers):
             errors.append(f"{name}: runtime engine socket")
         if any(value.startswith("DOCKER_") for value in container["Config"]["Env"]):
             errors.append(f"{name}: runtime engine environment")
+        environment = dict(value.split("=", 1) for value in container["Config"]["Env"])
+        errors.extend(environment_errors(service, environment))
         ports = host.get("PortBindings") or {}
         if ports and service != "app":
             errors.append(f"{name}: private runtime port published")
@@ -81,24 +166,35 @@ def inspect_containers(containers):
             "nano_cpus": host.get("NanoCpus"),
             "pids": host.get("PidsLimit"),
         }
-        if service == "runner":
+        if service in IMAGE_KEYS:
             environment = dict(
                 value.split("=", 1) for value in container["Config"]["Env"]
             )
-            if environment.get("VIBEARR_RUNNER_IMAGE_ID") != container["Image"]:
+            if environment.get(IMAGE_KEYS[service]) != container["Image"]:
                 errors.append(
-                    f"{name}: declared worker image differs from its actual image"
+                    f"{name}: declared {service} image differs from its actual image"
                 )
-            expected = {
-                "memory_bytes": 4096 * 1024**2,
-                "memory_swap_bytes": 4096 * 1024**2,
-                "nano_cpus": 2_000_000_000,
-                "pids": 128,
-            }
-            if limits != expected:
+            if service == "worker" and limits != WORKER_LIMITS:
                 errors.append(
                     f"{name}: actual worker ceilings differ from the registered slot"
                 )
+        labels = container["Config"]["Labels"]
+        project = labels.get("com.docker.compose.project", "")
+        if not project or service not in SERVICES:
+            errors.append(f"{name}: selected Compose service identity is missing")
+        else:
+            prefix = project + "_"
+            observed_networks = container.get("NetworkSettings", {}).get("Networks", {})
+            networks = {value.removeprefix(prefix) for value in observed_networks}
+            volumes = {
+                value.get("Name", "").rsplit("_", 1)[-1]
+                for value in container["Mounts"]
+                if value["Type"] == "volume"
+            }
+            errors.extend(isolation(service, networks, volumes, added))
+            for mount in container["Mounts"]:
+                if mount.get("Name") == prefix + "worker-secrets" and mount["RW"]:
+                    errors.append(f"{name}: worker channel secrets are writable")
         facts.append(
             {
                 "name": name,
@@ -113,9 +209,37 @@ def inspect_containers(containers):
     return {"schema_version": 1, "errors": errors, "containers": facts}
 
 
+def inspect_stack(containers):
+    report = inspect_containers(containers)
+    services = [item["service"] for item in report["containers"]]
+    if len(services) != len(SERVICES) or set(services) != SERVICES:
+        report["errors"].append(
+            "Actual stack must contain exactly one app, postgres, runner and worker."
+        )
+    projects = {
+        item["Config"]["Labels"].get("com.docker.compose.project")
+        for item in containers
+    }
+    if len(projects) != 1:
+        report["errors"].append("Actual containers must belong to one Compose project.")
+    by_service = {
+        item["Config"]["Labels"].get("com.docker.compose.service"): item
+        for item in containers
+    }
+    if {"runner", "worker"} <= by_service.keys():
+        runner = dict(
+            value.split("=", 1) for value in by_service["runner"]["Config"]["Env"]
+        )
+        if runner.get("VIBEARR_WORKER_IMAGE_ID") != by_service["worker"]["Image"]:
+            report["errors"].append(
+                "Runner selected worker image differs from the actual worker."
+            )
+    return report
+
+
 def main():
     if sys.argv[1:] == ["--inspect"]:
-        report = inspect_containers(json.load(sys.stdin))
+        report = inspect_stack(json.load(sys.stdin))
         print(json.dumps(report, indent=2))
         raise SystemExit(bool(report["errors"]))
     errors = audit(json.load(sys.stdin))

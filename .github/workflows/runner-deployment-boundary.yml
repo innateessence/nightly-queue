@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       project:
-        description: Existing three-container Compose project to inspect without enabling processing
+        description: Existing four-container Compose project to inspect without enabling processing
         required: true
 
 permissions:
@@ -13,9 +13,17 @@ permissions:
 jobs:
   boundary:
     runs-on: [self-hosted, runner-deployment-qualification]
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - name: Inspect the current integrated runner boot
+      - name: Check out trusted audit tooling
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Build disposable audit image
+        env:
+          BUILDX_CONFIG: ${{ runner.temp }}/boundary-buildx
+        run: docker build --target tools --tag "nq-boundary-audit:$GITHUB_RUN_ID" .
+      - name: Inspect the current compact worker boot
         shell: bash
         env:
           PROJECT: ${{ inputs.project }}
@@ -23,17 +31,20 @@ jobs:
           set -euo pipefail
           [[ "$PROJECT" =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]]
           mapfile -t ids < <(docker ps -q --filter "label=com.docker.compose.project=$PROJECT")
-          ((${#ids[@]} == 3))
-          mapfile -t runner < <(docker ps -q --filter "label=com.docker.compose.project=$PROJECT" --filter label=com.docker.compose.service=runner)
-          ((${#runner[@]} == 1))
-          docker exec "${runner[0]}" python -I -c 'import json; from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path("/run/vibearr/runner/control-token").read_text().strip()); r=c.capabilities(); assert r["runtime"] == "integrated-runner-v1" and r["qualified"] is True; print(json.dumps(r))' > "$RUNNER_TEMP/runner-boundary.json"
-          docker inspect "${ids[@]}" --format '{{.Name}} {{.Image}} {{.HostConfig.ReadonlyRootfs}}' > "$RUNNER_TEMP/runtime-images.txt"
+          ((${#ids[@]} == 4))
+          mapfile -t worker < <(docker ps -q --filter "label=com.docker.compose.project=$PROJECT" --filter label=com.docker.compose.service=worker)
+          ((${#worker[@]} == 1))
+          docker exec "${worker[0]}" python -I -c 'import json; from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path("/run/vibearr/worker/control-token").read_text().strip()); r=c.capabilities(); assert r["runtime"] == "compact-worker-v1" and r["qualified"] is True; print(json.dumps(r))' > "$RUNNER_TEMP/runner-boundary.json"
+          docker inspect "${ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "nq-boundary-audit:$GITHUB_RUN_ID" -m deploy.docker.audit --inspect > "$RUNNER_TEMP/runtime-inspection.json"
+      - name: Remove disposable audit image
+        if: always()
+        run: docker image rm --no-prune "nq-boundary-audit:$GITHUB_RUN_ID"
       - name: Upload actual deployment observations
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: runner-deployment-boundary
           path: |
             ${{ runner.temp }}/runner-boundary.json
-            ${{ runner.temp }}/runtime-images.txt
+            ${{ runner.temp }}/runtime-inspection.json
           if-no-files-found: error
           retention-days: 7
