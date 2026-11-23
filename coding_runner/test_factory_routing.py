@@ -1,3 +1,4 @@
+import importlib.util
 from copy import deepcopy
 import os
 from pathlib import Path
@@ -15,6 +16,9 @@ from vibearr_runner.factory_routing import (
     route,
 )
 from vibearr_runner.native_sessions import NativeSessionError
+
+
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
 
 
 class FactoryRoutingTests(unittest.TestCase):
@@ -296,6 +300,9 @@ class FactoryGitRoutingTests(unittest.TestCase):
         self.assertIn("reviewer-security", result["required_reviewers"])
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class FactoryPreflightTests(unittest.TestCase):
     def setUp(self):
         from .test_native_preflight import NativePreflightTests
