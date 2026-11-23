@@ -252,6 +252,25 @@ class WorkerBrowserReceiptTests(unittest.TestCase):
 
 
 class LocalServiceTests(unittest.TestCase):
+    def test_candidate_log_symlink_cannot_overwrite_trusted_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app, control = root / "app", root / "control"
+            app.mkdir()
+            control.mkdir()
+            sentinel = control / "sentinel"
+            sentinel.write_text("private control")
+            (app / "serve.log").symlink_to(sentinel)
+            services = LocalServices()
+            services.runtime = SimpleNamespace(path=lambda operation: control)
+            services.active = str(uuid4())
+            with patch("vibearr_executor.local_services.subprocess.Popen"):
+                services._spawn("serve", {}, app)
+            self.assertEqual(sentinel.read_text(), "private control")
+            logs = list(control.glob("app-serve-*.log"))
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(logs[0].stat().st_mode & 0o777, 0o600)
+
     def test_source_tree_matches_the_git_empty_tree(self):
         self.assertEqual(
             source_tree(pack({}), 40), "4b825dc642cb6eb9a060e54bf8d69288fbee4904"

@@ -48,6 +48,9 @@ def main():
             "Browser application requires its local disposable task database."
         )
     os.chdir(work)
+    dependencies = Path("/opt/candidate/venv/lib/python3.12/site-packages")
+    if dependencies.exists():
+        sys.path.insert(0, str(dependencies))
     sys.path.insert(0, str(work))
     os.environ["DJANGO_SETTINGS_MODULE"] = "vibearr_app.settings"
     from django.conf import settings
