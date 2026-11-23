@@ -161,6 +161,7 @@ if [[ $mode == full || $mode == boundary || $mode == candidate || $mode == opera
   compose exec -T worker python -I -m vibearr_executor.compact_worker qualify > "$output/requalified.json" 2>&1
   compose exec -T worker python -I -m vibearr_executor.compact_worker qualify-roles > "$output/role-qualification.json" 2>&1
   compose exec -T worker python -I < deploy/docker/dependency_smoke.py > "$output/dependency-smoke.json" 2>&1
+  docker cp "$(compose ps -q worker):/control/dependency-smoke-proof.json" "$output/dependency-smoke-proof.json" > "$output/dependency-smoke-export.log" 2>&1
   docker inspect "$(compose ps -q runner)" --format '{{json .}}' > "$output/runner-before.json"
   compose exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 runner python -I - < deploy/docker/controller_witness.py > "$output/controller-before.json" 2>&1
   compose kill -s SIGKILL runner > "$output/runner-restart.log" 2>&1
@@ -175,6 +176,10 @@ if [[ $mode == full || $mode == candidate ]]; then
   container=$(compose ps -q worker)
   docker cp "$container:/control/candidate-check" "$output/candidate" > "$output/candidate-export.log" 2>&1
   ((candidate_result == 0)) || exit "$candidate_result"
+  browser_result=0
+  compose exec -T worker python -I -m vibearr_executor.compact_browser_qualify --commit "${binding[0]}" --tree "${binding[1]}" --source-digest "${binding[2]}" < "$scratch/source.tar" > "$output/candidate-browser.log" 2>&1 || browser_result=$?
+  docker cp "$container:/control/candidate-browser" "$output/candidate-browser" > "$output/candidate-browser-export.log" 2>&1
+  ((browser_result == 0)) || exit "$browser_result"
 fi
 if [[ $mode == full || $mode == operations ]]; then
   if [[ -n $commit ]]; then
