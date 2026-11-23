@@ -1193,6 +1193,45 @@ class FinalValidationBindingTests(unittest.TestCase):
 
 
 class AuthenticatedManifestTests(unittest.TestCase):
+    def test_even_authenticated_validation_deadline_cannot_exceed_frozen_task_budget(
+        self,
+    ):
+        fixture = Fixture(rounds=2)
+        intent = next(
+            entry["data"]
+            for entry in reversed(fixture.entries)
+            if entry["kind"] == "native_intent"
+            and entry["data"]["kind"] == "validation"
+        )
+        for operation in intent["data"]["operations"]:
+            manifest = operation["manifest"]
+            manifest["deadline"] = "2026-11-22T00:20:00+00:00"
+            fixture.seal(manifest["operation_id"], manifest)
+        with self.assertRaisesRegex(
+            ValueError, "validation extended the frozen overall deadline"
+        ):
+            fixture.verify("failed-check-repair")
+
+    def test_authenticated_successful_check_must_finish_within_frozen_task_budget(self):
+        fixture = Fixture(rounds=2)
+        validation = next(
+            entry["data"]
+            for entry in reversed(fixture.entries)
+            if entry["kind"] == "native_validation"
+        )
+        check = validation["checks"][0]
+        operation = check["receipt"]["operation_id"]
+        fixture.statuses[operation]["result"]["ended_at"] = timestamp(
+            "2026-11-22T00:11:00+00:00"
+        ).timestamp()
+        fixture.seal(operation)
+        check["receipt"] = receipt_summary(fixture.statuses[operation])
+        fixture.finish_history()
+        with self.assertRaisesRegex(
+            ValueError, "validation exceeded the frozen overall deadline"
+        ):
+            fixture.verify("failed-check-repair")
+
     def test_actual_shaped_termination_api_binds_original_manifest_and_sealed_digest(
         self,
     ):
