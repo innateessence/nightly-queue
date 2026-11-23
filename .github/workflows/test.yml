@@ -1,4 +1,4 @@
-name: Three-container checks
+name: Four-container checks
 
 on:
   pull_request:

@@ -1,23 +1,30 @@
-# Three-container Docker runtime
+# Four-container Docker runtime
 
 This contract replaces the preprovisioned worker-slot fleet and its separate
 agent/setup/validation, database, proxy, gateway, and account services. It implements
-[issue #142](https://github.com/innateessence/nightly-queue/issues/142).
+[issue #152](https://github.com/innateessence/nightly-queue/issues/152), adapting
+the existing work in [#142](https://github.com/innateessence/nightly-queue/issues/142)
+to the [factory plan](https://github.com/innateessence/nightly-queue/pull/146).
 
 ## Deployment
 
-The canonical Compose stack has three long-running services:
+The canonical Compose stack has exactly four long-running services:
 
 | Service | Responsibility |
 | --- | --- |
 | `app` | Web UI/API, PostgreSQL-backed scheduling, durable manual/scheduled issue imports |
 | `postgres` | Production application database |
-| `runner` | Controller, one selected native CLI, setup, validation, disposable test PostgreSQL, Git delivery |
+| `runner` | Independent controller, private journal, persistent selected logins, scoped network mediation and Git/PR delivery |
+| `worker` | Authenticated execution API; sequential setup, selected native CLI/reviewer and independent validation phases; disposable local PostgreSQL/browser services |
 
-The runner image includes pinned Codex, Claude Code and OpenCode executables. One
-coding task owns the runner at a time; its phases execute sequentially. The runner
+The worker image includes pinned Codex, Claude Code and OpenCode executables. The
+lean runner carries their subscription-login executables but no task tools,
+PostgreSQL, browser or task-network capabilities. One coding task owns the worker
+at a time; its phases execute sequentially. The runner
 starts with the application but processing remains disabled until configured and
 qualified. A failed check or unavailable login must not enable another backend.
+Humans review and merge every PR; keep delivery mode `pull_request` and automatic
+merge disabled. A role's readiness result is not merge authorization.
 
 Codex uses ChatGPT subscription login. Claude Code uses Claude subscription login.
 The application stores a managed-login reference; OAuth login files remain in a
@@ -43,24 +50,29 @@ scratch tmpfs. No host checkout/home/credentials, engine socket/API credentials,
 privileged mode, host namespaces or devices are allowed. Image IDs are supplied
 by explicit operator image inspection; the runtime never controls Docker.
 
-The runner has no production DB network or credentials and no application
-credential encryption key. Root-owned local execution control drops task code to
-UID 1000 with no capabilities or privilege escalation. Controller/Git delivery
-state belongs to UID 10001; temporary test PostgreSQL uses UID 10002. Task code
-cannot modify runtime commands or trusted validation tools.
+Neither runner nor worker has production DB network access, credentials or the
+application encryption key. The worker mounts only its control state and private
+worker-channel secrets. Persistent logins, controller journals and publication
+credentials remain in the runner. The worker has no public egress network.
+Root-owned execution control drops task code to UID 1000 with no capabilities or
+privilege escalation; temporary PostgreSQL administration and candidate app
+services use distinct identities. Task code cannot modify runtime commands,
+image-owned validation tools or trusted control state.
 
-Model/package egress mediation runs inside the runner. Task-UID traffic cannot
-reach the control endpoint or arbitrary public/LAN addresses. The operator's
+Account, model/package and selected Ollama mediation are modules in the trusted
+runner, with one lifecycle/journal rather than standalone daemons or sidecars.
+The worker calls only operation-scoped endpoints/grants. Task-UID traffic cannot
+reach management/login APIs or arbitrary public/LAN addresses. The operator's
 selected external Ollama endpoint is an explicit exception, reached through the
 inference-only relay. Setup has package access; validation has no external
 network. Loopback is available for temporary test databases and test servers.
 
-The container's CPU, memory and PID limits cover the controller, coding phase and
-test services together. Do not present them as separate per-process guarantees.
-There is less isolation between phases than in separate containers: they share a
-kernel namespace and scratch storage that trusted reset must clean. This design
-is intended for the operator's registered repositories, not hostile multi-tenant
-workloads. Do not reuse old fleet proofs as proof of this boundary.
+The worker's CPU, memory and PID limits cover its trusted execution control,
+coding/check phase and local test services together. The runner has separate
+declared control-plane limits; no per-process ceiling is implied. Phases share a
+namespace and scratch storage that trusted reset must clean. This design is for
+the operator's registered repositories, not hostile multi-tenant workloads.
+Integrated-runner and retired fleet proofs cannot qualify this separate boundary.
 
 ## Jobs, validation and recovery
 
@@ -71,7 +83,8 @@ and scheduler are supervised together; coding work happens in the runner and doe
 not block imports.
 
 Each task phase gets a fresh snapshot/home. Confirm task descendants are gone
-before reset or reuse. An uncertain termination fences the runner. The durable
+before reset or reuse. Export a sealed candidate, reset all writable state, and
+import a verified fresh copy for validation or review. An uncertain termination fences the worker. The durable
 controller journal and immutable operation IDs prevent restart from inventing a
 new agent invocation, push or PR for an uncertain existing operation.
 
@@ -90,8 +103,9 @@ acceptance are separate and must report genuine observations, never fixtures.
 ## Operations and migration
 
 Migrations run inside `app` before the web server and scheduler. Backups, restore,
-browser checks and qualification are explicit short-lived container operations,
-not permanent services. Preserve database names, volume identities, original
+developer/maintenance checks and qualification may use explicit short-lived
+container operations, stopped after use. Normal task checks and browser reviews
+run inside the worker without adding containers. Preserve database names, volume identities, original
 keys, selected credentials, queue/history, journals and unresolved publications.
 
 Drain and back up the old deployment before switching. Test restore into an empty

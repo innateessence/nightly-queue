@@ -21,7 +21,7 @@ done
 case "$mode" in full|unit|boundary|candidate|operations) ;; *) echo 'Choose full, unit, boundary, candidate, or operations.' >&2; exit 2 ;; esac
 [[ -z $candidate || -n $commit ]] || { echo 'Exact candidate input requires --commit.' >&2; exit 2; }
 project=${VIBEARR_CHECK_PROJECT:-vibearr-check-${GITHUB_RUN_ID:-local}-${RANDOM}-${RANDOM}}
-[[ $project =~ ^vibearr-check-[a-z0-9-]+$ && ${#project} -le 50 ]] || { echo 'Choose a disposable vibearr-check-* project of at most 50 characters.' >&2; exit 2; }
+[[ $project =~ ^(vibearr-check|nq-auto-qualification)-[a-z0-9-]+$ && ${#project} -le 50 ]] || { echo 'Choose a disposable vibearr-check-* or nq-auto-qualification-* project of at most 50 characters.' >&2; exit 2; }
 restore_project=${project}-restore
 for selected in "$project" "$restore_project"; do
   [[ -z $(docker ps -aq --filter "label=com.docker.compose.project=$selected") && -z $(docker volume ls -q --filter "name=^${selected}_") ]] || { echo 'Check project already has state; choose another name.' >&2; exit 2; }
@@ -39,14 +39,15 @@ export VIBEARR_POSTGRES_DB=vibearr_checks VIBEARR_POSTGRES_USER=vibearr_checks
 export VIBEARR_RUNNER_NAME=check-runner
 export VIBEARR_APP_IMAGE=$project-app:checks VIBEARR_TOOLS_IMAGE=$project-tools:checks
 export VIBEARR_RUNNER_IMAGE=$project-runner:checks VIBEARR_BACKUP_IMAGE=$project-backup:checks
+export VIBEARR_WORKER_BASE_IMAGE=$project-worker-base:checks VIBEARR_WORKER_IMAGE=$project-worker:checks
 export VIBEARR_BROWSER_IMAGE=$project-browser:checks VIBEARR_BACKUP_VOLUME=${project}_backup-data
 export VIBEARR_RESTORE_BACKUP_VOLUME=${project}_backup-data
 compose() { docker compose --file "$recipe/docker-compose.yml" --project-name "$project" "$@"; }
-start_runner() {
+start_runtime() {
   local attempt
   for attempt in 1 2 3 4 5 6; do
-    if compose up -d --wait runner; then return; fi
-    echo "Runner restart attempt $attempt observed an earlier exit; waiting for its new boot." >&2
+    if compose up -d --wait worker runner; then return; fi
+    echo "Runtime restart attempt $attempt observed an earlier exit; waiting for its new boot." >&2
     sleep 1
   done
   return 1
@@ -68,7 +69,7 @@ cleanup() {
   for volume in "${project}_backup-data" "${project}_browser-artifacts"; do
     if docker volume inspect "$volume" >/dev/null 2>&1; then docker volume rm "$volume" >> "$output/cleanup.log" 2>&1 || result=1; fi
   done
-  for role in app tools runner source input packaging browser backup; do
+  for role in app tools runner worker worker-base source input packaging browser backup; do
     image=$project-$role:checks
     if docker image inspect "$image" >/dev/null 2>&1; then
       docker image rm --no-prune "$image" >> "$output/image-cleanup.log" 2>&1 || result=1
@@ -82,7 +83,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-echo "Building disposable three-container checks for $project"
+echo "Building disposable four-container checks for $project"
 docker build --target tools --tag "$VIBEARR_TOOLS_IMAGE" . > "$output/tools-build.log" 2>&1
 source_image=$project-source:checks
 if [[ -n $candidate ]]; then
@@ -114,18 +115,28 @@ if [[ -n $introduction ]]; then arguments+=(--introduction "$introduction"); fi
 docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 512m --pids-limit 64 --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=128m --entrypoint python "$input_image" -m deploy.docker.export_candidate "${arguments[@]}" > "$scratch/source.tar" 2> "$output/source.json"
 mkdir "$scratch/source"
 tar -xf "$scratch/source.tar" -C "$scratch/source"
-for target in application runner; do
+# Runtime, tooling and recipes all come from the exported candidate.
+for target in tools application runner worker-base; do
   image=$VIBEARR_APP_IMAGE
+  if [[ $target == tools ]]; then image=$VIBEARR_TOOLS_IMAGE; fi
   if [[ $target == runner ]]; then image=$VIBEARR_RUNNER_IMAGE; fi
-  docker build --file "$recipe/Dockerfile" --target "$target" --tag "$image" "$scratch/source" > "$output/$target-build.log" 2>&1
+  if [[ $target == worker-base ]]; then image=$VIBEARR_WORKER_BASE_IMAGE; fi
+  docker build --file "$scratch/source/Dockerfile" --target "$target" --tag "$image" "$scratch/source" > "$output/$target-build.log" 2>&1
 done
+VIBEARR_WORKER_BASE_IMAGE_ID=$(docker image inspect "$VIBEARR_WORKER_BASE_IMAGE" --format '{{.Id}}')
+export VIBEARR_WORKER_BASE_IMAGE_ID
+docker build --file "$scratch/source/vibearr_executor/Worker.Dockerfile" --build-arg "RUNTIME_IMAGE=$VIBEARR_WORKER_BASE_IMAGE" --build-arg "RUNTIME_IMAGE_ID=$VIBEARR_WORKER_BASE_IMAGE_ID" --tag "$VIBEARR_WORKER_IMAGE" "$scratch/source" > "$output/worker-build.log" 2>&1
+[[ $(docker image inspect "$VIBEARR_WORKER_BASE_IMAGE" --format '{{.Id}}') == "$VIBEARR_WORKER_BASE_IMAGE_ID" ]] || { echo 'Worker toolchain image changed during build.' >&2; exit 1; }
 VIBEARR_RUNNER_IMAGE_ID=$(docker image inspect "$VIBEARR_RUNNER_IMAGE" --format '{{.Id}}')
-export VIBEARR_RUNNER_IMAGE_ID
+VIBEARR_WORKER_IMAGE_ID=$(docker image inspect "$VIBEARR_WORKER_IMAGE" --format '{{.Id}}')
+export VIBEARR_RUNNER_IMAGE_ID VIBEARR_WORKER_IMAGE_ID
+recipe=$scratch/source
+cd "$recipe"
 compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit > "$output/compose-audit.log"
 compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp:rw,nosuid,nodev,size=8m --entrypoint python "$VIBEARR_TOOLS_IMAGE" -c 'import os,sys,unittest; from pathlib import Path; Path("/tmp/compose.json").write_bytes(sys.stdin.buffer.read()); os.environ["VIBEARR_COMPOSE_CONFIG"]="/tmp/compose.json"; result=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromName("vibearr.test_compose")); sys.exit(not result.wasSuccessful())' > "$output/compose-tests.log" 2>&1
 compose up -d --wait > "$output/start.log" 2>&1
 mapfile -t ids < <(compose ps -q)
-((${#ids[@]} == 3))
+((${#ids[@]} == 4))
 docker inspect "${ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit --inspect > "$output/runtime-inspection.json"
 if [[ $mode == full || $mode == unit ]]; then
   docker run --rm --network "${project}_database" --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10001 --memory 2g --pids-limit 128 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,exec,size=2048m --volume "${project}_application-secrets:/run/vibearr/application:ro" --volume "${project}_database-secrets:/run/vibearr/database:ro" -e DJANGO_DEBUG=True -e POSTGRES_HOST=postgres -e "VIBEARR_POSTGRES_DB=$VIBEARR_POSTGRES_DB" -e "VIBEARR_POSTGRES_USER=$VIBEARR_POSTGRES_USER" --entrypoint sh "$VIBEARR_TOOLS_IMAGE" -c 'cp -R /app /tmp/test-source && cd /tmp/test-source && python -m deploy.docker.entrypoint python manage.py test "$@" --noinput' sh "$@" > "$output/application-tests.log" 2>&1
@@ -133,27 +144,27 @@ if [[ $mode == full || $mode == unit ]]; then
 fi
 if [[ $mode == full || $mode == unit || $mode == candidate ]]; then
   package_image=$project-packaging:checks
-  docker build --file deploy/docker/Packaging.Dockerfile --build-arg "SOURCE_IMAGE=$source_image" --build-arg "WORKER_IMAGE=$VIBEARR_RUNNER_IMAGE" --build-arg "TOOLS_IMAGE=$VIBEARR_TOOLS_IMAGE" --tag "$package_image" . > "$output/packaging-build.log" 2>&1
+  docker build --file "$recipe/deploy/docker/Packaging.Dockerfile" --build-arg "SOURCE_IMAGE=$source_image" --build-arg "WORKER_IMAGE=$VIBEARR_WORKER_IMAGE" --build-arg "TOOLS_IMAGE=$VIBEARR_TOOLS_IMAGE" --tag "$package_image" "$recipe" > "$output/packaging-build.log" 2>&1
   package_id=$(docker image inspect "$package_image" --format '{{.Id}}')
   docker run --rm --network none --read-only --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --security-opt no-new-privileges:true --memory 2g --memory-swap 2g --pids-limit 128 --cpus 2 --tmpfs /work:rw,nosuid,nodev,exec,size=1024m,uid=1000,gid=1000,mode=0700 --tmpfs /home/task:rw,nosuid,nodev,exec,size=32m,uid=1000,gid=1000,mode=0700 --tmpfs /tmp:rw,nosuid,nodev,exec,size=128m --tmpfs /input:rw,nosuid,nodev,noexec,size=40m,mode=0711 --tmpfs /secrets:rw,nosuid,nodev,noexec,size=64k,mode=0711 --tmpfs /control:rw,nosuid,nodev,noexec,size=128m,mode=0700 --tmpfs /opt/candidate:rw,nosuid,nodev,exec,size=4m,mode=0755 -e "VIBEARR_CHECK_IMAGE_ID=$package_id" -e "VIBEARR_CHECK_COMMIT=$commit" -e "VIBEARR_CHECK_BASE=$base" -e "VIBEARR_CHECK_INTRODUCTION=$introduction" "$package_image" > "$output/packaging.log" 2>&1
 fi
 if [[ $mode == full || $mode == boundary || $mode == candidate ]]; then
-  compose exec -T runner python -I -m vibearr_executor.integrated restart-witness > "$output/restart-witness.json" 2>&1
-  compose kill -s SIGKILL runner > "$output/restart.log" 2>&1
-  start_runner >> "$output/restart.log" 2>&1
-  compose exec -T runner python -I -m vibearr_executor.integrated qualify > "$output/qualification.json" 2>&1
-  compose exec -T runner python -I -m vibearr_executor.integrated restart-witness > "$output/second-witness.json" 2>&1
-  compose kill -s SIGKILL runner >> "$output/restart.log" 2>&1
-  start_runner >> "$output/restart.log" 2>&1
-  compose exec -T runner python -I -c 'from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path("/run/vibearr/runner/control-token").read_text().strip()); assert c.capabilities()["qualified"] is False' > "$output/restart-proof.log" 2>&1
-  compose exec -T runner python -I -m vibearr_executor.integrated qualify > "$output/requalified.json" 2>&1
-  compose exec -T runner python -I < deploy/docker/dependency_smoke.py > "$output/dependency-smoke.json" 2>&1
+  compose exec -T worker python -I -m vibearr_executor.compact_worker restart-witness > "$output/restart-witness.json" 2>&1
+  compose kill -s SIGKILL worker > "$output/restart.log" 2>&1
+  start_runtime >> "$output/restart.log" 2>&1
+  compose exec -T worker python -I -m vibearr_executor.compact_worker qualify > "$output/qualification.json" 2>&1
+  compose exec -T worker python -I -m vibearr_executor.compact_worker restart-witness > "$output/second-witness.json" 2>&1
+  compose kill -s SIGKILL worker >> "$output/restart.log" 2>&1
+  start_runtime >> "$output/restart.log" 2>&1
+  compose exec -T worker python -I -c 'from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path("/run/vibearr/worker/control-token").read_text().strip()); assert c.capabilities()["qualified"] is False' > "$output/restart-proof.log" 2>&1
+  compose exec -T worker python -I -m vibearr_executor.compact_worker qualify > "$output/requalified.json" 2>&1
+  compose exec -T worker python -I < deploy/docker/dependency_smoke.py > "$output/dependency-smoke.json" 2>&1
 fi
 if [[ $mode == full || $mode == candidate ]]; then
   mapfile -t binding < <(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -c 'import json,sys; v=json.load(sys.stdin); print(v["commit_sha"]); print(v["tree_sha"]); print(v["source_digest"])' < "$output/source.json")
   candidate_result=0
-  compose exec -T runner python -I -m vibearr_executor.integrated_validate --commit "${binding[0]}" --tree "${binding[1]}" --source-digest "${binding[2]}" < "$scratch/source.tar" > "$output/candidate.log" 2>&1 || candidate_result=$?
-  container=$(compose ps -q runner)
+  compose exec -T worker python -I -m vibearr_executor.integrated_validate --commit "${binding[0]}" --tree "${binding[1]}" --source-digest "${binding[2]}" < "$scratch/source.tar" > "$output/candidate.log" 2>&1 || candidate_result=$?
+  container=$(compose ps -q worker)
   docker cp "$container:/control/candidate-check" "$output/candidate" > "$output/candidate-export.log" 2>&1
   ((candidate_result == 0)) || exit "$candidate_result"
 fi
@@ -166,7 +177,7 @@ if [[ $mode == full || $mode == operations ]]; then
     export VIBEARR_BROWSER_SOURCE_BINDING
   fi
   bash deploy/docker/operations.sh browser > "$output/browser.log" 2>&1
-  compose stop app runner > "$output/quiesce.log" 2>&1
+  compose stop app runner worker > "$output/quiesce.log" 2>&1
   bash deploy/docker/operations.sh backup --quiesced > "$output/backup.log" 2>&1
   backup_id=$(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.records backup_id < "$output/backup.log")
   for action in restore-files restore-database restore-bootstrap; do
