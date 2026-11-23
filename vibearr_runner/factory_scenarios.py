@@ -12,6 +12,7 @@ from .native_contract import (
     canonical,
     digest,
     identifier,
+    receipt_passed,
     receipt_summary,
     validate_native_artifact,
 )
@@ -370,6 +371,9 @@ class History:
                 == result["receipt"],
                 "Scenario has an orphan or substituted native agent result.",
             )
+        for intent in self.intents.values():
+            if intent["kind"] == "validation":
+                self.validation_intent(intent)
         for entry in self.facts.get("native_validation", []):
             self.validation(entry["data"])
         self.rounds = {}
@@ -409,6 +413,33 @@ class History:
                 "Scenario reset or exceeded factory rounds.",
             )
         self.accounting()
+
+    def validation_intent(self, intent):
+        require(
+            intent["context_id"] == self.context["id"]
+            and intent["context_digest"] == self.context["digest"]
+            and intent["policy_digest"] == self.context["document"]["policy_digest"],
+            "Scenario validation dispatch changed its frozen context or policy.",
+        )
+        seconds = self.run["configuration_snapshot"]["global"]["task_timeout_seconds"]
+        overall = timestamp(self.run["created_at"]).timestamp() + finite(seconds)
+        for original in intent["data"]["operations"]:
+            manifest = original["manifest"]
+            receipt = self.receipts.get(manifest["operation_id"])
+            need(
+                receipt is not None,
+                "Original validation operation termination remains unknown.",
+            )
+            verify_operation_manifest(self.worker, manifest)
+            require(
+                manifest["run_id"] == self.run_id
+                and 0 < timestamp(manifest["deadline"]).timestamp() <= overall,
+                "Scenario validation extended the frozen overall deadline.",
+            )
+            require(
+                not receipt_passed(receipt) or receipt["ended_at"] <= overall,
+                "Successful scenario validation exceeded the frozen overall deadline.",
+            )
 
     def validation(self, value):
         intent = self.intents.get(value["intent_id"])

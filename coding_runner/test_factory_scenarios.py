@@ -1,4 +1,6 @@
 from copy import deepcopy
+from datetime import timedelta
+from importlib.util import find_spec
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -7,7 +9,6 @@ from unittest.mock import patch
 from uuid import UUID, uuid5
 
 from coding_runner.test_factory_acceptance import chain, identity, worker_identity
-from vibearr_executor.validation_profile import CHECK_IDS, ValidationProfile
 from vibearr_runner import factory_scenarios as scenarios
 from vibearr_runner.factory_routing import AGENT_ROLES, route
 from vibearr_runner.native_contract import (
@@ -20,6 +21,11 @@ from vibearr_runner.native_contract import (
 )
 from coding_runner.test_native_evidence import receipt as delivery_receipt
 from vibearr_runner.self_acceptance import timestamp
+
+
+SDK_AVAILABLE = find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor.validation_profile import CHECK_IDS, ValidationProfile
 
 
 OPERATION = identity(90000)
@@ -711,6 +717,9 @@ class Fixture:
         }
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Executor SDK is required for protected scenario fixtures."
+)
 class FactoryScenarioTests(unittest.TestCase):
     def assert_case_passes(self, fixture, name, **kwargs):
         self.assertFalse(
@@ -979,6 +988,9 @@ class FactoryScenarioTests(unittest.TestCase):
                 )
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Executor SDK is required for protected checkpoint fixtures."
+)
 class CheckpointAuthenticationTests(unittest.TestCase):
     def setUp(self):
         self.fixture = Fixture()
@@ -1100,6 +1112,9 @@ class CheckpointAuthenticationTests(unittest.TestCase):
             )
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Executor SDK is required for protected validation fixtures."
+)
 class FinalValidationBindingTests(unittest.TestCase):
     def test_failure_dispatch_cannot_extend_frozen_overall_deadline(self):
         fixture = Fixture(rounds=2, terminal=True)
@@ -1192,7 +1207,32 @@ class FinalValidationBindingTests(unittest.TestCase):
             fixture.verify("failed-check-repair")
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Executor SDK is required for protected manifest fixtures."
+)
 class AuthenticatedManifestTests(unittest.TestCase):
+    def test_validation_without_result_cannot_hide_a_replaced_manifest(self):
+        fixture = Fixture(rounds=2)
+        intent = next(
+            entry
+            for entry in fixture.entries
+            if entry["kind"] == "native_intent"
+            and entry["data"]["kind"] == "validation"
+        )
+        for operation in intent["data"]["data"]["operations"]:
+            manifest = operation["manifest"]
+            manifest["deadline"] = (
+                timestamp(manifest["deadline"]) + timedelta(seconds=0.5)
+            ).isoformat()
+        fixture.entries = [
+            entry
+            for entry in fixture.entries
+            if entry["kind"] != "native_validation"
+            or entry["data"]["intent_id"] != intent["operation_id"]
+        ]
+        with self.assertRaisesRegex(ValueError, "manifest"):
+            fixture.verify("failed-check-repair")
+
     def test_even_authenticated_validation_deadline_cannot_exceed_frozen_task_budget(
         self,
     ):

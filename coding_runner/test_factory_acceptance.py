@@ -1,6 +1,7 @@
 from contextlib import redirect_stdout
 from copy import deepcopy
 from datetime import timedelta
+from importlib.util import find_spec
 import io
 import json
 from pathlib import Path
@@ -13,6 +14,9 @@ from uuid import UUID
 from vibearr_runner import factory_acceptance as factory
 from vibearr_runner.native_contract import digest
 from vibearr_runner.factory_routing import default_configuration, route
+
+
+SDK_AVAILABLE = find_spec("vibearr_executor") is not None
 
 
 def identity(number):
@@ -898,6 +902,9 @@ class HumanMergeTests(unittest.TestCase):
             )
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Executor SDK is required for protected runtime receipts."
+)
 class NativeValidationProofTests(unittest.TestCase):
     def setUp(self):
         from coding_runner.test_factory_scenarios import Fixture
@@ -964,10 +971,11 @@ class NativeValidationProofTests(unittest.TestCase):
             if entry["kind"] == "native_intent"
             and entry["data"]["kind"] == "validation"
         )
-        manifest = intent["data"]["operations"][0]["manifest"]
-        manifest["deadline"] = (
-            factory.timestamp(manifest["deadline"]) + timedelta(seconds=0.5)
-        ).isoformat()
+        for operation in intent["data"]["operations"]:
+            manifest = operation["manifest"]
+            manifest["deadline"] = (
+                factory.timestamp(manifest["deadline"]) + timedelta(seconds=0.5)
+            ).isoformat()
         with self.assertRaises(ValueError):
             self.verify()
 
@@ -990,7 +998,11 @@ class NativeValidationProofTests(unittest.TestCase):
             if entry["kind"] == "native_intent"
             and entry["data"]["kind"] == "validation"
         )
-        intent["data"]["operations"][0]["manifest"]["profile_digest"] = "0" * 64
+        for operation in intent["data"]["operations"]:
+            manifest = operation["manifest"]
+            manifest["deadline"] = (
+                factory.timestamp(manifest["deadline"]) + timedelta(seconds=0.5)
+            ).isoformat()
         self.fixture.entries = [
             entry
             for entry in self.fixture.entries
@@ -1091,6 +1103,9 @@ class DependencyProofTests(unittest.TestCase):
             factory.verify_dependency(self.github, self.first, self.second, scenario())
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Executor SDK is required for worker browser exports."
+)
 class BrowserProofTests(unittest.TestCase):
     def setUp(self):
         from vibearr_executor.test_local_services import WorkerBrowserReceiptTests
