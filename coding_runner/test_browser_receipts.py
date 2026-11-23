@@ -35,7 +35,9 @@ class DockerBrowserReceiptTests(unittest.TestCase):
 
     def frame(self, name="desktop", theme="light"):
         path = self.capture / f"queue-{name}-{theme}.png"
-        path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"fixture image bytes" * 1000)
+        from vibearr_executor.test_local_services import fixture_png
+
+        path.write_bytes(fixture_png())
         return capture_receipt(
             self.binding,
             path,
@@ -85,10 +87,10 @@ class DockerBrowserReceiptTests(unittest.TestCase):
             self.validate(frame)
 
     def test_changed_png_cannot_reuse_its_capture_receipt(self):
+        from vibearr_executor.test_local_services import fixture_png
+
         frame = self.frame()
-        Path(frame["path"]).write_bytes(
-            b"\x89PNG\r\n\x1a\n" + b"different image" * 1000
-        )
+        Path(frame["path"]).write_bytes(fixture_png(reverse=True))
         with self.assertRaisesRegex(ValueError, "differs"):
             self.validate(frame)
 
