@@ -240,6 +240,10 @@ def append_evidence(run, operation_id, kind, payload):
 def record_evidence(
     *, runner, run_id, claim_token, operation_id, kind, payload, progress=None
 ):
+    if kind == "publication_observation":
+        raise RunConflict(
+            "Publication observations are written only by trusted provider reconciliation."
+        )
     lock_controller(runner)
     run = owned_run(runner, run_id)
     from vibearr_runner.native_contract import ARTIFACT_KINDS, FACT_KINDS

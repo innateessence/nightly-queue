@@ -578,6 +578,9 @@ def validation_profile_binding(run, value, workspace, ctx):
 
 
 def validate_intent_binding(run, value, operation_id=None):
+    from .factory_delivery import validate_delivery_policy
+
+    validate_delivery_policy(run, value)
     ctx = context(run, value["context_id"], value["context_digest"])
     if str(ctx.pk) != run.context_reference:
         raise RunConflict("Native dispatch requires the current context.")
@@ -815,6 +818,9 @@ def validate_intent_binding(run, value, operation_id=None):
                 raise RunConflict(
                     "Independent validation must pass before publication."
                 )
+            from .factory_delivery import validate_factory_workspace
+
+            validate_factory_workspace(run, data["workspace"], ctx)
     existing = {
         operation
         for entry in all_intents(run)
@@ -1053,8 +1059,10 @@ def bind_artifact(run, claim_token, kind, value, operation_id=None):
         run, claim_token, reporting=kind != "native_intent" or completion
     )
     if kind == "native_intent":
+        from .factory_delivery import validate_delivery_policy
         from .merge_services import completion_authority
 
+        validate_delivery_policy(run, value)
         if completion:
             completion_authority(run, document)
         else:
@@ -1180,4 +1188,7 @@ def validate_delivery(run, value):
         from .merge_services import validate_merged_delivery
 
         validate_merged_delivery(run, value, workspace)
+    from .factory_delivery import validate_factory_workspace
+
+    validate_factory_workspace(run, value["workspace"], ctx)
     return value
