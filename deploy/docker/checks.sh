@@ -81,6 +81,13 @@ print(json.dumps(targets,sort_keys=True))
 ')
   "$orchestrate" exec -T -e "VIBEARR_QUALIFICATION_TARGETS=$targets" worker python -I -m vibearr_executor.compact_worker qualify
 }
+observe_phase() {
+  local phase=$1
+  local phase_ids=()
+  mapfile -t phase_ids < <(docker ps -q --no-trunc --filter "label=com.docker.compose.project=$project" --filter status=running)
+  ((${#phase_ids[@]} == 4)) || { echo "Expected four running services after $phase." >&2; return 1; }
+  printf '%s\n' "${phase_ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -I -c 'import json,re,sys; ids=sys.stdin.read().splitlines(); assert len(set(ids)) == 4 and all(re.fullmatch("[a-f0-9]{64}", value) for value in ids); print(json.dumps({"phase":sys.argv[1],"containers":ids},sort_keys=True))' "$phase" >> "$output/phase-counts.jsonl"
+}
 export_volume() {
   local volume=$1 destination=$2
   if ! docker volume inspect "$volume" >/dev/null 2>&1; then return; fi
@@ -97,7 +104,7 @@ cleanup() {
   for volume in "${project}_backup-data" "${project}_browser-artifacts"; do
     if docker volume inspect "$volume" >/dev/null 2>&1; then docker volume rm "$volume" >> "$output/cleanup.log" 2>&1 || result=1; fi
   done
-  for role in app tools runner worker worker-base source input packaging browser backup; do
+  for role in app tools runner worker worker-base source input packaging browser backup reports; do
     image=$project-$role:checks
     if docker image inspect "$image" >/dev/null 2>&1; then
       docker image rm --no-prune "$image" >> "$output/image-cleanup.log" 2>&1 || result=1
@@ -166,6 +173,8 @@ compose up -d --wait > "$output/start.log" 2>&1
 mapfile -t ids < <(compose ps -q)
 ((${#ids[@]} == 4))
 docker inspect "${ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit --inspect > "$output/runtime-inspection.json"
+docker stats --no-stream --no-trunc --format '{{json .}}' "${ids[@]}" > "$output/idle-resources.jsonl"
+observe_phase startup
 if [[ $mode == full || $mode == unit ]]; then
   docker run --rm --network "${project}_database" --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10001 --memory 2g --pids-limit 128 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,exec,size=2048m --volume "${project}_application-secrets:/run/vibearr/application:ro" --volume "${project}_database-secrets:/run/vibearr/database:ro" -e DJANGO_DEBUG=True -e POSTGRES_HOST=postgres -e "VIBEARR_POSTGRES_DB=$VIBEARR_POSTGRES_DB" -e "VIBEARR_POSTGRES_USER=$VIBEARR_POSTGRES_USER" --entrypoint sh "$VIBEARR_TOOLS_IMAGE" -c 'cp -R /app /tmp/test-source && cd /tmp/test-source && if [ "$#" -gt 0 ]; then set -- "$@" deploy.docker; fi; python -m deploy.docker.entrypoint python manage.py test "$@" --noinput' sh "$@" > "$output/application-tests.log" 2>&1
   docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 2g --pids-limit 128 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,exec,size=2048m --entrypoint sh "$VIBEARR_TOOLS_IMAGE" -c 'black --check . && ruff check . && mypy . --config-file mypy.ini && shellcheck test.sh run.sh deploy/docker/*.sh && actionlint -config-file .github/actionlint.yaml .github/workflows/*.yml && python -m unittest discover -s vibearr_executor -t . && python -m vibearr_runner.verify' > "$output/tools-tests.log" 2>&1
@@ -187,8 +196,10 @@ if [[ $mode == full || $mode == boundary || $mode == candidate || $mode == opera
   compose exec -T worker python -I -c 'from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path("/run/vibearr/worker/control-token").read_text().strip()); assert c.capabilities()["qualified"] is False' > "$output/restart-proof.log" 2>&1
   qualify_worker > "$output/requalified.json" 2>&1
   compose exec -T worker python -I -m vibearr_executor.compact_worker qualify-roles > "$output/role-qualification.json" 2>&1
+  observe_phase boundary
   compose exec -T worker python -I < deploy/docker/dependency_smoke.py > "$output/dependency-smoke.json" 2>&1
   docker cp "$(compose ps -q worker):/control/dependency-smoke-proof.json" "$output/dependency-smoke-proof.json" > "$output/dependency-smoke-export.log" 2>&1
+  observe_phase dependency
   docker inspect "$(compose ps -q runner)" --format '{{json .}}' > "$output/runner-before.json"
   compose exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 runner python -I - < deploy/docker/controller_witness.py > "$output/controller-before.json" 2>&1
   compose kill -s SIGKILL runner > "$output/runner-restart.log" 2>&1
@@ -203,10 +214,12 @@ if [[ $mode == full || $mode == candidate ]]; then
   container=$(compose ps -q worker)
   docker cp "$container:/control/candidate-check" "$output/candidate" > "$output/candidate-export.log" 2>&1
   ((candidate_result == 0)) || exit "$candidate_result"
+  observe_phase candidate
   browser_result=0
   compose exec -T worker python -I -m vibearr_executor.compact_browser_qualify --commit "${binding[0]}" --tree "${binding[1]}" --source-digest "${binding[2]}" < "$scratch/source.tar" > "$output/candidate-browser.log" 2>&1 || browser_result=$?
   docker cp "$container:/control/candidate-browser" "$output/candidate-browser" > "$output/candidate-browser-export.log" 2>&1
   ((browser_result == 0)) || exit "$browser_result"
+  observe_phase browser
   compose exec -T worker python -I -m vibearr_executor.compact_proof_export > "$output/proof-export.log" 2>&1
   docker cp "$container:/control/engineering-proofs" "$output/engineering-proofs" > "$output/proof-copy.log" 2>&1
 fi
@@ -223,9 +236,11 @@ if [[ $mode == full || $mode == operations ]]; then
   compose exec -T --user 10001:10001 -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 app python -m deploy.docker.entrypoint python -m deploy.docker.recovery_fixture seed > "$output/recovery-seed.json" 2>&1
   compose exec -T --user 10001:10001 runner python -I -m vibearr_runner.drain on > "$output/drain-request.json" 2>&1
   compose exec -T --user 10001:10001 runner python -I -m vibearr_runner.drain wait --timeout 60 > "$output/drain-ack.json" 2>&1
+  observe_phase beforebackup
   compose stop app runner worker > "$output/quiesce.log" 2>&1
   bash deploy/docker/operations.sh backup --quiesced > "$output/backup.log" 2>&1
   backup_id=$(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.records backup_id < "$output/backup.log")
+  docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 0:0 --memory 128m --pids-limit 16 --cpus 1 --volume "$VIBEARR_BACKUP_VOLUME:/backups:ro" --entrypoint python "$VIBEARR_TOOLS_IMAGE" -I -c 'import json,sys; from pathlib import Path; from uuid import UUID; value=sys.argv[1]; assert str(UUID(value)) == value; path=Path("/backups") / value / "manifest.json"; assert path.is_file() and not path.is_symlink() and path.stat().st_size <= 1048576; print(json.dumps(json.loads(path.read_bytes()),sort_keys=True))' "$backup_id" > "$output/backup-manifest.json"
   for action in restore-files restore-database restore-bootstrap; do
     COMPOSE_PROJECT_NAME=$restore_project VIBEARR_DATA_PROJECT=$restore_project VIBEARR_RUNNER_NAME=restored-check-runner bash deploy/docker/operations.sh "$action" "$backup_id" > "$output/$action.log" 2>&1
   done
@@ -233,10 +248,20 @@ if [[ $mode == full || $mode == operations ]]; then
   restored exec -T --user 10001:10001 app python -m deploy.docker.entrypoint python manage.py check > "$output/restored-system.log" 2>&1
   restored exec -T --user 10001:10001 -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 app python -m deploy.docker.entrypoint python -m deploy.docker.recovery_fixture verify > "$output/restored-fixture.json" 2>&1
   restored exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 runner python -I - "$backup_id" < deploy/docker/restore_check.py > "$output/restored-authority.json" 2>&1
-  restored exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 worker python -I - "$backup_id" --worker < deploy/docker/restore_check.py > "$output/restored-worker-authority.json" 2>&1
   restored exec -T worker python -I -m vibearr_executor.compact_worker restart-witness > "$output/restored-restart-witness.json" 2>&1
   restored kill -s SIGKILL worker > "$output/restored-restart.log" 2>&1
   start_runtime restored >> "$output/restored-restart.log" 2>&1
   qualify_worker restored > "$output/restored-qualification.json" 2>&1
   restored exec -T worker python -I -m vibearr_executor.compact_worker qualify-roles > "$output/restored-role-qualification.json" 2>&1
+  restored exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 worker python -I - "$backup_id" --worker < deploy/docker/restore_check.py > "$output/restored-worker-authority.json" 2>&1
+  restored exec -T worker python -I -c 'import json,os; from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path(os.environ["VIBEARR_EXECUTOR_TOKEN_FILE"]).read_text().strip()); print(json.dumps(c.capabilities(),sort_keys=True))' > "$output/restored-capabilities.json"
+  restored exec -T worker python -I -c 'import json,os; from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path(os.environ["VIBEARR_EXECUTOR_TOKEN_FILE"]).read_text().strip()); print(json.dumps(c.request("/v4/qualification"),sort_keys=True))' > "$output/restored-boundary.json"
+fi
+if [[ $mode == full && -n $commit ]]; then
+  report_image=$project-reports:checks
+  docker build --file "$recipe/deploy/docker/Reports.Dockerfile" --build-arg "TOOLS_IMAGE=$VIBEARR_TOOLS_IMAGE" --tag "$report_image" "$output" > "$scratch/reports-build.log" 2>&1
+  mv "$scratch/reports-build.log" "$output/reports-build.log"
+  docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10001 --memory 512m --pids-limit 64 --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=128m "$report_image" > "$output/engineering-report.json" 2> "$output/engineering-report-validation.log"
+elif [[ $mode == full ]]; then
+  echo 'Disposable worktree checks do not issue an engineering qualification report.' > "$output/engineering-report-not-issued.txt"
 fi
