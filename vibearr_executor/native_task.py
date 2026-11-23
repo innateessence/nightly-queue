@@ -81,13 +81,18 @@ def command(provider, model, home):
         ]
     if provider != "opencode":
         raise ValueError("Unsupported coding agent.")
+    relay = os.environ.get("VIBEARR_OLLAMA_URL", "http://127.0.0.1:3130/v1")
+    grant = os.environ.get("VIBEARR_EGRESS_GRANT", "")
+    options = {"baseURL": relay}
+    if grant:
+        options["headers"] = {"X-Vibearr-Grant": grant}
     config = {
         "$schema": "https://opencode.ai/config.json",
         "provider": {
             "ollama": {
                 "npm": "@ai-sdk/openai-compatible",
                 "name": "External Ollama",
-                "options": {"baseURL": "http://127.0.0.1:3130/v1"},
+                "options": options,
                 "models": {model: {"name": model}},
             }
         },
@@ -132,6 +137,8 @@ def main():
     connection = json.loads(
         Path(os.environ["VIBEARR_BACKEND_SECRET_FILE"]).read_bytes()
     )
+    if connection.get("schema_version") == 1 and "scope" in connection:
+        connection = connection["connection"]
     if connection["provider"] != provider:
         raise ValueError("Selected connection differs from the task provider.")
     if any(
@@ -149,9 +156,14 @@ def main():
     home = Path(os.environ["HOME"])
     if provider != "opencode":
         install_login(provider, connection["files"], home)
+    from urllib.parse import urlsplit
+
+    bypass = "127.0.0.1,localhost"
+    if os.environ.get("VIBEARR_OLLAMA_URL"):
+        bypass += "," + (urlsplit(os.environ["VIBEARR_OLLAMA_URL"]).hostname or "")
     os.environ.update(
-        NO_PROXY="127.0.0.1,localhost",
-        no_proxy="127.0.0.1,localhost",
+        NO_PROXY=bypass,
+        no_proxy=bypass,
         XDG_CONFIG_HOME=str(home / ".config"),
         XDG_DATA_HOME=str(home / ".local/share"),
         XDG_CACHE_HOME=str(home / ".cache"),
