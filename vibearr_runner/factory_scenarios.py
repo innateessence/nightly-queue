@@ -627,6 +627,19 @@ class History:
             )
             return checks["sequence"]
         need("routing" in roles, "Scenario lacks required review routing.")
+        from .delivery import DeliveryError
+        from .factory_delivery import validate_routing
+
+        try:
+            validate_routing(
+                self.run["configuration_snapshot"],
+                self.artifacts,
+                round_number,
+                self.context["id"],
+                [{**entry, "payload": entry["data"]} for entry in self.entries],
+            )
+        except DeliveryError as error:
+            raise ValueError(str(error)) from None
         required = roles["routing"]["document"]["payload"]["required_reviewers"]
         require(
             validation["state"] == "passed",
@@ -696,6 +709,7 @@ class History:
             == {"id": self.context["id"], "digest": self.context["digest"]}
             and delivery["configuration_revision"]
             == self.scenario["configuration_revision"]
+            and delivery["policy_digest"] == self.context["document"]["policy_digest"]
             and delivery["workspace"] == publication["workspace"] == workspace
             and delivery["delivery"]["pull_request"] == publication["pull_request"]
             and delivery["delivery"]["mode"] == "pull_request"
@@ -704,6 +718,18 @@ class History:
             == workspace["commit_sha"]
             and self.run["result_url"] == publication["pull_request"]["url"],
             "Scenario publication differs from the verified candidate or run.",
+        )
+        build = self.rounds[max(self.rounds)]["build"]["document"]["execution"]
+        session = self.intents[build["intent_id"]]["data"]["session"]
+        require(
+            delivery["runtime"]
+            == {
+                "image_digest": session["image_digest"],
+                "profile_id": session["manifest"]["profile_id"],
+                "agent_version": build["agent_version"],
+                "session_id": build["session_id"],
+            },
+            "Scenario publication changed its original builder identity.",
         )
         validations = [
             entry["data"]

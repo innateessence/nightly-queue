@@ -512,6 +512,23 @@ class Fixture:
         receipt["delivery"].update(
             pull_request=pull, pushed_sha=self.workspace["commit_sha"]
         )
+        build = next(
+            entry["document"]["execution"]
+            for entry in reversed(self.artifacts)
+            if entry["role"] == "build"
+        )
+        session = next(
+            entry["data"]["data"]["session"]
+            for entry in self.entries
+            if entry["operation_id"] == build["intent_id"]
+        )
+        receipt["policy_digest"] = self.context["document"]["policy_digest"]
+        receipt["runtime"] = {
+            "image_digest": session["image_digest"],
+            "profile_id": session["manifest"]["profile_id"],
+            "agent_version": build["agent_version"],
+            "session_id": build["session_id"],
+        }
         self.entry("verified_delivery", receipt)
 
     def finish_history(self):
@@ -1052,6 +1069,36 @@ class CheckpointAuthenticationTests(unittest.TestCase):
 
 
 class FinalValidationBindingTests(unittest.TestCase):
+    def test_exhausted_review_cannot_lower_the_frozen_required_reviewer_set(self):
+        fixture = Fixture(rounds=2, terminal=True, failure="reviews")
+        for entry in fixture.entries:
+            if entry["kind"] == "native_workspace":
+                entry["data"]["factory_paths"] = ["work_queue/services.py"]
+        with self.assertRaisesRegex(ValueError, "routing differs"):
+            fixture.verify("repair-exhaustion")
+
+    def test_verified_publication_cannot_change_frozen_policy(self):
+        fixture = Fixture(rounds=2)
+        verified = next(
+            entry["data"]
+            for entry in fixture.entries
+            if entry["kind"] == "verified_delivery"
+        )
+        verified["policy_digest"] = "f" * 64
+        with self.assertRaisesRegex(ValueError, "verified candidate or run"):
+            fixture.verify("failed-check-repair")
+
+    def test_verified_publication_cannot_replace_original_builder_session(self):
+        fixture = Fixture(rounds=2)
+        verified = next(
+            entry["data"]
+            for entry in fixture.entries
+            if entry["kind"] == "verified_delivery"
+        )
+        verified["runtime"]["session_id"] = "different-provider-session"
+        with self.assertRaisesRegex(ValueError, "original builder identity"):
+            fixture.verify("failed-check-repair")
+
     def test_final_passed_check_requires_authenticated_original_operation(self):
         fixture = Fixture(rounds=2)
         final = next(
