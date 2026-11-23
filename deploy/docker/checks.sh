@@ -45,8 +45,9 @@ export VIBEARR_RESTORE_BACKUP_VOLUME=${project}_backup-data
 compose() { docker compose --file "$recipe/docker-compose.yml" --project-name "$project" "$@"; }
 start_runtime() {
   local attempt
+  local orchestrate=${1:-compose}
   for attempt in 1 2 3 4 5 6; do
-    if compose up -d --wait worker runner; then return; fi
+    if "$orchestrate" up -d --wait worker runner; then return; fi
     echo "Runtime restart attempt $attempt observed an earlier exit; waiting for its new boot." >&2
     sleep 1
   done
@@ -139,8 +140,8 @@ mapfile -t ids < <(compose ps -q)
 ((${#ids[@]} == 4))
 docker inspect "${ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit --inspect > "$output/runtime-inspection.json"
 if [[ $mode == full || $mode == unit ]]; then
-  docker run --rm --network "${project}_database" --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10001 --memory 2g --pids-limit 128 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,exec,size=2048m --volume "${project}_application-secrets:/run/vibearr/application:ro" --volume "${project}_database-secrets:/run/vibearr/database:ro" -e DJANGO_DEBUG=True -e POSTGRES_HOST=postgres -e "VIBEARR_POSTGRES_DB=$VIBEARR_POSTGRES_DB" -e "VIBEARR_POSTGRES_USER=$VIBEARR_POSTGRES_USER" --entrypoint sh "$VIBEARR_TOOLS_IMAGE" -c 'cp -R /app /tmp/test-source && cd /tmp/test-source && python -m deploy.docker.entrypoint python manage.py test "$@" --noinput' sh "$@" > "$output/application-tests.log" 2>&1
-  docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 2g --pids-limit 128 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,exec,size=2048m --entrypoint sh "$VIBEARR_TOOLS_IMAGE" -c 'black --check . && ruff check . && mypy . --config-file mypy.ini && shellcheck test.sh run.sh deploy/docker/*.sh && actionlint -config-file .github/actionlint.yaml .github/workflows/*.yml && python -m unittest discover -s vibearr_executor -t . && python -m unittest discover -s deploy/docker -t . && python -m vibearr_runner.verify' > "$output/tools-tests.log" 2>&1
+  docker run --rm --network "${project}_database" --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10001 --memory 2g --pids-limit 128 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,exec,size=2048m --volume "${project}_application-secrets:/run/vibearr/application:ro" --volume "${project}_database-secrets:/run/vibearr/database:ro" -e DJANGO_DEBUG=True -e POSTGRES_HOST=postgres -e "VIBEARR_POSTGRES_DB=$VIBEARR_POSTGRES_DB" -e "VIBEARR_POSTGRES_USER=$VIBEARR_POSTGRES_USER" --entrypoint sh "$VIBEARR_TOOLS_IMAGE" -c 'cp -R /app /tmp/test-source && cd /tmp/test-source && if [ "$#" -gt 0 ]; then set -- "$@" deploy.docker; fi; python -m deploy.docker.entrypoint python manage.py test "$@" --noinput' sh "$@" > "$output/application-tests.log" 2>&1
+  docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 2g --pids-limit 128 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,exec,size=2048m --entrypoint sh "$VIBEARR_TOOLS_IMAGE" -c 'black --check . && ruff check . && mypy . --config-file mypy.ini && shellcheck test.sh run.sh deploy/docker/*.sh && actionlint -config-file .github/actionlint.yaml .github/workflows/*.yml && python -m unittest discover -s vibearr_executor -t . && python -m vibearr_runner.verify' > "$output/tools-tests.log" 2>&1
 fi
 if [[ $mode == full || $mode == unit || $mode == candidate ]]; then
   package_image=$project-packaging:checks
@@ -148,7 +149,7 @@ if [[ $mode == full || $mode == unit || $mode == candidate ]]; then
   package_id=$(docker image inspect "$package_image" --format '{{.Id}}')
   docker run --rm --network none --read-only --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --security-opt no-new-privileges:true --memory 2g --memory-swap 2g --pids-limit 128 --cpus 2 --tmpfs /work:rw,nosuid,nodev,exec,size=1024m,uid=1000,gid=1000,mode=0700 --tmpfs /home/task:rw,nosuid,nodev,exec,size=32m,uid=1000,gid=1000,mode=0700 --tmpfs /tmp:rw,nosuid,nodev,exec,size=128m --tmpfs /input:rw,nosuid,nodev,noexec,size=40m,mode=0711 --tmpfs /secrets:rw,nosuid,nodev,noexec,size=64k,mode=0711 --tmpfs /control:rw,nosuid,nodev,noexec,size=128m,mode=0700 --tmpfs /opt/candidate:rw,nosuid,nodev,exec,size=4m,mode=0755 -e "VIBEARR_CHECK_IMAGE_ID=$package_id" -e "VIBEARR_CHECK_COMMIT=$commit" -e "VIBEARR_CHECK_BASE=$base" -e "VIBEARR_CHECK_INTRODUCTION=$introduction" "$package_image" > "$output/packaging.log" 2>&1
 fi
-if [[ $mode == full || $mode == boundary || $mode == candidate ]]; then
+if [[ $mode == full || $mode == boundary || $mode == candidate || $mode == operations ]]; then
   compose exec -T worker python -I -m vibearr_executor.compact_worker restart-witness > "$output/restart-witness.json" 2>&1
   compose kill -s SIGKILL worker > "$output/restart.log" 2>&1
   start_runtime >> "$output/restart.log" 2>&1
@@ -158,6 +159,7 @@ if [[ $mode == full || $mode == boundary || $mode == candidate ]]; then
   start_runtime >> "$output/restart.log" 2>&1
   compose exec -T worker python -I -c 'from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path("/run/vibearr/worker/control-token").read_text().strip()); assert c.capabilities()["qualified"] is False' > "$output/restart-proof.log" 2>&1
   compose exec -T worker python -I -m vibearr_executor.compact_worker qualify > "$output/requalified.json" 2>&1
+  compose exec -T worker python -I -m vibearr_executor.compact_worker qualify-roles > "$output/role-qualification.json" 2>&1
   compose exec -T worker python -I < deploy/docker/dependency_smoke.py > "$output/dependency-smoke.json" 2>&1
 fi
 if [[ $mode == full || $mode == candidate ]]; then
@@ -177,6 +179,10 @@ if [[ $mode == full || $mode == operations ]]; then
     export VIBEARR_BROWSER_SOURCE_BINDING
   fi
   bash deploy/docker/operations.sh browser > "$output/browser.log" 2>&1
+  compose exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 runner python -I - seed-state < deploy/docker/restore_check.py > "$output/recovery-private-seed.json" 2>&1
+  compose exec -T --user 10001:10001 -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 app python -m deploy.docker.entrypoint python -m deploy.docker.recovery_fixture seed > "$output/recovery-seed.json" 2>&1
+  compose exec -T --user 10001:10001 runner python -I -m vibearr_runner.drain on > "$output/drain-request.json" 2>&1
+  compose exec -T --user 10001:10001 runner python -I -m vibearr_runner.drain wait --timeout 60 > "$output/drain-ack.json" 2>&1
   compose stop app runner worker > "$output/quiesce.log" 2>&1
   bash deploy/docker/operations.sh backup --quiesced > "$output/backup.log" 2>&1
   backup_id=$(docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.records backup_id < "$output/backup.log")
@@ -185,4 +191,12 @@ if [[ $mode == full || $mode == operations ]]; then
   done
   restored up -d --wait > "$output/restored-start.log" 2>&1
   restored exec -T --user 10001:10001 app python -m deploy.docker.entrypoint python manage.py check > "$output/restored-system.log" 2>&1
+  restored exec -T --user 10001:10001 -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 app python -m deploy.docker.entrypoint python -m deploy.docker.recovery_fixture verify > "$output/restored-fixture.json" 2>&1
+  restored exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 runner python -I - "$backup_id" < deploy/docker/restore_check.py > "$output/restored-authority.json" 2>&1
+  restored exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 worker python -I - "$backup_id" --worker < deploy/docker/restore_check.py > "$output/restored-worker-authority.json" 2>&1
+  restored exec -T worker python -I -m vibearr_executor.compact_worker restart-witness > "$output/restored-restart-witness.json" 2>&1
+  restored kill -s SIGKILL worker > "$output/restored-restart.log" 2>&1
+  start_runtime restored >> "$output/restored-restart.log" 2>&1
+  restored exec -T worker python -I -m vibearr_executor.compact_worker qualify > "$output/restored-qualification.json" 2>&1
+  restored exec -T worker python -I -m vibearr_executor.compact_worker qualify-roles > "$output/restored-role-qualification.json" 2>&1
 fi
