@@ -162,6 +162,7 @@ class Fixture:
         self.plan = collected["_factory_documents"]["plans"][identity(3)]
         self.workspace = collected["delivery"]["workspace"]
         self.statuses, self.artifacts, self.entries = {}, [], []
+        self.manifests = {}
         self.next_id = 1000
         self.now = timestamp(self.run["created_at"]).timestamp() + 1
         self.validation_profile = ValidationProfile(
@@ -179,7 +180,33 @@ class Fixture:
         self.worker = SimpleNamespace(
             status=lambda key: deepcopy(self.statuses[key]),
             capabilities=lambda: deepcopy(self.capabilities()),
+            termination_receipt=self.termination_receipt,
         )
+
+    def seal(self, operation, manifest=None):
+        if manifest is not None:
+            self.manifests[operation] = deepcopy(manifest)
+        status = self.statuses[operation]
+        status["receipt_digest"] = digest(
+            {
+                "manifest": self.manifests[operation],
+                "result": status["result"],
+                "boot": status["worker_boot"],
+            }
+        )
+
+    def termination_receipt(self, operation):
+        manifest, status = self.manifests[operation], self.statuses[operation]
+        return {
+            "schema_version": 1,
+            "instance_id": worker_identity()["instance_id"],
+            "operation_id": operation,
+            "run_id": manifest["run_id"],
+            "manifest_digest": digest(manifest),
+            "state": status["state"],
+            "resources_terminated": status["descendants_terminated"],
+            "receipt_digest": status["receipt_digest"],
+        }
 
     def number(self):
         self.next_id += 1
@@ -243,6 +270,7 @@ class Fixture:
             "deadline": "2026-11-22T00:10:00+00:00",
             "network_hosts": [],
         }
+        self.seal(operation, manifest)
         account = {**self.context["document"]["account"], "model": "model-" + role}
         session = {
             "adapter": "codex",
@@ -375,6 +403,7 @@ class Fixture:
                             },
                         }
                     )
+                    self.seal(operation, operations[-1]["manifest"])
                 session = {
                     "schema_version": 1,
                     "run_id": self.run["id"],
@@ -611,6 +640,8 @@ class Fixture:
             )
             observed["result"].pop("artifact")
             self.statuses[operation] = deepcopy(observed)
+            self.seal(operation)
+            observed = deepcopy(self.statuses[operation])
         receipt = receipt_summary(observed) if after else None
         record = {
             "binding": {
@@ -761,6 +792,7 @@ class FactoryScenarioTests(unittest.TestCase):
         )
         operation = next(iter(fixture.statuses))
         fixture.statuses[operation]["result"]["canceled"] = True
+        fixture.seal(operation)
         fixture.artifacts = []
         fixture.statuses = {operation: fixture.statuses[operation]}
         fixture.entries = [
@@ -1158,3 +1190,91 @@ class FinalValidationBindingTests(unittest.TestCase):
         final["intent_id"] = identity(99999999)
         with self.assertRaisesRegex(ValueError, "original immutable intent"):
             fixture.verify("failed-check-repair")
+
+
+class AuthenticatedManifestTests(unittest.TestCase):
+    def test_actual_shaped_termination_api_binds_original_manifest_and_sealed_digest(
+        self,
+    ):
+        fixture = Fixture()
+        operation = next(iter(fixture.manifests))
+        manifest = fixture.manifests[operation]
+        scenarios.verify_operation_manifest(fixture.worker, manifest)
+        self.assertNotEqual(
+            fixture.worker.termination_receipt(operation)["receipt_digest"],
+            receipt_summary(fixture.worker.status(operation))["receipt_digest"],
+        )
+
+    def test_final_validation_cannot_replace_even_a_bounded_deadline(self):
+        fixture = Fixture(rounds=2)
+        intent = next(
+            entry["data"]
+            for entry in reversed(fixture.entries)
+            if entry["kind"] == "native_intent"
+            and entry["data"]["kind"] == "validation"
+        )
+        for operation in intent["data"]["operations"]:
+            operation["manifest"]["deadline"] = "2026-11-22T00:08:00+00:00"
+        with self.assertRaisesRegex(
+            ValueError, "authenticated original worker manifest"
+        ):
+            fixture.verify("failed-check-repair")
+
+    def test_agent_cannot_replace_original_profile(self):
+        fixture = Fixture(rounds=2)
+        intent = next(
+            entry["data"]
+            for entry in fixture.entries
+            if entry["kind"] == "native_intent"
+        )
+        intent["data"]["session"]["manifest"]["profile_id"] = "another-profile"
+        with self.assertRaisesRegex(
+            ValueError, "authenticated original worker manifest"
+        ):
+            fixture.verify("failed-check-repair")
+
+    def test_agent_cannot_replace_original_resource_limits(self):
+        fixture = Fixture(rounds=2)
+        intent = next(
+            entry["data"]
+            for entry in fixture.entries
+            if entry["kind"] == "native_intent"
+        )
+        intent["data"]["session"]["manifest"]["limits"]["cpu"] = 2
+        with self.assertRaisesRegex(
+            ValueError, "authenticated original worker manifest"
+        ):
+            fixture.verify("failed-check-repair")
+
+    def test_task_argv_cannot_be_injected_into_manifest(self):
+        fixture = Fixture(rounds=2)
+        intent = next(
+            entry["data"]
+            for entry in fixture.entries
+            if entry["kind"] == "native_intent"
+        )
+        intent["data"]["session"]["manifest"]["argv"] = ["unregistered-command"]
+        with self.assertRaisesRegex(ValueError, "missing or unknown fields"):
+            fixture.verify("failed-check-repair")
+
+    def test_sealed_digest_must_bind_actual_result_and_worker_boot(self):
+        fixture = Fixture()
+        operation = next(iter(fixture.manifests))
+        fixture.statuses[operation]["receipt_digest"] = "f" * 64
+        with self.assertRaisesRegex(ValueError, "sealed worker receipt"):
+            scenarios.verify_operation_manifest(
+                fixture.worker, fixture.manifests[operation]
+            )
+
+    def test_termination_api_cannot_substitute_another_instance(self):
+        fixture = Fixture()
+        operation = next(iter(fixture.manifests))
+        protected = fixture.termination_receipt(operation)
+        protected["instance_id"] = identity(9999)
+        fixture.worker.termination_receipt = lambda _operation: protected
+        with self.assertRaisesRegex(
+            ValueError, "authenticated original worker manifest"
+        ):
+            scenarios.verify_operation_manifest(
+                fixture.worker, fixture.manifests[operation]
+            )
