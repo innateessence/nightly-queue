@@ -149,6 +149,45 @@ class FactoryContractTests(unittest.TestCase):
         with self.assertRaises(FactoryContractError):
             validate_artifact(value)
 
+    def test_execution_timestamps_reject_huge_integers_without_overflow(self):
+        for key in ("started_at", "ended_at"):
+            value = artifact()
+            value["execution"][key] = 10**1000
+            with self.subTest(key=key), self.assertRaises(FactoryContractError):
+                validate_artifact(value)
+
+    def test_bound_dispatch_preserves_specification_identity(self):
+        value = {
+            "role": "build",
+            "round": 1,
+            "prompt_digest": "a" * 64,
+            "input_digest": "b" * 64,
+            "specification_id": str(uuid4()),
+            "specification_digest": "c" * 64,
+        }
+        self.assertEqual(validate_role_intent(value), value)
+        for change in (
+            {"specification_id": "invalid"},
+            {"specification_digest": "invalid"},
+            {"specification_id": None},
+        ):
+            with self.subTest(change=change), self.assertRaises(FactoryContractError):
+                validate_role_intent({**value, **change})
+        value.pop("specification_id")
+        with self.assertRaises(FactoryContractError):
+            validate_role_intent(value)
+
+    def test_bootstrap_dispatch_preserves_explicit_unbound_specification(self):
+        value = {
+            "role": "intake",
+            "round": 1,
+            "prompt_digest": "a" * 64,
+            "input_digest": "b" * 64,
+            "specification_id": None,
+            "specification_digest": "",
+        }
+        self.assertEqual(validate_role_intent(value), value)
+
     def test_duplicate_criterion_ids_are_rejected(self):
         value = artifact("specification")
         value["payload"]["criteria"] *= 2
