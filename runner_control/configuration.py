@@ -181,6 +181,13 @@ def project_configuration(project, defaults, overrides, credentials):
             )
     policy = ExecutionPolicy.from_data(effective["execution_policy"])
     if policy.delivery_mode == "merge":
+        errors.append(
+            {
+                "field": "execution_policy",
+                "code": "human_merge_required",
+                "message": "Automatic merge is disabled; select pull-request delivery for human review.",
+            }
+        )
         try:
             profile = merge_profile(effective["merge_profile"])
             if profile["repository_id"] != project.github_repository_id:

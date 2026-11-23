@@ -22,6 +22,7 @@ PRESERVED_EVIDENCE = {
     "finish",
     "release",
     "factory_retention",
+    "publication_observation",
 }
 PRESERVED_EVIDENCE.update(ARTIFACT_KINDS)
 
@@ -200,6 +201,10 @@ def purge_run(run_id, now=None):
             if run.configuration_snapshot.get("execution_kind") == "native":
                 original = run.source_snapshot
                 tombstone = {"purged": True, "digest": digest(original)}
+                if run.native_outcome == "delivered":
+                    for field in ("repository_id", "issue_number"):
+                        if type(original.get(field)) is int:
+                            tombstone[field] = original[field]
                 Run.objects.filter(pk=run.pk).update(source_snapshot=tombstone)
                 from work_queue.models import QueueItem
 
