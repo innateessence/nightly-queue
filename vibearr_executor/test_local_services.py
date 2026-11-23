@@ -162,6 +162,53 @@ class WorkerBrowserReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Browser errors"):
             self.validate(report)
 
+    def test_factory_focus_accepts_exact_viewport_images_on_project_page(self):
+        report = copy.deepcopy(self.report)
+        for frame in report["screenshots"]:
+            frame["url"] = (
+                "http://127.0.0.1:8765/projects/1/edit/?theme=" + frame["theme"]
+            )
+            frame["capture"] = {"focus": "factory", "full_page": False}
+        self.assertEqual(len(self.validate(report)), 4)
+
+    def test_factory_focus_is_rejected_on_a_different_registered_page(self):
+        report = copy.deepcopy(self.report)
+        report["screenshots"][0]["capture"] = {"focus": "factory", "full_page": False}
+        with self.assertRaisesRegex(ValueError, "registered project page"):
+            self.validate(report)
+
+    def test_default_page_evidence_cannot_be_downgraded_to_a_viewport(self):
+        report = copy.deepcopy(self.report)
+        report["screenshots"][0]["capture"] = {"focus": "page", "full_page": False}
+        with self.assertRaisesRegex(ValueError, "fixed full-page"):
+            self.validate(report)
+
+    def test_viewport_capture_cannot_include_extra_page_height(self):
+        report = copy.deepcopy(self.report)
+        frame = report["screenshots"][0]
+        path = self.capture / Path(frame["path"]).name
+        path.write_bytes(fixture_png(width=1440, height=1100))
+        replacement = capture_worker_receipt(
+            self.binding,
+            self.worker,
+            path,
+            receipt_path=frame["path"],
+            url="http://127.0.0.1:8765/projects/1/edit/?theme=light",
+            viewport=frame["viewport"],
+            theme=frame["theme"],
+            focus="factory",
+            full_page=False,
+        )
+        report["screenshots"][0] = replacement
+        with self.assertRaisesRegex(ValueError, "undeclared page extent"):
+            self.validate(report)
+
+    def test_existing_full_page_worker_receipts_remain_readable(self):
+        report = copy.deepcopy(self.report)
+        for frame in report["screenshots"]:
+            frame.pop("capture")
+        self.assertEqual(len(self.validate(report)), 4)
+
     def test_header_only_junk_cannot_claim_to_be_a_png(self):
         path = self.capture / "queue-mobile-dark.png"
         path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"not pixels" * 2000)

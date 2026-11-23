@@ -27,6 +27,7 @@ from .runtime import durable
 from .local_app import APP_UID
 from vibearr_runner.browser_receipts import (
     validate_binding,
+    validate_capture_mode,
     validate_page_path,
     validate_worker_binding,
     validate_worker_report,
@@ -229,6 +230,12 @@ class LocalServices:
             }
         )
         page_path = validate_page_path(context["document"].get("browser_page", "/"))
+        focus = context["document"].get("browser_focus", "page")
+        mode = validate_capture_mode({"focus": focus, "full_page": focus == "page"})
+        if mode["focus"] == "factory" and not page_path.startswith("/projects/"):
+            raise Rejected(
+                "Factory viewport capture requires a registered project page."
+            )
         self.active, self.binding, self.worker_binding = operation_id, binding, worker
         self.root.mkdir(mode=0o711, parents=True, exist_ok=True)
         self.root.chmod(0o711)
@@ -239,6 +246,7 @@ class LocalServices:
             "source_binding": binding,
             "worker_binding": worker,
             "page_path": page_path,
+            "capture_focus": focus,
         }
         durable(runtime.inputs / "browser.json", canonical(settings), 0o444)
         browser_root = runtime.home / "browser"
@@ -254,6 +262,7 @@ class LocalServices:
                     "not_before": time.time(),
                     "deadline": deadline,
                     "page_path": page_path,
+                    "capture_focus": focus,
                 }
             ),
         )
@@ -443,6 +452,12 @@ class LocalServices:
             ):
                 raise Rejected(
                     "Browser evidence rendered a different application page."
+                )
+            if frame.get("capture", {}).get("focus", "page") != window.get(
+                "capture_focus", "page"
+            ):
+                raise Rejected(
+                    "Browser evidence differs from its selected capture focus."
                 )
 
     def qualify_browser(self):

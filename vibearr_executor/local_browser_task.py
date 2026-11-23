@@ -10,11 +10,17 @@ from vibearr_runner.browser_receipts import (
     VIEWPORTS,
     capture_worker_receipt,
     validate_binding,
+    validate_capture_mode,
     validate_page_path,
     validate_worker_binding,
 )
 
 BASE = "http://127.0.0.1:8765"
+FACTORY_ANCESTORS = """element => {
+    for (let node = element.parentElement; node; node = node.parentElement) {
+        if (node.tagName === 'DETAILS') node.open = true;
+    }
+}"""
 
 
 def record_error(target, message):
@@ -61,6 +67,10 @@ async def capture():
     binding = validate_binding(value["source_binding"])
     worker = validate_worker_binding(value["worker_binding"])
     page_path = validate_page_path(value["page_path"])
+    focus = value.get("capture_focus", "page")
+    mode = validate_capture_mode({"focus": focus, "full_page": focus == "page"})
+    if focus == "factory" and not page_path.startswith("/projects/"):
+        raise RuntimeError("Factory focus requires a registered local project page.")
     checks = boundary_checks()
     root = Path.home() / "browser"
     capture_root = root / ("capture-" + uuid4().hex)
@@ -118,6 +128,11 @@ async def capture():
                     details = page.locator("main details").first
                 if await details.count():
                     await details.evaluate("element => { element.open = true; }")
+                if focus == "factory":
+                    field = page.locator('select[name="runner-factory_mode"]')
+                    await field.evaluate(FACTORY_ANCESTORS)
+                    await field.scroll_into_view_if_needed()
+                    await page.evaluate("window.scrollBy(0, -100)")
                 style = await context.request.get(
                     BASE + "/static/work_queue/queue.css", max_redirects=0
                 )
@@ -128,7 +143,7 @@ async def capture():
                         "The candidate application has no released queue styling."
                     )
                 path = capture_root / f"queue-{name}-{theme}.png"
-                await page.screenshot(path=str(path), full_page=True)
+                await page.screenshot(path=str(path), full_page=mode["full_page"])
                 frames.append(
                     capture_worker_receipt(
                         binding,
@@ -140,6 +155,8 @@ async def capture():
                         url=page.url,
                         viewport=viewport,
                         theme=theme,
+                        focus=focus,
+                        full_page=mode["full_page"],
                     )
                 )
             await context.close()
