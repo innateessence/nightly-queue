@@ -1,3 +1,4 @@
+import importlib.util
 from copy import deepcopy
 from dataclasses import asdict, replace
 import json
@@ -13,6 +14,12 @@ from vibearr_runner.workspaces import git
 from . import test_factory_reviews as review_fixture
 
 
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+
+
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class FactoryGenerationTests(unittest.TestCase):
     def setUp(self):
         harness = review_fixture.NativeFactoryEngineTests()
