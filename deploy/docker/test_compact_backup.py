@@ -1,13 +1,15 @@
 import json
 from pathlib import Path
 import tempfile
+import stat
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
 from .backup import backup_volumes
 from .backup_files import COMPACT_VOLUMES, VOLUMES, capture, inventory, restore
-from .worker_recovery import recover
+from .worker_recovery import recover, registered_channel
 
 
 class CompactBackupTests(unittest.TestCase):
@@ -61,6 +63,37 @@ class CompactBackupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             restore(archive, records, self.target, COMPACT_VOLUMES)
         self.assertEqual(list((self.target / "worker-control").iterdir()), [])
+
+
+class WorkerChannelModeTests(unittest.TestCase):
+    def setUp(self):
+        self.path = Path("/restore/worker-secrets/control-token")
+        self.info = SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o440, st_uid=0, st_gid=10001
+        )
+
+    def test_registered_restored_channel_is_accepted(self):
+        self.assertTrue(registered_channel(self.path, self.info))
+
+    def test_arbitrary_group_readable_path_is_rejected(self):
+        self.assertFalse(registered_channel(Path("/tmp/control-token"), self.info))
+
+    def test_arbitrary_restored_filename_is_rejected(self):
+        self.assertFalse(
+            registered_channel(self.path.with_name("other-token"), self.info)
+        )
+
+    def test_task_owned_channel_is_rejected(self):
+        self.info.st_uid = 1000
+        self.assertFalse(registered_channel(self.path, self.info))
+
+    def test_other_group_channel_is_rejected(self):
+        self.info.st_gid = 1000
+        self.assertFalse(registered_channel(self.path, self.info))
+
+    def test_group_writable_channel_is_rejected(self):
+        self.info.st_mode = stat.S_IFREG | 0o460
+        self.assertFalse(registered_channel(self.path, self.info))
 
 
 class WorkerAuthorityRestoreTests(unittest.TestCase):
