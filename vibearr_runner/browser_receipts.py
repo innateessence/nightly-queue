@@ -219,13 +219,27 @@ def validate_worker_binding(value):
     return value
 
 
-def capture_worker_receipt(binding, worker_binding, path, **options):
+def validate_capture_mode(value):
+    if not isinstance(value, dict) or set(value) != {"focus", "full_page"}:
+        raise ValueError("Declare the browser capture focus and extent.")
+    if not isinstance(value["focus"], str) or type(value["full_page"]) is not bool:
+        raise ValueError("Browser capture focus and extent are invalid.")
+    if (value["focus"], value["full_page"]) not in {("page", True), ("factory", False)}:
+        raise ValueError("Select the fixed full-page or Factory viewport recipe.")
+    return value
+
+
+def capture_worker_receipt(
+    binding, worker_binding, path, *, focus="page", full_page=True, **options
+):
     validate_worker_binding(worker_binding)
+    mode = validate_capture_mode({"focus": focus, "full_page": full_page})
     result = capture_receipt(binding, path, **options)
     result.update(
         schema_version=3,
         runtime="compact-worker-browser-v1",
         worker_binding=worker_binding,
+        capture=mode,
     )
     return result
 
@@ -242,6 +256,8 @@ def validate_receipt(
 ):
     worker = isinstance(value, dict) and value.get("schema_version") == 3
     fields = RECEIPT_FIELDS | {"worker_binding"} if worker else RECEIPT_FIELDS
+    if worker and "capture" in value:
+        fields |= {"capture"}
     if not isinstance(value, dict) or set(value) != fields:
         raise ValueError(
             "Use complete Docker browser receipts; host screenshots cannot qualify this release."
@@ -290,6 +306,13 @@ def validate_receipt(
         validate_page_path(target.path)
         if target.query != "theme=" + value["theme"]:
             raise ValueError("Browser page theme differs from its receipt.")
+        mode = validate_capture_mode(
+            value.get("capture", {"focus": "page", "full_page": True})
+        )
+        if mode["focus"] == "factory" and not target.path.startswith("/projects/"):
+            raise ValueError(
+                "Factory viewport evidence requires the registered project page."
+            )
     captured = datetime.fromisoformat(value["captured_at"])
     if (
         captured.utcoffset() is None
@@ -326,6 +349,8 @@ def validate_receipt(
         width != value["viewport"]["width"] or height < value["viewport"]["height"]
     ):
         raise ValueError("Browser PNG dimensions differ from its viewport receipt.")
+    if worker and not mode["full_page"] and height != value["viewport"]["height"]:
+        raise ValueError("Browser viewport capture includes undeclared page extent.")
     if (
         type(value["bytes"]) is not int
         or value["bytes"] != len(content)
@@ -400,6 +425,10 @@ def validate_capture_receipts(
             and urlsplit(frame["url"]).path != urlsplit(first["url"]).path
         ):
             raise ValueError("Browser frames must render the same selected page.")
+        if expected_worker is not None and frame.get("capture", {}).get(
+            "focus", "page"
+        ) != first.get("capture", {}).get("focus", "page"):
+            raise ValueError("Browser frames must share one selected capture focus.")
         name = "desktop" if frame["viewport"] == VIEWPORTS["desktop"] else "mobile"
         observed.add((name, frame["theme"]))
     if observed != expected:
