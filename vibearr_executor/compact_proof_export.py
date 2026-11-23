@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from .contracts import canonical
+from .contracts import canonical, digest
 from .client import Client
 from .control_token import read_control_token
 from .runtime import durable
@@ -32,6 +32,23 @@ def operation(identity):
     return {key: value[key] for key in FIELDS}
 
 
+def oom_operation(records):
+    context = digest(canonical({"case": "memory"}))
+    selected = [
+        record
+        for record in records
+        if record["manifest"]["profile_id"] == "worker-qualification"
+        and record["manifest"]["phase"] == "agent"
+        and record["manifest"]["context_digest"] == context
+        and record["result"]["exit_code"] == -9
+    ]
+    if len(selected) != 1:
+        raise ValueError(
+            "Expected exactly one actual memory probe in the current qualification."
+        )
+    return selected[0]
+
+
 def main():
     output = ROOT / "engineering-proofs"
     output.mkdir(mode=0o700, exist_ok=False)
@@ -53,14 +70,9 @@ def main():
         ),
     )
     records = [operation(value["operation_id"]) for value in boundary["receipts"]]
-    oom = [value for value in records if value["result"]["exit_code"] == -9]
-    if len(oom) != 1:
-        raise ValueError(
-            "Expected exactly one actual OOM operation in the current qualification."
-        )
     durable(
         output / "resource-limits.json",
-        canonical({"boundary": boundary, "oom_operation": oom[0]}),
+        canonical({"boundary": boundary, "oom_operation": oom_operation(records)}),
     )
     session = json.loads((ROOT / "candidate-check/session.json").read_bytes())
     report = json.loads((ROOT / "candidate-check/evidence.json").read_bytes())
