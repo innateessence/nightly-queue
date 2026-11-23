@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import stat
@@ -18,8 +19,32 @@ class ControlTokenTests(unittest.TestCase):
         self.path.write_text("a" * 48)
         self.path.chmod(0o600)
 
+    @contextmanager
+    def trusted_private_owner(self):
+        actual = self.path.stat()
+        metadata = SimpleNamespace(
+            st_mode=actual.st_mode,
+            st_uid=10001,
+            st_gid=actual.st_gid,
+            st_nlink=actual.st_nlink,
+            st_size=actual.st_size,
+        )
+        with (
+            patch("os.fstat", return_value=metadata),
+            patch("os.geteuid", return_value=10001),
+        ):
+            yield
+
     def test_owner_only_regular_token_remains_supported(self):
-        self.assertEqual(read_control_token(self.path), "a" * 48)
+        with self.trusted_private_owner():
+            self.assertEqual(read_control_token(self.path), "a" * 48)
+
+    def test_real_token_obeys_actual_reader_and_owner_policy(self):
+        if os.geteuid() in {0, 10001}:
+            self.assertEqual(read_control_token(self.path), "a" * 48)
+            return
+        with self.assertRaisesRegex(Rejected, "ownership"):
+            read_control_token(self.path)
 
     def test_writable_group_token_is_rejected(self):
         self.path.chmod(0o660)
@@ -51,12 +76,15 @@ class ControlTokenTests(unittest.TestCase):
 
     def test_non_ascii_token_is_rejected(self):
         self.path.write_text("é" * 48)
-        with self.assertRaisesRegex(Rejected, "ASCII"):
+        with self.trusted_private_owner(), self.assertRaisesRegex(Rejected, "ASCII"):
             read_control_token(self.path)
 
     def test_multiline_token_is_rejected(self):
         self.path.write_text("a" * 32 + "\n" + "b" * 32)
-        with self.assertRaisesRegex(Rejected, "malformed"):
+        with (
+            self.trusted_private_owner(),
+            self.assertRaisesRegex(Rejected, "malformed"),
+        ):
             read_control_token(self.path)
 
     def shared_token(self, *, uid=0, gid=10001):
