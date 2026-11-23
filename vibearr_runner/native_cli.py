@@ -16,6 +16,7 @@ from .native_codex import (
 from .native_sessions import NativeSession, NativeSessionError
 from .policy import ExecutionPolicy
 from .opencode_connection import valid_model
+from .native_claude import consume_claude
 
 
 class NativeEvents(CodexEvents):
@@ -53,6 +54,8 @@ class NativeEvents(CodexEvents):
         return "Selected native CLI failed; inspect its protected diagnostics before retrying."
 
     def line(self, line):
+        if self.provider == "claude":
+            return consume_claude(self, line)
         if self.provider == "codex":
             try:
                 event = json.loads(line)
