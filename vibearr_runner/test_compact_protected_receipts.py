@@ -31,6 +31,8 @@ class ProtectedEngineeringReceiptTests(unittest.TestCase):
                 "timed_out": False,
                 "canceled": False,
                 "log_truncated": False,
+                "started_at": 1700000000.0,
+                "ended_at": 1700000001.0,
             },
         }
         self.seal(self.record)
@@ -72,6 +74,21 @@ class ProtectedEngineeringReceiptTests(unittest.TestCase):
 
     def test_failed_export_cannot_claim_success(self):
         self.assert_failed_result_rejected("export_error", "failed export")
+
+    def test_start_after_sealed_end_is_rejected(self):
+        self.assert_failed_result_rejected("started_at", 1700000002.0)
+
+    def test_missing_sealed_end_is_rejected(self):
+        self.record["result"].pop("ended_at")
+        self.seal(self.record)
+        with self.assertRaisesRegex(ValueError, "chronology"):
+            protected_operation(self.record, self.worker)
+
+    def test_boolean_sealed_end_is_rejected(self):
+        self.assert_failed_result_rejected("ended_at", True)
+
+    def test_negative_sealed_start_is_rejected(self):
+        self.assert_failed_result_rejected("started_at", -1)
 
     def test_running_restart_cannot_claim_reconciled_execution(self):
         record = deepcopy(self.record)
