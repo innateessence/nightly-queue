@@ -1,3 +1,4 @@
+import importlib.util
 import copy
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -8,10 +9,6 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from vibearr_executor.artifacts import pack, result_manifest
-from vibearr_executor.contracts import Limits, Profile
-from vibearr_executor.integrated_profiles import ARGV, RUNTIME, VERSIONS
-from vibearr_runner.native_cli import NativeCLIAdapter
 from vibearr_runner.native_conformance import (
     FACTORY_ROLES,
     MAX_RESULT,
@@ -30,6 +27,14 @@ from vibearr_runner.native_sessions import (
     NativeSessionError,
 )
 from vibearr_runner.policy import ExecutionPolicy, default_execution_policy
+
+
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor.artifacts import pack, result_manifest
+    from vibearr_executor.contracts import Limits, Profile
+    from vibearr_executor.integrated_profiles import ARGV, RUNTIME, VERSIONS
+    from vibearr_runner.native_cli import NativeCLIAdapter
 
 
 def transcript(provider, payload=None, *, session=None):
@@ -219,6 +224,9 @@ class RecordedExecutor:
         }
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class RoleCapabilityTests(unittest.TestCase):
     def setUp(self):
         self.capabilities = RecordedExecutor().capabilities()
@@ -335,7 +343,7 @@ class RoleCapabilityTests(unittest.TestCase):
 class NativeRoleResultTests(unittest.TestCase):
     def test_every_provider_preserves_a_complete_result_beyond_display_preview(self):
         payload = {"summary": "x" * 8000}
-        for provider in VERSIONS:
+        for provider in ("codex", "claude", "opencode"):
             with self.subTest(provider=provider):
                 self.assertEqual(
                     parse_role_result(provider, transcript(provider, payload))[
@@ -345,13 +353,13 @@ class NativeRoleResultTests(unittest.TestCase):
                 )
 
     def test_duplicate_terminal_events_are_rejected_for_all_providers(self):
-        for provider in VERSIONS:
+        for provider in ("codex", "claude", "opencode"):
             content = transcript(provider)
             with self.subTest(provider=provider), self.assertRaises(NativeSessionError):
                 parse_role_result(provider, content + content.splitlines()[-1] + b"\n")
 
     def test_changed_session_is_rejected_for_all_providers(self):
-        for provider in VERSIONS:
+        for provider in ("codex", "claude", "opencode"):
             events = [json.loads(line) for line in transcript(provider).splitlines()]
             field = {
                 "codex": "thread_id",
@@ -428,6 +436,9 @@ class NativeRoleResultTests(unittest.TestCase):
             parse_role_result("codex", transcript("codex", {"text": "x" * MAX_RESULT}))
 
 
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+)
 class FactoryNativeAdapterTests(unittest.TestCase):
     def prepare(self, provider="codex", role="reviewer-code", browser_capture=None):
         self.executor = RecordedExecutor()
@@ -637,6 +648,9 @@ class PermissionAndExecutableTests(unittest.TestCase):
         with self.assertRaises(NativeSessionError):
             validate_browser_capture(["reviewer-ui"], capture)
 
+    @unittest.skipUnless(
+        SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+    )
     def test_version_probe_does_not_claim_provider_or_worker_qualification(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             binary = Path(directory) / "codex"
@@ -647,6 +661,9 @@ class PermissionAndExecutableTests(unittest.TestCase):
             self.assertFalse(result["worker_boundary_verified"])
             self.assertFalse(result["authenticated"])
 
+    @unittest.skipUnless(
+        SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+    )
     def test_version_probe_rejects_a_different_installed_cli(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             binary = Path(directory) / "opencode"
@@ -657,6 +674,9 @@ class PermissionAndExecutableTests(unittest.TestCase):
             ):
                 executable_probe("opencode", directory=Path(directory))
 
+    @unittest.skipUnless(
+        SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+    )
     def test_version_probe_uses_its_clean_home_as_working_directory(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             binary = Path(directory) / "codex"
@@ -668,6 +688,9 @@ class PermissionAndExecutableTests(unittest.TestCase):
             result = executable_probe("codex", directory=Path(directory))
             self.assertEqual(result["agent_version"], "0.169.0")
 
+    @unittest.skipUnless(
+        SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+    )
     def test_version_probe_bounds_output_before_reading_all_of_it(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             binary = Path(directory) / "codex"
@@ -676,6 +699,9 @@ class PermissionAndExecutableTests(unittest.TestCase):
             with self.assertRaisesRegex(NativeSessionError, "output exceeds its bound"):
                 executable_probe("codex", directory=Path(directory))
 
+    @unittest.skipUnless(
+        SDK_AVAILABLE, "Install the native-runtime extra for native executor tests"
+    )
     def test_version_probe_terminates_a_hanging_process_group(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             binary = Path(directory) / "codex"
