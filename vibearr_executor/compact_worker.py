@@ -404,11 +404,16 @@ class CompactHandler(Handler):
                 and parts[4] == "connection-binding"
             ):
                 return runtime.connection_binding(parts[3])
-        if self.command == "POST" and not data:
-            if self.path == "/v4/qualify":
-                from .compact_qualification import qualify
+        if self.command == "POST" and self.path == "/v4/qualify":
+            from .compact_protocol import qualification_targets
 
-                return qualify(runtime)
+            if set(data) != {"targets"}:
+                raise Rejected("Supply only the inspected qualification targets.")
+            targets = qualification_targets(data["targets"])
+            from .compact_qualification import qualify
+
+            return qualify(runtime, targets=targets)
+        if self.command == "POST" and not data:
             if self.path == "/v4/qualify-roles":
                 from .compact_role_qualification import qualify_roles
 
@@ -465,7 +470,21 @@ def main():
             ) != os.environ.get("VIBEARR_WORKER_IMAGE_ID"):
                 raise Rejected("Worker health identity differs from installed image.")
             return
-        print(json.dumps(client.request("/v4/" + args.action, {})))
+        data = {}
+        if args.action == "qualify":
+            from .compact_protocol import qualification_targets
+
+            targets = os.environ.get("VIBEARR_QUALIFICATION_TARGETS", "")
+            if len(targets.encode()) > 512:
+                raise Rejected("Qualification targets exceed their byte limit.")
+            try:
+                decoded = json.loads(targets)
+            except ValueError:
+                raise Rejected(
+                    "Supply inspected qualification targets as JSON."
+                ) from None
+            data = {"targets": qualification_targets(decoded)}
+        print(json.dumps(client.request("/v4/" + args.action, data)))
         return
     requirements = Path("/opt/validation/project-requirements.txt").read_bytes()
     installed, validation = profiles(
