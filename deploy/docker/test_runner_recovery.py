@@ -136,6 +136,14 @@ class RunnerConnectionRestoreTests(unittest.TestCase):
             self.restore()
         self.assertTrue(self.ledger.is_file())
 
+    def test_marker_requires_a_boolean_retirement_request(self):
+        self.marker.write_text(
+            json.dumps({"backup_id": self.identity, "new_runner_identity_required": 1})
+        )
+        with self.assertRaisesRegex(ValueError, "exact pending"):
+            self.restore()
+        self.assertTrue(self.ledger.is_file())
+
     def test_linked_marker_is_rejected(self):
         saved = self.marker.with_name("saved-marker")
         self.marker.rename(saved)
