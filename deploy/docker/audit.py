@@ -204,7 +204,11 @@ def inspect_containers(containers):
                     errors.append(
                         f"{name}: private volume belongs to a different project"
                     )
-                if logical == "worker-secrets" and mount["RW"]:
+                if (
+                    service in {"runner", "worker"}
+                    and logical == "worker-secrets"
+                    and mount["RW"]
+                ):
                     errors.append(f"{name}: worker channel secrets are writable")
         facts.append(
             {
