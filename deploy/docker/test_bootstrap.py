@@ -1,6 +1,8 @@
 import fcntl
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -56,6 +58,39 @@ class InitializationLockTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "permissions"):
             with initialization_lock(self.directory):
                 pass
+
+    def test_fifo_without_reader_cannot_block_initialization(self):
+        self.directory.mkdir()
+        os.mkfifo(self.directory / ".initialize.lock", mode=0o600)
+        source = """
+import errno
+from pathlib import Path
+import sys
+from deploy.docker.bootstrap import initialization_lock
+
+try:
+    with initialization_lock(Path(sys.argv[1]), timeout=0):
+        raise AssertionError("FIFO lock was accepted")
+except OSError as error:
+    if error.errno != errno.ENXIO:
+        raise
+"""
+        subprocess.run(
+            [sys.executable, "-c", source, str(self.directory)],
+            check=True,
+            capture_output=True,
+            timeout=5,
+        )
+
+    def test_fifo_with_reader_is_rejected_as_nonregular(self):
+        self.directory.mkdir()
+        path = self.directory / ".initialize.lock"
+        os.mkfifo(path, mode=0o600)
+        reader = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        self.addCleanup(os.close, reader)
+        with self.assertRaisesRegex(RuntimeError, "unsafe type"):
+            with initialization_lock(self.directory, timeout=0):
+                self.fail("FIFO lock was accepted")
 
     def test_hard_linked_lock_is_rejected(self):
         self.directory.mkdir()
