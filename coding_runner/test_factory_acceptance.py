@@ -389,7 +389,38 @@ def chain(allowance=100):
 def stack():
     from vibearr_runner.test_compact_evidence import valid_evidence
 
-    return valid_evidence()
+    report, capabilities = valid_evidence()
+    report.update(source_digest="c" * 64, tree_sha="d" * 40)
+    containers = list(report["containers"].values())
+    resources = {"memory_peak": "4294967296", "pids_peak": "128"}
+    report["worker_boundary"]["resources"] = resources
+    report["worker"]["qualification_digest"] = digest(report["worker_boundary"])
+    capabilities["qualification_digest"] = report["worker"]["qualification_digest"]
+    phases = (
+        "startup",
+        "boundary",
+        "dependency",
+        "candidate",
+        "browser",
+        "beforebackup",
+    )
+    report["runtime_observations"] = {
+        "phases": [
+            {"phase": phase, "containers": list(containers)} for phase in phases
+        ],
+        "idle": [
+            {
+                "ID": identity,
+                "CPUPerc": "0.00%",
+                "MemPerc": "1.00%",
+                "PIDs": "10",
+                "MemUsage": "10MiB / 1GiB",
+            }
+            for identity in containers
+        ],
+        "worker_peak": dict(resources),
+    }
+    return report, capabilities
 
 
 class FactoryStateTests(unittest.TestCase):
@@ -1200,6 +1231,9 @@ class BrowserProofTests(unittest.TestCase):
 
 
 class QualificationTests(unittest.TestCase):
+    @unittest.skipUnless(
+        SDK_AVAILABLE, "Executor SDK is required to validate protected boundary proofs."
+    )
     def test_fixture_receipts_never_qualify_even_with_matching_worker_boot(self):
         report, capabilities = stack()
         with self.assertRaises(ValueError):
