@@ -21,15 +21,23 @@ from .plan_presentation import (
 )
 from .plan_services import valid_handoff
 from .services import RunConflict
+from .factory_presentation import (
+    ARTIFACT_PAGE_SIZE,
+    artifact_data,
+    prepare_factory_runs,
+    present_artifact,
+)
 
 
 @require_GET
 def activity(request):
     runs = Run.objects.select_related("item", "runner").filter(state=Run.State.ACTIVE)
+    page = Paginator(runs, 25).get_page(request.GET.get("page"))
+    page.object_list = [present_run(run) for run in prepare_factory_runs(page)]
     response = render(
         request,
         "runner_control/activity.html",
-        {"runs": [present_run(run) for run in runs]},
+        {"runs": page.object_list, "page": page},
     )
     response["Cache-Control"] = "no-store"
     return response
@@ -44,7 +52,7 @@ def history(request):
     if status in Run.State.values:
         runs = runs.filter(state=status)
     page = Paginator(runs, 25).get_page(request.GET.get("page"))
-    page.object_list = [present_run(run) for run in page]
+    page.object_list = [present_run(run) for run in prepare_factory_runs(page)]
     response = render(
         request,
         "runner_control/plan_history.html",
@@ -90,7 +98,27 @@ def system(request):
 
 @require_GET
 def detail(request, run_id):
-    run = get_object_or_404(Run.objects.select_related("item"), pk=run_id)
+    run = get_object_or_404(Run.objects.select_related("item", "runner"), pk=run_id)
+    safe_run = present_run(prepare_factory_runs([run])[0])
+    factory = Paginator(
+        run.factory_artifacts.order_by("-sequence"), ARTIFACT_PAGE_SIZE
+    ).get_page(request.GET.get("factory_page"))
+    documents, factory_error = present_payload(
+        run, [artifact_data(entry) for entry in factory]
+    )
+    factory.object_list = (
+        [
+            present_artifact(
+                entry,
+                safe_run.factory.get("binding"),
+                specification_id=safe_run.factory.get("specification_artifact_id", ""),
+                intake_id=safe_run.factory.get("intake_artifact_id", ""),
+            )
+            for entry in documents
+        ]
+        if documents is not None
+        else []
+    )
     native_run = run.configuration_snapshot.get("execution_kind") == "native"
     reason = ""
     try:
@@ -125,7 +153,9 @@ def detail(request, run_id):
         request,
         "runner_control/plan_detail.html",
         {
-            "run": present_run(run),
+            "run": safe_run,
+            "factory_artifacts": factory,
+            "factory_error": factory_error,
             "native_run": native_run,
             "contexts": contexts,
             "plans": plans,

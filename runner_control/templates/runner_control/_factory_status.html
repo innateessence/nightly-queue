@@ -1,0 +1,5 @@
+{% if run.factory.present %}
+<span class="cell-note">Factory{% if run.factory.round %} round {{ run.factory.round }}{% endif %}: {% if run.factory.unavailable %}evidence unavailable{% elif run.factory.ready %}{% if run.publication.status == 'merged' or run.publication.status == 'closed_unmerged' %}evidence complete{% else %}ready for human review{% endif %}{% else %}current evidence incomplete{% endif %}</span>
+{% if not run.factory.unavailable %}{% for review in run.factory.reviewers %}<span class="cell-note">{{ review.label }}: {{ review.verdict }}</span>{% endfor %}{% endif %}
+{% endif %}
+{% if run.result_url %}<span class="cell-note">{{ run.publication.label }}</span>{% endif %}
