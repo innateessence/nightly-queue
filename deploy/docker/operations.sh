@@ -12,25 +12,27 @@ import json,sys
 config=json.load(sys.stdin)
 app=config["services"]["app"]
 values=[config["name"], app["environment"]["VIBEARR_POSTGRES_DB"], app["environment"]["VIBEARR_POSTGRES_USER"], config["networks"]["database"]["name"], app["image"], app["environment"]["VIBEARR_RUNNER_NAME"], config["networks"]["app-egress"]["name"]]
-values += [config["volumes"][name]["name"] for name in ("application-secrets", "database-secrets", "runner-secrets", "runner-data", "runner-control", "runner-logins", "postgres-data")]
+if set(config["services"]) != {"app","postgres","runner","worker"}:
+    raise ValueError("Compact operations require exactly four runtime services")
+values += [config["volumes"][name]["name"] for name in ("application-secrets", "database-secrets", "runner-secrets", "runner-data", "runner-logins", "worker-secrets", "worker-control", "postgres-data")]
 for value in values:
     if not isinstance(value,str) or "\n" in value or "\r" in value:
         raise ValueError("Invalid deployment facts")
     print(value)
 ')
-((${#facts[@]} == 14)) || { echo 'Unable to read the selected deployment.' >&2; exit 1; }
+((${#facts[@]} == 15)) || { echo 'Unable to read the selected compact deployment.' >&2; exit 1; }
 project=${facts[0]}
 [[ $project =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]] || exit 2
-volumes=(application-secrets database-secrets runner-secrets runner-data runner-control runner-logins)
+volumes=(application-secrets database-secrets runner-secrets runner-data runner-logins worker-secrets worker-control)
 backup_volume=${VIBEARR_BACKUP_VOLUME:-${project}_backup-data}
 source_volume=${VIBEARR_RESTORE_BACKUP_VOLUME:-$backup_volume}
 limits=(--rm --read-only --cap-drop ALL --cap-add DAC_OVERRIDE --cap-add CHOWN --cap-add FOWNER --security-opt no-new-privileges:true --user 0:0 --memory 1g --memory-swap 1g --pids-limit 64 --cpus 1 --tmpfs "/tmp:rw,nosuid,nodev,size=64m" --tmpfs "/var/lib/postgresql/data:rw,nosuid,nodev,noexec,size=1m")
 environment=(-e "VIBEARR_POSTGRES_DB=${facts[1]}" -e "VIBEARR_POSTGRES_USER=${facts[2]}")
 case "$action" in
   backup)
-    [[ $identity == --quiesced ]] || { echo 'Stop app and runner, then supply backup --quiesced.' >&2; exit 2; }
+    [[ $identity == --quiesced ]] || { echo 'Stop app, runner and worker, then supply backup --quiesced.' >&2; exit 2; }
     while IFS= read -r service; do
-      [[ $service == postgres || -z $service ]] || { echo 'Stop all application/runner state writers before backup.' >&2; exit 1; }
+      [[ $service == postgres || -z $service ]] || { echo 'Stop all app, runner and worker state writers before backup.' >&2; exit 1; }
     done < <(docker compose ps --status running --services)
     docker volume create "$backup_volume" >/dev/null
     docker run "${limits[@]}" --network none --volume "$backup_volume:/backups" --entrypoint python3.12 "$backup_image" -I -c 'import os; os.chmod("/backups",0o700)'
@@ -49,8 +51,8 @@ case "$action" in
       docker volume create --label "com.docker.compose.project=$project" --label "com.docker.compose.volume=${volumes[index]}" "${facts[index+7]}" >/dev/null
       mounts+=(--volume "${facts[index+7]}:/restore/${volumes[index]}")
     done
-    docker volume create --label "com.docker.compose.project=$project" --label com.docker.compose.volume=postgres-data "${facts[13]}" >/dev/null
-    mounts+=(--volume "${facts[13]}:/restore-database")
+    docker volume create --label "com.docker.compose.project=$project" --label com.docker.compose.volume=postgres-data "${facts[14]}" >/dev/null
+    mounts+=(--volume "${facts[14]}:/restore-database")
     docker run "${limits[@]}" --network none "${mounts[@]}" "$backup_image" restore-files "$identity"
     ;;
   restore-database)
@@ -60,6 +62,8 @@ case "$action" in
     ;;
   restore-bootstrap)
     [[ $identity =~ ^[a-f0-9-]{36}$ ]] || exit 2
+    [[ -z $(docker compose ps -q worker) ]] || { echo 'Retire restored worker authority before starting its container.' >&2; exit 1; }
+    docker run "${limits[@]}" --network none --volume "${facts[12]}:/restore/worker-secrets" --volume "${facts[13]}:/restore/worker-control" --entrypoint python3.12 "$backup_image" -I -m deploy.docker.worker_recovery "$identity"
     docker run --rm --network "${facts[3]}" --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10001 --memory 512m --pids-limit 64 --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=64m "${environment[@]}" -e POSTGRES_HOST=postgres --volume "${facts[7]}:/run/vibearr/application:ro" --volume "${facts[8]}:/run/vibearr/database:ro" --volume "${facts[9]}:/run/vibearr/runner" --volume "${facts[10]}:/var/lib/vibearr" --entrypoint python "${facts[4]}" -m deploy.docker.entrypoint python manage.py docker_bootstrap_runner "${facts[5]}" --restored-backup "$identity"
     ;;
   browser)
