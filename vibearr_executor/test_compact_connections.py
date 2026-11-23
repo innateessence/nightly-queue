@@ -51,7 +51,17 @@ class RunnerStateBootstrapTests(unittest.TestCase):
         state.chmod(0o755)
         with self.assertRaises(JournalError):
             Journal(state)
-        prepare_state_directory(state)
+
+        def check_owner(descriptor, uid, gid):
+            self.assertEqual((uid, gid), (10001, 10001))
+            self.assertEqual(Path(os.readlink(f"/proc/self/fd/{descriptor}")), state)
+            self.assertEqual(stat.S_IMODE(os.fstat(descriptor).st_mode), 0o700)
+
+        with patch(
+            "vibearr_runner.compact_connections.os.fchown", side_effect=check_owner
+        ) as owner:
+            prepare_state_directory(state)
+        owner.assert_called_once()
         self.assertEqual(stat.S_IMODE(state.stat().st_mode), 0o700)
         self.assertEqual(state.stat().st_uid, os.getuid())
         with Journal(state) as journal:
