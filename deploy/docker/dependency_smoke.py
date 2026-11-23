@@ -1,6 +1,7 @@
 """Exercise setup-to-validation artifact transfer without model credentials."""
 
 from datetime import datetime, timedelta, timezone
+import base64
 import json
 from pathlib import Path
 import time
@@ -97,10 +98,28 @@ def main():
             "Dependency validation smoke failed: "
             + client.logs(operation, 0, 8192).decode(errors="replace")
         )
+    setup_path = Path("/control/operations") / build_id
+    setup_record = json.loads((setup_path / "record.json").read_bytes())
+    setup_fields = (
+        "manifest",
+        "operation_id",
+        "state",
+        "descendants_terminated",
+        "result",
+        "worker_boot",
+        "execution_identity",
+        "receipt_digest",
+    )
+    setup_operation = {key: setup_record[key] for key in setup_fields}
+    dependency_archive = base64.b64encode(
+        (setup_path / "dependencies.tar").read_bytes()
+    ).decode()
     proof = {
         "build": {**result, "run_id": run_id},
         "parent_profile": parent.data(),
         "operation": {**observed, "manifest": manifest},
+        "setup_operation": setup_operation,
+        "dependency_archive": dependency_archive,
     }
     durable(Path("/control/dependency-smoke-proof.json"), canonical(proof))
     client.purge_dependencies(build_id, run_id=run_id)
