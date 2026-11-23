@@ -12,5 +12,5 @@ def recovery_request(path):
     if group == ["", "v1", "operations"]:
         return action in {"status", "stop", "logs", "result", "termination_receipt"}
     if group == ["", "v1", "dependency-builds"]:
-        return action in {"status", "stop"}
+        return action == "stop"
     return group == ["", "v2", "operations"] and action == "dependencies"

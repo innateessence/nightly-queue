@@ -140,6 +140,63 @@ class CompactWriteProtocolTests(unittest.TestCase):
                 client.request("/v2/dependencies/prepare", {})
         prepare.assert_not_called()
 
+    def pending_dependency(self, runtime):
+        operation = self.manifest["operation_id"]
+        runtime.prepare(self.manifest)
+        runtime.dependency_builds.path(operation).mkdir()
+        runtime.dependency_builds.save(
+            {"request": {"build_id": operation}, "state": "running"}
+        )
+        return operation
+
+    def test_dependency_status_cannot_dispatch_a_prepared_legacy_operation(self):
+        operation = self.pending_dependency(self.legacy)
+        original = self.legacy.record(operation)
+        with (
+            self.endpoint(self.legacy, IntegratedHandler) as client,
+            patch.object(self.legacy, "start", return_value={}) as start,
+        ):
+            with self.assertRaises(ExecutorRejected):
+                client.dependencies(operation, "status")
+        start.assert_not_called()
+        self.assertEqual(self.legacy.record(operation), original)
+        self.assertEqual(
+            self.legacy.dependency_builds.read(operation)["state"], "running"
+        )
+        self.assertIsNone(self.legacy.thread)
+
+    def test_compact_dependency_status_reconciles_only_its_prepared_operation(self):
+        operation = self.pending_dependency(self.compact)
+        with (
+            self.endpoint(self.compact, CompactHandler) as client,
+            patch.object(self.compact, "start", return_value={}) as start,
+        ):
+            self.assertEqual(
+                client.dependencies(operation, "status")["state"], "running"
+            )
+        start.assert_called_once_with(operation)
+
+    def test_recorded_dependency_stop_still_terminates_legacy_operation(self):
+        operation = self.pending_dependency(self.legacy)
+        with self.endpoint(self.legacy, IntegratedHandler) as client:
+            self.assertEqual(
+                client.dependencies(operation, "stop")["state"], "canceled"
+            )
+        result = self.legacy.record(operation)["result"]
+        self.assertTrue(result["terminated"])
+        self.assertTrue(result["canceled"])
+
+    def test_unversioned_dependency_status_cannot_start_on_compact_worker(self):
+        operation = self.pending_dependency(self.compact)
+        with (
+            self.endpoint(self.compact, CompactHandler) as client,
+            patch.object(self.compact, "start", return_value={}) as start,
+        ):
+            client.expected_runtime = ""
+            with self.assertRaises(ExecutorRejected):
+                client.dependencies(operation, "status")
+        start.assert_not_called()
+
     def test_compact_prepare_and_terminal_start_replay_use_versioned_route(self):
         operation = self.manifest["operation_id"]
         with self.endpoint(self.compact, CompactHandler) as client:
@@ -196,6 +253,7 @@ class CompactWriteProtocolTests(unittest.TestCase):
             f"/v1/operations/{operation}/purge",
             f"/v1/operations/{operation}/secret",
             f"/v1/dependency-builds/{operation}/start",
+            f"/v1/dependency-builds/{operation}/status",
             f"/v1/dependency-builds/{operation}/resume",
             "/v2/dependencies/prepare",
             f"/v2/dependencies/{operation}/chunks",
