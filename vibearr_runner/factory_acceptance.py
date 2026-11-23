@@ -404,8 +404,23 @@ def verify_generations(contexts, run):
         previous = contexts[previous_id]["document"]
         require(
             context["repository"]["base_revision"] == generation["new_base"]
-            and previous["repository"]["base_revision"] == generation["old_base"],
+            and previous["repository"]["base_revision"] == generation["old_base"]
+            and generation["new_base"] != generation["old_base"],
             "Base generation does not identify the inspected old and new base.",
+        )
+        bases = {"base_revision", "base_tree_sha"}
+        require(
+            {
+                key: value
+                for key, value in context["repository"].items()
+                if key not in bases
+            }
+            == {
+                key: value
+                for key, value in previous["repository"].items()
+                if key not in bases
+            },
+            "Base generation changed frozen repository or branch authority.",
         )
         mutable = {"source_digest", "fetched_at", "factory_generation", "repository"}
         require(
@@ -628,6 +643,21 @@ def check_factory_chain(entries, native_entries, run, collected, scenario, docum
             and account["backend"] == scenario["provider"],
             "Role account differs from its frozen provider, credential version or configured model.",
         )
+        frozen_context = documents["contexts"][document["context_id"]]["document"]
+        registration = frozen_context["factory"]["profiles"][document["role"]]
+        qualification = registration["qualification"]
+        identity = execution["execution_identity"]
+        require(
+            frozen_context["runtime_binding_digest"] == identity["binding_digest"]
+            and all(
+                qualification.get(key) == identity[key]
+                for key in ("instance_id", "worker_boot")
+            )
+            and session["manifest"]["profile_id"] == registration["profile_id"]
+            and session["manifest"]["profile_digest"] == registration["profile_digest"]
+            and session["image_digest"] == qualification["image_digest"],
+            "Role execution differs from its frozen worker boot, image or registered profile.",
+        )
         require(
             session["adapter"] == execution["adapter"]
             and account["model"] == execution["model"]
@@ -802,6 +832,27 @@ def observe_human_merge(github, collected):
     }
 
 
+def verify_dependency(github, first, second, scenario):
+    require(
+        first["human_merge"].get("status") == "human_merged",
+        "B cannot start before A's verified human merge.",
+    )
+    require(
+        timestamp(second["claimed_at"]) >= timestamp(first["human_merge"]["merged_at"]),
+        "B was claimed before the human merge of A.",
+    )
+    base = second["delivery"]["workspace"]["base_revision"]
+    merge = first["human_merge"]["merge_sha"]
+    comparison = github.request(
+        "GET", f"/repos/{scenario['repository']}/compare/{merge}...{base}"
+    )
+    require(
+        comparison.get("status") in {"ahead", "identical"}
+        and comparison.get("merge_base_commit", {}).get("sha") == merge,
+        "B's inspected base does not contain A's actual human merge.",
+    )
+
+
 def verify_stack(report, capabilities, source_revision):
     from .compact_evidence import validate_compact_report
 
@@ -812,7 +863,9 @@ def verify_stack(report, capabilities, source_revision):
     return validate_compact_report(report, capabilities)
 
 
-def verify_native_receipts(entries, worker):
+def verify_native_receipts(entries, worker, *, documents, artifacts):
+    from .factory_scenarios import validate_validation_binding
+
     require(worker is not None, "Authenticated original worker status is required.")
     receipts = {}
     for entry in entries:
@@ -826,10 +879,56 @@ def verify_native_receipts(entries, worker):
             )
             receipts[operation_id] = receipt
     require(bool(receipts), "Missing authenticated termination receipts.")
+    require(
+        len(receipts) <= 128, "Original native operation history exceeds its bound."
+    )
     for operation_id, receipt in receipts.items():
         require(
             receipt_summary(worker.status(operation_id)) == receipt,
             "Saved termination differs from the authenticated original worker receipt.",
+        )
+    intents = {
+        entry["operation_id"]: entry["data"]
+        for entry in entries
+        if entry["kind"] == "native_intent"
+    }
+    for entry in entries:
+        if entry["kind"] == "native_agent":
+            receipt = entry["data"]["receipt"]
+            require(
+                receipts.get(receipt["operation_id"]) == receipt,
+                "Native agent result lacks its authenticated original termination receipt.",
+            )
+        if entry["kind"] != "native_validation":
+            continue
+        validation = entry["data"]
+        intent = intents.get(validation["intent_id"])
+        require(
+            intent is not None and intent["kind"] == "validation",
+            "Validation lacks its original immutable dispatch.",
+        )
+        validate_validation_binding(intent, validation, receipts)
+        checks = [
+            artifact["document"]
+            for artifact in artifacts
+            if artifact["document"]["role"] == "checks"
+            and artifact["document"]["payload"]["validation_id"]
+            == entry["operation_id"]
+        ]
+        require(
+            len(checks) == 1,
+            "Native validation lacks its exact saved factory checks artifact.",
+        )
+        document = checks[0]
+        context = documents["contexts"][document["context_id"]]
+        require(
+            intent["context_id"] == context["id"]
+            and intent["context_digest"] == context["digest"]
+            and intent["policy_digest"] == context["document"]["policy_digest"]
+            and intent["attempt"] == document["round"] - 1
+            and validation["source_digest"] == document["source_digest"]
+            and validation["tree_sha"] == document["tree_sha"],
+            "Validation dispatch belongs to another context, policy, repair attempt or candidate.",
         )
     return sorted(receipts)
 
@@ -919,35 +1018,102 @@ def verify_browser(collected, chain, supplied, worker, capabilities):
     )
 
 
-def verify_failures(failures, worker):
-    missing = []
-    for name in sorted(FAILURE_CASES):
-        entry = failures.get(name, {})
-        if (
-            entry.get("passed") is not True
-            or entry.get("fixtures") is not False
-            or not entry.get("receipts")
-            or worker is None
-        ):
-            missing.append("Missing actual failure-matrix evidence: " + name)
-            continue
-        for receipt in entry["receipts"]:
-            operation_id = identifier(receipt.get("operation_id"))
-            status = worker.status(operation_id)
-            require(
-                status.get("state") == "exited"
-                and status.get("descendants_terminated") is True
-                and status.get("receipt_digest") == receipt.get("receipt_digest")
-                and status.get("execution_identity")
-                == receipt.get("execution_identity"),
-                "Failure-matrix receipt does not match the authenticated terminated operation.",
-            )
-        missing.append(
-            "No trusted scenario producer for "
-            + name
-            + "; authenticated termination alone does not prove this factory behavior."
+def verify_failures(
+    failures,
+    worker=None,
+    *,
+    queue,
+    github,
+    scenario,
+    records,
+    operation_id,
+    checkpoint_digests=(),
+):
+    from .factory_scenarios import verify_failures as verify_scenarios
+
+    return verify_scenarios(
+        failures,
+        worker,
+        queue=queue,
+        github=github,
+        scenario=scenario,
+        records=records,
+        operation_id=operation_id,
+        checkpoint_digests=checkpoint_digests,
+    )
+
+
+def pin_failure_evidence(state, failures, *, worker=None, journal_path=None):
+    if not failures:
+        return
+    require(
+        isinstance(failures, dict)
+        and type(failures.get("schema_version")) is int
+        and failures["schema_version"] == 1
+        and failures.get("operation_id") == state["operation_id"],
+        "Failure evidence belongs to another acceptance operation.",
+    )
+    cases = failures.get("cases")
+    require(
+        isinstance(cases, dict) and set(cases) <= FAILURE_CASES,
+        "Unknown failure scenario evidence.",
+    )
+    previous = deepcopy(state.get("failure_bindings", {}))
+    authenticated = set(state.get("authenticated_checkpoints", []))
+    for name, case in cases.items():
+        identity = {
+            key: case.get(key) for key in ("run_id", "context_id", "context_digest")
+        }
+        for key in ("run_id", "context_id"):
+            identifier(identity[key])
+        valid_digest(identity["context_digest"])
+        pinned = previous.get(name)
+        require(
+            pinned is None or pinned["identity"] == identity,
+            "Resume the original failure scenario run and immutable context.",
         )
-    return missing
+        values = {
+            key: case.get(key, [])
+            for key in ("evidence_ids", "artifact_ids", "checkpoints")
+        }
+        require(
+            all(
+                isinstance(value, list) and len(value) <= 1000
+                for value in values.values()
+            ),
+            "Bound failure scenario evidence before observation.",
+        )
+        for checkpoint in values["checkpoints"]:
+            require(
+                isinstance(checkpoint, dict)
+                and type(checkpoint.get("schema_version")) is int
+                and checkpoint["schema_version"] == 1
+                and checkpoint.get("kind") == "factory-observation"
+                and checkpoint.get("operation_id") == state["operation_id"]
+                and all(
+                    checkpoint.get(key) == value for key, value in identity.items()
+                ),
+                "Checkpoint belongs to another acceptance operation, run or immutable context.",
+            )
+        values["checkpoints"] = [digest(value) for value in values["checkpoints"]]
+        if pinned is not None:
+            require(
+                all(pinned[key] == values[key][: len(pinned[key])] for key in values),
+                "Failure scenario evidence or original checkpoint was replaced.",
+            )
+        for checkpoint, checkpoint_digest in zip(
+            case.get("checkpoints", []), values["checkpoints"]
+        ):
+            if checkpoint_digest in authenticated or worker is None:
+                continue
+            from .factory_scenarios import authenticate_checkpoint
+
+            options = {"journal_path": journal_path} if journal_path is not None else {}
+            authenticate_checkpoint(checkpoint, worker, **options)
+            authenticated.add(checkpoint_digest)
+        previous[name] = {"identity": identity, **deepcopy(values)}
+    state["failure_bindings"] = previous
+    state["authenticated_checkpoints"] = sorted(authenticated)
 
 
 def collect(
@@ -1028,7 +1194,9 @@ def collect(
         chain = check_factory_chain(
             artifacts, entries, run, observed, scenario, documents
         )
-        verify_native_receipts(entries, worker)
+        verify_native_receipts(
+            entries, worker, documents=documents, artifacts=artifacts
+        )
         merged = observe_human_merge(github, observed)
         checks = verify_checks(github, observed, scenario)
         frames = []
@@ -1072,21 +1240,7 @@ def collect(
             "Acceptance requires one distinct PR for each issue.",
         )
         first, second = records
-        require(
-            timestamp(second["claimed_at"])
-            >= timestamp(first["human_merge"]["merged_at"]),
-            "B was claimed before the human merge of A.",
-        )
-        base = second["delivery"]["workspace"]["base_revision"]
-        merge = first["human_merge"]["merge_sha"]
-        comparison = github.request(
-            "GET", f"/repos/{scenario['repository']}/compare/{merge}...{base}"
-        )
-        require(
-            comparison.get("status") in {"ahead", "identical"}
-            and comparison.get("merge_base_commit", {}).get("sha") == merge,
-            "B's inspected base does not contain A's actual human merge.",
-        )
+        verify_dependency(github, first, second, scenario)
     complete = len(records) == 2 and all(
         entry["human_merge"]["status"] == "human_merged" for entry in records
     )
@@ -1101,7 +1255,18 @@ def collect(
         verify_stack(stack_report, capabilities, scenario["source_revision"])
     except (ValueError, TypeError, KeyError) as exc:
         missing.append(str(exc))
-    missing.extend(verify_failures(failure_evidence or {}, worker))
+    missing.extend(
+        verify_failures(
+            failure_evidence or {},
+            worker,
+            queue=queue,
+            github=github,
+            scenario=scenario,
+            records=records,
+            operation_id=state["operation_id"],
+            checkpoint_digests=state.get("authenticated_checkpoints", []),
+        )
+    )
     qualified = complete and not missing and state["evidence_kind"] == "live"
     return {
         "schema_version": 1,
@@ -1131,6 +1296,14 @@ def main(argv=None):
     parser.add_argument("--run-b")
     parser.add_argument("--stack-report", type=Path)
     parser.add_argument("--failure-evidence", type=Path)
+    runner_directory = os.getenv(
+        "VIBEARR_RUNNER_STATE_DIR", os.getenv("NQ_RUNNER_STATE_DIR", "/var/lib/vibearr")
+    )
+    parser.add_argument(
+        "--controller-journal",
+        type=Path,
+        default=Path(runner_directory) / "journal.json",
+    )
     parser.add_argument("--browser-evidence", type=Path)
     parser.add_argument("--github-token-file", type=Path)
     args = parser.parse_args(argv)
@@ -1164,10 +1337,14 @@ def main(argv=None):
                 failures = (
                     private_json(args.failure_evidence) if args.failure_evidence else {}
                 )
+                worker = ExecutorClient.from_environment()
+                pin_failure_evidence(
+                    state, failures, worker=worker, journal_path=args.controller_journal
+                )
+                storage.save(state)
                 browser = (
                     private_json(args.browser_evidence) if args.browser_evidence else {}
                 )
-                worker = ExecutorClient.from_environment()
                 result = collect(
                     queue,
                     github,
