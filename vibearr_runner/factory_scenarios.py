@@ -420,6 +420,22 @@ class History:
             and value["run_id"] == self.run_id,
             "Scenario validation changed its original context, policy or source.",
         )
+        controls = self.run["configuration_snapshot"]["global"]
+        overall = timestamp(self.run["created_at"]).timestamp() + finite(
+            controls["task_timeout_seconds"]
+        )
+        for original in intent["data"]["operations"]:
+            require(
+                timestamp(original["manifest"]["deadline"]).timestamp() <= overall,
+                "Scenario validation extended the frozen overall deadline.",
+            )
+        if value["state"] == "passed":
+            require(
+                all(
+                    check["receipt"]["ended_at"] <= overall for check in value["checks"]
+                ),
+                "Successful scenario validation exceeded the frozen overall deadline.",
+            )
 
     def execution(self, document):
         execution = document["execution"]
