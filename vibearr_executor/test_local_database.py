@@ -99,6 +99,53 @@ class LocalDatabaseTests(unittest.TestCase):
         self.assertTrue(self.database.fenced)
         self.assertTrue(self.database.data.exists())
 
+    def test_reused_owned_pid_is_not_signaled_through_its_pidfd(self):
+        record = {"pid": 123, "start_time": 20}
+        with (
+            patch("vibearr_executor.local_database.os.pidfd_open", return_value=9),
+            patch("vibearr_executor.local_database.os.close") as close,
+            patch("vibearr_executor.local_database.signal.pidfd_send_signal") as kill,
+            patch.object(
+                self.database,
+                "current_identity",
+                return_value=({"pid": 123, "start_time": 21}, str(UID)),
+            ),
+        ):
+            self.database.kill_owned_process(record)
+        kill.assert_not_called()
+        close.assert_called_once_with(9)
+
+    def test_uncertain_process_inspection_keeps_the_fence_and_storage(self):
+        marker = self.root / "must-survive"
+        marker.write_text("retained")
+        with patch.object(
+            self.database, "owned_processes", side_effect=PermissionError("denied")
+        ):
+            with self.assertRaises(PermissionError):
+                self.database.reset("uncertain")
+        self.assertTrue(self.database.fenced)
+        self.assertEqual(marker.read_text(), "retained")
+
+    def test_changing_process_inventory_cannot_reset_the_cleanup_deadline(self):
+        marker = self.root / "must-survive"
+        marker.write_text("retained")
+        with (
+            patch.object(
+                self.database,
+                "owned_processes",
+                side_effect=[[], [{"pid": 123, "start_time": 20}]],
+            ),
+            patch(
+                "vibearr_executor.local_database.time.monotonic", side_effect=[0, 0, 11]
+            ),
+            patch.object(self.database, "kill_owned_process") as kill,
+        ):
+            with self.assertRaisesRegex(LocalDatabaseError, "did not terminate"):
+                self.database.reset("changing-processes")
+        kill.assert_not_called()
+        self.assertTrue(self.database.fenced)
+        self.assertEqual(marker.read_text(), "retained")
+
     def test_database_paths_must_be_absolute_trusted_configuration(self):
         with self.assertRaisesRegex(ValueError, "trusted absolute"):
             LocalDatabase(Path("relative"))
@@ -244,6 +291,88 @@ class LocalDatabaseAcceptanceTests(unittest.TestCase):
         self.assertFalse(self.database.process_identity(backend))
         self.assertEqual(list(self.root.iterdir()), [])
 
+    def stopped_backend_after_crash(self):
+        import psycopg2
+
+        connection = psycopg2.connect(self.database.prepare("stopped-backend"))
+        self.addCleanup(connection.close)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_backend_pid()")
+            backend = cursor.fetchone()[0]
+        os.kill(backend, signal.SIGSTOP)
+        os.kill(self.database.process.pid, signal.SIGKILL)
+        self.database.process.wait(timeout=3)
+        self.addCleanup(self.kill_probe_backend, backend)
+        return backend
+
+    def kill_probe_backend(self, pid):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            pass
+
+    def test_stopped_backend_is_terminated_before_reset_discards_storage(self):
+        backend = self.stopped_backend_after_crash()
+        self.database.reset("reconcile")
+        self.assertIsNone(self.database.current_identity(backend))
+        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertFalse(self.database.fenced)
+
+    def test_replacement_manager_finds_stopped_backend_without_a_pid_file(self):
+        backend = self.stopped_backend_after_crash()
+        (self.database.data / "postmaster.pid").unlink()
+        replacement = LocalDatabase(self.root)
+        replacement.reset("reconcile")
+        self.assertIsNone(replacement.current_identity(backend))
+        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertFalse(replacement.fenced)
+
+    def test_reset_does_not_signal_unrelated_database_uid_processes(self):
+        self.database.prepare("owned-database")
+        unrelated = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            user=UID,
+            group=UID,
+            extra_groups=[],
+            cwd="/",
+        )
+        self.addCleanup(unrelated.wait, timeout=3)
+        self.addCleanup(unrelated.kill)
+        self.database.reset("reset-owned-only")
+        self.assertIsNone(unrelated.poll())
+        self.assertFalse(self.database.fenced)
+
+    def test_reset_preserves_a_different_postgresql_cluster(self):
+        self.database.prepare("owned-database")
+        other = LocalDatabase(self.root.parent / "unrelated-database", port=5433)
+        self.addCleanup(other.reset, "unrelated-cleanup")
+        url = other.prepare("unrelated-database")
+        self.database.reset("owned-reset")
+        self.assertIsNone(other.process.poll())
+        self.assertEqual(self.query(url, "SELECT current_user"), "[('task',)]")
+        self.assertFalse(self.database.fenced)
+
+    def test_unknown_executable_in_database_storage_fences_without_signaling(self):
+        self.database.prepare("unknown-child")
+        unknown = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            user=UID,
+            group=UID,
+            extra_groups=[],
+            cwd=self.database.data,
+        )
+        self.addCleanup(unknown.wait, timeout=3)
+        self.addCleanup(unknown.kill)
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.database.reset("unknown-process")
+        self.assertTrue(self.database.fenced)
+        self.assertTrue(self.database.data.exists())
+        self.assertIsNone(unknown.poll())
+
     def test_role_creation_failure_stops_the_started_database_before_reuse(self):
         with patch.object(
             self.database, "sql", side_effect=RuntimeError("role setup failed")
@@ -278,14 +407,39 @@ class LocalDatabaseAcceptanceTests(unittest.TestCase):
         self.assertIsNone(self.database.process)
         self.assertEqual(list(self.root.iterdir()), [])
 
+    def test_canceled_startup_stops_a_stopped_database_child(self):
+        original = self.database.wait_ready
+        stopped = []
+
+        def cancel_after_ready(cancel):
+            original(cancel)
+            children = self.database.owned_processes()
+            child = next(
+                record
+                for record in children
+                if record["pid"] != self.database.process.pid
+            )
+            stopped.append(child["pid"])
+            self.addCleanup(self.kill_probe_backend, child["pid"])
+            os.kill(child["pid"], signal.SIGSTOP)
+            raise LocalDatabaseError("Local database startup was canceled.")
+
+        with patch.object(self.database, "wait_ready", side_effect=cancel_after_ready):
+            with self.assertRaisesRegex(LocalDatabaseError, "canceled"):
+                self.database.prepare("cancel-with-stopped-child")
+        self.assertEqual(len(stopped), 1)
+        self.assertIsNone(self.database.current_identity(stopped[0]))
+        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertFalse(self.database.fenced)
+
     def test_failed_stop_fences_storage_until_actual_termination_is_confirmed(self):
         self.database.prepare("stop-failure")
         with patch.object(
             self.database,
-            "command",
-            side_effect=subprocess.TimeoutExpired("pg_ctl", 15),
+            "kill_owned_process",
+            side_effect=PermissionError("process termination denied"),
         ):
-            with self.assertRaises(subprocess.TimeoutExpired):
+            with self.assertRaises(PermissionError):
                 self.database.reset("stop")
         self.assertTrue(self.database.fenced)
         self.assertTrue(self.database.data.exists())
