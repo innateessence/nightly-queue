@@ -1,5 +1,6 @@
 from contextlib import redirect_stdout
 from copy import deepcopy
+from datetime import timedelta
 import io
 import json
 from pathlib import Path
@@ -84,7 +85,10 @@ def chain(allowance=100):
         )
     }
     snapshot = {
-        "global": {"implementation_timeout_seconds": allowance},
+        "global": {
+            "implementation_timeout_seconds": allowance,
+            "task_timeout_seconds": 120,
+        },
         "effective": {"factory": configuration},
         "execution_policy": {"delivery_mode": "pull_request", "repair_limit": 2},
     }
@@ -218,6 +222,7 @@ def chain(allowance=100):
                             "attempt": 0,
                             "context_id": document["context_id"],
                             "context_digest": document["context_digest"],
+                            "policy_digest": "d" * 64,
                             "data": {
                                 "factory": {
                                     **{
@@ -237,6 +242,7 @@ def chain(allowance=100):
                                     "agent_version": execution["agent_version"],
                                     "image_digest": "sha256:" + "5" * 64,
                                     "manifest": {
+                                        "deadline": "2026-11-22T00:01:40+00:00",
                                         "profile_id": "factory-" + role,
                                         "profile_digest": "a" * 64,
                                         "run_id": run["id"],
@@ -331,6 +337,7 @@ def chain(allowance=100):
                         "source": deepcopy(run["source_snapshot"]),
                         "repository": workspace,
                         "runtime_binding_digest": worker_identity()["binding_digest"],
+                        "policy_digest": "d" * 64,
                         "factory": {
                             "profiles": {
                                 role: {
@@ -550,6 +557,19 @@ class FactoryChainTests(unittest.TestCase):
             allowance=1
         )
         with self.assertRaisesRegex(ValueError, "Aggregate role time"):
+            self.check()
+
+    def test_original_role_manifest_cannot_extend_the_frozen_task_deadline(self):
+        self.native[1]["data"]["data"]["session"]["manifest"][
+            "deadline"
+        ] = "2026-11-22T00:02:01+00:00"
+        with self.assertRaisesRegex(ValueError, "absolute task deadline"):
+            self.check()
+
+    def test_successful_role_cannot_finish_after_the_frozen_task_deadline(self):
+        self.scenario, self.run, self.collected, self.entries, self.native = chain()
+        self.run["created_at"] = "2026-11-21T23:58:01+00:00"
+        with self.assertRaisesRegex(ValueError, "absolute task deadline"):
             self.check()
 
     def test_prior_integrated_runtime_does_not_qualify_compact_execution(self):
@@ -891,6 +911,7 @@ class NativeValidationProofTests(unittest.TestCase):
         return factory.verify_native_receipts(
             self.fixture.entries,
             self.fixture.worker,
+            run=self.fixture.run,
             documents=self.documents,
             artifacts=self.fixture.artifacts,
         )
@@ -932,6 +953,96 @@ class NativeValidationProofTests(unittest.TestCase):
         with self.assertRaisesRegex(
             ValueError, "another context, policy, repair attempt"
         ):
+            self.verify()
+
+    def test_bounded_validation_deadline_cannot_replace_the_original_prepared_manifest(
+        self,
+    ):
+        intent = next(
+            entry["data"]
+            for entry in self.fixture.entries
+            if entry["kind"] == "native_intent"
+            and entry["data"]["kind"] == "validation"
+        )
+        manifest = intent["data"]["operations"][0]["manifest"]
+        manifest["deadline"] = (
+            factory.timestamp(manifest["deadline"]) + timedelta(seconds=0.5)
+        ).isoformat()
+        with self.assertRaises(ValueError):
+            self.verify()
+
+    def test_agent_profile_cannot_replace_the_original_prepared_manifest(self):
+        intent = next(
+            entry["data"]
+            for entry in self.fixture.entries
+            if entry["kind"] == "native_intent" and entry["data"]["kind"] == "agent"
+        )
+        intent["data"]["session"]["manifest"]["profile_digest"] = "0" * 64
+        with self.assertRaises(ValueError):
+            self.verify()
+
+    def test_validation_without_saved_result_cannot_hide_a_replaced_original_manifest(
+        self,
+    ):
+        intent = next(
+            entry["data"]
+            for entry in self.fixture.entries
+            if entry["kind"] == "native_intent"
+            and entry["data"]["kind"] == "validation"
+        )
+        intent["data"]["operations"][0]["manifest"]["profile_digest"] = "0" * 64
+        self.fixture.entries = [
+            entry
+            for entry in self.fixture.entries
+            if entry["kind"] != "native_validation"
+        ]
+        with self.assertRaisesRegex(ValueError, "manifest"):
+            self.verify()
+
+    def test_authenticated_validation_deadline_cannot_exceed_the_frozen_task_allowance(
+        self,
+    ):
+        intent = next(
+            entry["data"]
+            for entry in self.fixture.entries
+            if entry["kind"] == "native_intent"
+            and entry["data"]["kind"] == "validation"
+        )
+        for operation in intent["data"]["operations"]:
+            manifest = operation["manifest"]
+            manifest["deadline"] = factory.timestamp(
+                factory.frozen_task_deadline(self.fixture.run) + 1
+            ).isoformat()
+            self.fixture.seal(manifest["operation_id"], manifest)
+        with self.assertRaisesRegex(ValueError, "frozen absolute task deadline"):
+            self.verify()
+
+    def test_authenticated_successful_validation_cannot_finish_after_the_task_deadline(
+        self,
+    ):
+        validation = next(
+            entry["data"]
+            for entry in self.fixture.entries
+            if entry["kind"] == "native_validation"
+        )
+        operation = validation["checks"][0]["receipt"]["operation_id"]
+        status = self.fixture.statuses[operation]
+        status["result"]["ended_at"] = (
+            factory.frozen_task_deadline(self.fixture.run) + 1
+        )
+        self.fixture.seal(operation)
+        receipt = factory.receipt_summary(status)
+        validation["checks"][0]["receipt"] = receipt
+        termination = next(
+            entry["data"]
+            for entry in self.fixture.entries
+            if entry["kind"] == "native_termination"
+        )
+        termination["operations"] = [
+            receipt if entry["operation_id"] == operation else entry
+            for entry in termination["operations"]
+        ]
+        with self.assertRaisesRegex(ValueError, "frozen absolute task deadline"):
             self.verify()
 
 
