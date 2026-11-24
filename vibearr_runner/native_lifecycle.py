@@ -467,7 +467,7 @@ class NativeLifecycle:
                 "Native journal belongs to another claimed run."
             )
         if self.native.get("ownership_lost"):
-            self.resources.reconcile(self.run_id, self.executor, stop=True)
+            self.stop_resources()
             raise ReconciliationRequired(
                 "Native execution stopped after ownership loss; explicit reconciliation is required."
             )
@@ -1016,6 +1016,13 @@ class NativeLifecycle:
             "tree_sha": source.tree_sha,
             "commit_sha": commit,
         }
+        factory_data = {}
+        if self.snapshot["effective"].get("factory", {}).get("enabled"):
+            from .factory_reviews import collect_factory_paths
+
+            factory_data["factory_paths"] = collect_factory_paths(
+                workspace.checkout, identity["base_revision"], source.commit_sha
+            )
         payload = workspace_record(
             context_id=self.native["context"]["id"],
             context_digest=self.native["context"]["digest"],
@@ -1027,12 +1034,18 @@ class NativeLifecycle:
             requirements_digest=hashlib.sha256(
                 files["requirements.txt"][1]
             ).hexdigest(),
+            **factory_data,
         )
         self.native["workspace_id"] = self.artifact(
             "native_workspace", payload, f"workspace:{operation}"
         )
         self.native["candidate"] = payload
         self.native["phase"] = "validation"
+        if self.snapshot["effective"].get("factory", {}).get("enabled"):
+            from .factory_lifecycle import FactoryLifecycle
+            from .factory_reviews import FactoryReviewLoop
+
+            FactoryReviewLoop(FactoryLifecycle(self)).candidate_imported(source)
         if self.native.get("publication_revision"):
             from .native_revision import NativeRevision
 
@@ -1184,9 +1197,16 @@ class NativeLifecycle:
             provenance=provenance,
             result=observed,
         )
-        self.artifact(
+        data["result_id"] = self.artifact(
             "native_validation", payload, f"validation-result:{session['attempt_id']}"
         )
+        if observed["state"] == "passed":
+            data["evidence"] = observed["validation"]
+        if self.snapshot["effective"].get("factory", {}).get("enabled"):
+            from .factory_lifecycle import FactoryLifecycle
+            from .factory_reviews import FactoryReviewLoop
+
+            return FactoryReviewLoop(FactoryLifecycle(self)).validated(observed)
         if observed["state"] != "passed":
             return self.repair(observed)
         data["evidence"] = observed["validation"]
@@ -1309,6 +1329,18 @@ class NativeLifecycle:
         )
         return "reporting_pending"
 
+    def stop_resources(self):
+        if self.native.get("factory"):
+            from .factory_recovery import FactoryRecovery
+
+            return FactoryRecovery(self, self.native["factory"]).stop()
+        return self.resources.reconcile(self.run_id, self.executor, stop=True)
+
+    def factory_base_update(self):
+        from .factory_generation import FactoryBaseUpdate
+
+        return FactoryBaseUpdate(self).step()
+
     def terminate(self):
         from .native_contract import termination_record, intent_operations
         from .native_merge import NativeMerge
@@ -1322,7 +1354,7 @@ class NativeLifecycle:
             return
 
         ProcessTracker(self.journal, self.state).recover()
-        observations = self.resources.reconcile(self.run_id, self.executor, stop=True)
+        observations = self.stop_resources()
         expected = {
             operation
             for intent in self.native.get("intents", {}).values()

@@ -815,7 +815,8 @@ def validate_execution_identity(value):
         {"runtime", "protocol_version", "instance_id", "worker_boot", "binding_digest"},
     )
     if (
-        value["runtime"] not in {"compose-slot-v2", "integrated-runner-v1"}
+        value["runtime"]
+        not in {"compose-slot-v2", "integrated-runner-v1", "compact-worker-v1"}
         or type(value["protocol_version"]) is not int
         or value["protocol_version"] != 2
     ):
@@ -1608,6 +1609,12 @@ def status_document(
         "validation",
         "delivery",
         "waiting",
+        "intake",
+        "specification",
+        "build",
+        "checks",
+        "review",
+        "decision",
     }:
         raise NativeContractError("Native status stage is invalid.")
     if type(repair_count) is not int or not 0 <= repair_count <= 2:
