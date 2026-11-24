@@ -169,6 +169,7 @@ assert 'Set VIBEARR_EXECUTOR_URL and VIBEARR_EXECUTOR_TOKEN_FILE' in result['rea
 assert 'django' not in sys.modules
 """
         self.run_command([str(executable), "-I", "-c", configured], root)
+        self.run_command([str(executable), "-I", "-m", "vibearr_runner.verify"], root)
 
     def test_executor_sdist_installs_client_and_required_resources(self):
         with tempfile.TemporaryDirectory() as temporary:

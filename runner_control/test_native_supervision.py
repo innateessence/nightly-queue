@@ -106,6 +106,9 @@ class NativeSupervisionTests(NativeProtocolMixin, TestCase):
 
     def publication_clients(self):
         github, transport = GitHub(), Transport()
+        github.base_revision = self.state["native"]["candidate"]["workspace"][
+            "base_revision"
+        ]
         repository = self.item.repository_url.removeprefix(
             "https://github.com/"
         ).removesuffix(".git")

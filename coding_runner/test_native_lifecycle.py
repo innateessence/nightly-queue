@@ -716,9 +716,11 @@ class NativeLifecycleTests(unittest.TestCase):
             return original(arguments, **kwargs)
 
         self.host.checkpoint = lambda: not paused
-        with patch.object(
-            NativeDelivery, "clients", return_value=(GitHub(), transport)
-        ):
+        github = GitHub()
+        github.base_revision = self.state["native"]["candidate"]["workspace"][
+            "base_revision"
+        ]
+        with patch.object(NativeDelivery, "clients", return_value=(github, transport)):
             with patch.object(transport, "observed_remote", return_value=""):
                 with patch.object(processes, "run", side_effect=run):
                     self.assertEqual(self.engine().step(self.state), "wait")
