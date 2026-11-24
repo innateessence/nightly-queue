@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from vibearr_runner.delivery import DeliveryError, DeliveryRejected, DeliveryUnknown
@@ -523,7 +523,8 @@ class MergeLifecycleTests(unittest.TestCase):
             patch.object(NativeMerge, "client") as provider,
             patch.object(host, "checkpoint") as source,
         ):
-            self.assertEqual(NativeMerge(host).step(), "wait")
+            with self.assertRaises(DeliveryError):
+                NativeMerge(host).step()
         provider.assert_not_called()
         source.assert_not_called()
 
@@ -536,7 +537,7 @@ class MergeLifecycleTests(unittest.TestCase):
         with self.assertRaises(DeliveryError):
             NativeMerge(host).step()
 
-    def test_base_change_after_paused_unstarted_intent_releases_only_that_fence(self):
+    def test_base_change_after_paused_unstarted_intent_cannot_dispatch_revision(self):
         host = MergeHost()
         host.native["candidate"] = {"workspace": workspace()}
         identity = str(uuid4())
@@ -555,16 +556,9 @@ class MergeLifecycleTests(unittest.TestCase):
             patch.object(NativeMerge, "client", return_value=provider),
             patch("vibearr_runner.native_revision.MergeGitHub", return_value=provider),
         ):
-            self.assertEqual(NativeMerge(host).step(), "continue")
-        self.assertEqual(
-            host.records[0],
-            (
-                "native_merge_terminal",
-                {"schema_version": 1, "intent_id": identity, "state": "not_started"},
-            ),
-        )
-        self.assertEqual(host.native["phase"], "publication_revision")
-        self.assertEqual(host.native["publication_revision"]["intent"]["attempt"], 1)
+            with self.assertRaises(DeliveryError):
+                NativeMerge(host).step()
+        self.assertEqual(host.records, [])
         self.assertFalse(host.native["merge"].get("dispatched", False))
 
     def test_paused_dispatched_intent_never_becomes_unstarted(self):
@@ -578,7 +572,7 @@ class MergeLifecycleTests(unittest.TestCase):
                 NativeMerge(host).step()
         self.assertEqual(host.records, [])
 
-    def test_base_race_rejected_by_server_enters_revision_without_merge(self):
+    def test_base_race_cannot_dispatch_automatic_merge_or_revision(self):
         from vibearr_runner.native_lifecycle import NativeMetadataRejected
 
         host = MergeHost()
@@ -596,8 +590,9 @@ class MergeLifecycleTests(unittest.TestCase):
             patch.object(NativeMerge, "client", return_value=provider),
             patch.object(NativeMerge, "repair", return_value="continue") as repair,
         ):
-            self.assertEqual(NativeMerge(host).step(), "continue")
-        self.assertEqual(repair.call_args.args[0], "base_update")
+            with self.assertRaises(DeliveryError):
+                NativeMerge(host).step()
+        repair.assert_not_called()
         self.assertFalse(host.native["merge"].get("dispatched", False))
 
     def test_lost_merge_response_never_repeats_mutation_while_provider_open(self):
@@ -613,12 +608,12 @@ class MergeLifecycleTests(unittest.TestCase):
             raise DeliveryUnknown("502 response lost")
 
         provider.merge_once = merge_once
+        host.native["merge"] = {"dispatched": True, "intents": {"merge": str(uuid4())}}
         with patch.object(NativeMerge, "client", return_value=provider):
-            self.assertEqual(NativeMerge(host).step(), "continue")
             host.native["deadline"] = "2000-01-01T00:00:00+00:00"
             with self.assertRaises(ReconciliationRequired):
                 NativeMerge(host).step()
-        self.assertEqual(len(mutations), 1)
+        self.assertEqual(len(mutations), 0)
         self.assertTrue(host.native["merge"]["dispatched"])
 
     def test_actual_merge_after_response_loss_is_recorded_before_completion(self):
@@ -639,12 +634,36 @@ class MergeLifecycleTests(unittest.TestCase):
         )
         provider.pull = lambda *args: provider.raw
         with (
-            patch.object(NativeMerge, "client", return_value=provider),
-            patch.object(NativeMerge, "complete", return_value="continue"),
+            patch.object(NativeMerge, "client", return_value=provider) as selected,
+            patch.object(NativeMerge, "complete") as completion,
         ):
-            self.assertEqual(merge.reconcile(), "continue")
+            self.assertEqual(merge.reconcile(), "wait")
+        selected.assert_called_once_with(reconciliation=True)
+        completion.assert_not_called()
         self.assertEqual(host.records[0][0], "native_merge")
         self.assertEqual(host.records[0][1]["merge"]["commit_sha"], "e" * 40)
+
+    def test_policy_change_during_unknown_legacy_merge_keeps_read_only_reconciliation(
+        self,
+    ):
+        from dataclasses import replace
+        from vibearr_runner.native_delivery import NativeDelivery
+
+        host = MergeHost()
+        host.policy = replace(host.policy, delivery_mode="pull_request")
+        identity = str(uuid4())
+        host.native["merge"] = {"dispatched": True, "intents": {"merge": identity}}
+        provider = Provider()
+        provider.pull = lambda *args: provider.raw
+        provider.merge_once = Mock()
+        with patch.object(NativeMerge, "client", return_value=provider) as selected:
+            with self.assertRaises(ReconciliationRequired):
+                NativeDelivery(host).step()
+        selected.assert_called_once_with(reconciliation=True)
+        provider.merge_once.assert_not_called()
+        self.assertTrue(host.native["merge"]["dispatched"])
+        self.assertEqual(host.native["merge"]["intents"]["merge"], identity)
+        self.assertEqual(host.records, [])
 
     def test_unknown_dispatched_merge_cannot_terminate(self):
         host = MergeHost()
