@@ -85,3 +85,22 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(self.budget.data["total"], 11)
         self.assertIsNone(self.budget.data["active"])
         self.assertEqual(self.budget.remaining("research"), 0)
+
+    def test_cumulative_operation_charge_is_retry_safe(self):
+        self.budget.charge("implementation", "role-1", 3)
+        self.budget.charge("implementation", "role-1", 3)
+        self.budget.charge("implementation", "role-1", 5)
+        self.assertEqual(self.budget.remaining("implementation"), 5)
+        self.assertEqual(self.budget.data["total"], 5)
+
+    def test_accounting_cannot_move_operation_to_another_stage(self):
+        self.budget.charge("research", "role-1", 3)
+        with self.assertRaisesRegex(BudgetExceeded, "rewritten"):
+            self.budget.charge("implementation", "role-1", 3)
+
+    def test_nonfinite_or_decreasing_accounting_is_rejected(self):
+        self.budget.charge("research", "role-1", 3)
+        with self.assertRaisesRegex(BudgetExceeded, "rewritten"):
+            self.budget.charge("research", "role-1", 2)
+        with self.assertRaises(ValueError):
+            self.budget.charge("research", "role-1", float("nan"))
