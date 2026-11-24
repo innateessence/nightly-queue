@@ -17,10 +17,10 @@ BASE_TREE = "45216068e50d933e3540b4a4a2c5524a99503c1b"
 DEPENDENCY_SHA = "25a3c786d977facb304868dcfd94d3901a916df1"
 DEPENDENCY_TREE = "1f36d99a28b64aacfd054aa9a3246af289f9a709"
 REPOSITORY = "innateessence/nightly-queue"
-MANIFEST = ".github/component-prerequisites.json"
 SHA = re.compile(r"[a-f0-9]{40}")
 MODES = {"100644", "100755"}
 MANIFEST_BYTES = 4 * 1024**2
+PR_NUMBER = re.compile(r"[1-9][0-9]{0,8}")
 
 
 class Rejected(ValueError):
@@ -43,6 +43,19 @@ def source_path(value):
         raise Rejected("Source path escapes the source tree.")
     if any(character in value for character in ("\\", "\x00", "\r", "\n")):
         raise Rejected("Source path has unsupported separators or control characters.")
+    return value
+
+
+def manifest_source(value):
+    source_path(value)
+    prefix = ".github/component-prerequisites/pr-"
+    if not value.startswith(prefix) or not value.endswith(".json"):
+        raise Rejected("Select the unique manifest path for the external PR number.")
+    number = value[len(prefix) : -5]
+    if not PR_NUMBER.fullmatch(number):
+        raise Rejected(
+            "Manifest PR number must be a canonical positive integer of at most nine digits."
+        )
     return value
 
 
@@ -411,6 +424,7 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("/output"))
     parser.add_argument("--repository", type=Path)
     parser.add_argument("--write-manifest", type=Path)
+    parser.add_argument("--manifest-source", type=manifest_source)
     args = parser.parse_args()
     if args.repository is not None:
         if args.action != "manifest":
@@ -439,9 +453,13 @@ def main():
         if args.output.exists() and any(args.output.iterdir()):
             raise Rejected("Derived source output must be empty.")
         args.output.mkdir(parents=True, exist_ok=True)
+        if args.manifest_source is None:
+            raise Rejected(
+                "Assembly requires the unique externally selected PR manifest source."
+            )
         supplied_manifest, manifest = read_manifest(args.manifest)
         supplied = {
-            MANIFEST: supplied_manifest,
+            args.manifest_source: supplied_manifest,
             "deploy/docker/component_ci.py": Path(__file__).read_bytes(),
             "deploy/docker/component-ci.sh": Path("/component-ci.sh").read_bytes(),
             "deploy/docker/Component.Dockerfile": Path(
@@ -449,6 +467,10 @@ def main():
             ).read_bytes(),
         }
         report = assemble(git, args.candidate, manifest, supplied=supplied)
+        report["manifest_source"] = args.manifest_source
+        report["component_pr_number"] = int(
+            args.manifest_source.rsplit("pr-", 1)[1][:-5]
+        )
         shutil.copytree(git.directory, args.output / "repo")
         (args.output / "assembly.json").write_text(json.dumps(report, indent=2) + "\n")
         print(
