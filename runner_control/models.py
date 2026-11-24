@@ -51,6 +51,12 @@ class Run(models.Model):
         DELIVERY = "delivery", "Delivery"
         WAITING = "waiting", "Waiting"
         FINISHED = "finished", "Finished"
+        INTAKE = "intake", "Intake"
+        SPECIFICATION = "specification", "Specification"
+        BUILD = "build", "Build"
+        CHECKS = "checks", "Checks"
+        REVIEW = "review", "Review"
+        DECISION = "decision", "Decision"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     runner = models.ForeignKey(
@@ -154,6 +160,7 @@ from .settings_models import RunnerSchedule  # noqa: F401, E402
 from .gate_models import RunnerGateEvidence  # noqa: F401, E402
 from .plan_models import ContextSnapshot, PlanVersion  # noqa: F401, E402
 from .plan_models import ImmutableQuerySet  # noqa: E402
+from .factory_models import FactoryArtifact  # noqa: F401, E402
 from .operations_models import ReleaseQualification, RunRetention  # noqa: F401, E402
 from .operations_models import RunnerHealth  # noqa: F401, E402
 

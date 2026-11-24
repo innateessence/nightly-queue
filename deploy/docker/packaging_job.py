@@ -1,6 +1,7 @@
 """One-shot, credential-free tools task with a separate trusted task UID."""
 
 from datetime import datetime, timedelta, timezone
+import base64
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import time
 from uuid import uuid4
 
 from vibearr_executor.contracts import Limits, Manifest, Profile, digest
+from vibearr_executor.artifacts import unpack
 from vibearr_executor.slot_safety import binding
 from vibearr_executor.slots import SlotRuntime
 from vibearr_runner.native_validation import CandidateSource
@@ -99,25 +101,46 @@ def main():
         passed = (
             passed and receipt.get("schema_version") == 2 and receipt_passed(receipt)
         )
+        report = {
+            "kind": "offline-container-packaging",
+            "commit_sha": selected,
+            "source_digest": digest(source),
+            "passed": passed,
+            "exit_code": actual.get("exit_code"),
+            "export_error": actual.get("export_error"),
+            "binding": observed_binding,
+            "production_qualification": False,
+            "native_receipt_version": receipt.get("schema_version"),
+            "execution_identity": receipt.get("execution_identity"),
+        }
+        if not passed:
+            print(json.dumps(report), flush=True)
+            raise SystemExit(1)
+        _inventory, exported = runtime.export(operation)
+        artifact_proof = unpack(exported)["packaging-proof.json"][1]
+        proof = json.loads(artifact_proof)
+        record = runtime.record(operation)
+        keys = (
+            "manifest",
+            "operation_id",
+            "state",
+            "descendants_terminated",
+            "result",
+            "worker_boot",
+            "execution_identity",
+            "receipt_digest",
+        )
+        payload = {
+            "report": report,
+            "wheels": proof["wheels"],
+            "commands": proof["commands"],
+            "artifact_proof": base64.b64encode(artifact_proof).decode(),
+            "operation": {key: record[key] for key in keys},
+        }
         print(
-            json.dumps(
-                {
-                    "kind": "offline-container-packaging",
-                    "commit_sha": selected,
-                    "source_digest": digest(source),
-                    "passed": passed,
-                    "exit_code": actual.get("exit_code"),
-                    "export_error": actual.get("export_error"),
-                    "binding": observed_binding,
-                    "production_qualification": False,
-                    "native_receipt_version": receipt.get("schema_version"),
-                    "execution_identity": receipt.get("execution_identity"),
-                }
-            ),
+            json.dumps({"kind": "actual-packaging-proof", "payload": payload}),
             flush=True,
         )
-        if not passed:
-            raise SystemExit(1)
     finally:
         runtime.close()
 

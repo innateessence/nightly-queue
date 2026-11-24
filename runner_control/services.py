@@ -240,6 +240,10 @@ def append_evidence(run, operation_id, kind, payload):
 def record_evidence(
     *, runner, run_id, claim_token, operation_id, kind, payload, progress=None
 ):
+    if kind == "publication_observation":
+        raise RunConflict(
+            "Publication observations are written only by trusted provider reconciliation."
+        )
     lock_controller(runner)
     run = owned_run(runner, run_id)
     from vibearr_runner.native_contract import ARTIFACT_KINDS, FACT_KINDS
@@ -326,7 +330,15 @@ def finish_run(
         "error_summary": error_summary,
     }
     if outcome:
-        if outcome not in {"delivered", "merged", "failed", "canceled", "no_change"}:
+        if outcome not in {
+            "delivered",
+            "merged",
+            "failed",
+            "canceled",
+            "no_change",
+            "needs_info",
+            "rejected",
+        }:
             raise ValidationError({"outcome": "Choose a native terminal outcome."})
         result["outcome"] = outcome
         if outcome == "no_change" and not error_summary.strip():
@@ -344,6 +356,10 @@ def finish_run(
             )
         return run
     verify_active(run, claim_token, allow_cancellation=True)
+    if outcome in {"needs_info", "rejected"}:
+        from .factory_native import terminal_outcome
+
+        terminal_outcome(run, outcome)
     merge_race = (
         native
         and outcome == "merged"

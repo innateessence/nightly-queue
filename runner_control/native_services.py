@@ -10,6 +10,7 @@ from django.utils import timezone
 from credentials.redaction import redact_run_payload
 from projects.models import Project
 from vibearr_runner import native_contract as contract
+from vibearr_runner.factory_contract import repair_limit
 from vibearr_runner.policy import ExecutionPolicy
 from work_queue.models import QueueItem
 from work_queue.services import (
@@ -269,7 +270,7 @@ def update_status(*, runner, run_id, claim_token, data):
         return run
     if value["repair_count"] < previous.get("repair_count", 0) or value[
         "repair_count"
-    ] > min(2, native_policy(run).repair_limit):
+    ] > repair_limit(run.configuration_snapshot, native_policy(run).repair_limit):
         raise RunConflict("Native repair accounting cannot reset or exceed the policy.")
     run.native_status = value
     run.heartbeat_at = timezone.now()
@@ -392,6 +393,15 @@ def validate_context_binding(run, value, base_commit, resolved_base_branch):
     policy = native_policy(run)
     if document["validation_profile"]["profile_id"] != policy.validation_profile:
         raise RunConflict("Native context selected a different validation recipe.")
+    factory_enabled = (
+        run.configuration_snapshot["effective"].get("factory", {}).get("enabled")
+    )
+    if factory_enabled:
+        from .factory_native import context_binding
+
+        context_binding(run, document)
+    elif "factory" in document:
+        raise RunConflict("Disabled factory execution cannot register role profiles.")
     if registered(run):
         require_termination(run)
         previous = latest_context(run)
@@ -400,6 +410,12 @@ def validate_context_binding(run, value, base_commit, resolved_base_branch):
                 raise RunConflict(
                     "An active native attempt cannot rewrite frozen instructions/policy."
                 )
+        if factory_enabled:
+            from .factory_native import generation_binding
+
+            generation_binding(run, document, previous)
+    elif "factory_generation" in document:
+        raise RunConflict("Initial factory context cannot claim a prior generation.")
     if not run.item.base_branch:
         QueueItem.objects.filter(pk=run.item_id, base_branch="").update(
             base_branch=resolved_base_branch
@@ -416,7 +432,15 @@ def validate_plan_binding(run, value, ctx):
         or document["context_digest"] != ctx.digest
     ):
         raise RunConflict("Native plan must reference the current immutable context.")
-    if document["acceptance_criteria"] != ctx.document["acceptance_criteria"]:
+    if "factory" in ctx.document:
+        from .factory_native import plan_binding
+
+        plan_binding(run, document, ctx)
+    elif "factory_specification_id" in document:
+        raise RunConflict(
+            "Ordinary native context cannot claim a factory specification."
+        )
+    elif document["acceptance_criteria"] != ctx.document["acceptance_criteria"]:
         raise RunConflict("Native plan must retain the frozen acceptance criteria.")
     return document
 
@@ -578,13 +602,23 @@ def validation_profile_binding(run, value, workspace, ctx):
 
 
 def validate_intent_binding(run, value, operation_id=None):
+    from .factory_delivery import validate_delivery_policy
+
+    validate_delivery_policy(run, value)
     ctx = context(run, value["context_id"], value["context_digest"])
     if str(ctx.pk) != run.context_reference:
         raise RunConflict("Native dispatch requires the current context.")
-    plan = run.plans.filter(pk=run.plan_reference, context=ctx).first()
-    if plan is None:
+    plan = (
+        run.plans.filter(pk=run.plan_reference, context=ctx).first()
+        if run.plan_reference
+        else None
+    )
+    factory = value["data"].get("factory") if value["kind"] == "agent" else None
+    before_plan = factory and factory.get("role") in {"intake", "specification"}
+    if plan is None and not before_plan:
         raise RunConflict("Save a native plan artifact before dispatch.")
-    contract.validate_plan(plan.document)
+    if plan is not None:
+        contract.validate_plan(plan.document)
     from .merge_services import (
         bind_merge_intent,
         bind_revision_intent,
@@ -593,13 +627,24 @@ def validate_intent_binding(run, value, operation_id=None):
 
     reporting = value["kind"] == "merge" and value["data"]["stage"] != "merge"
     policy = completion_authority(run) if reporting else authorize(run)
-    if value["policy_digest"] != policy.digest or value["attempt"] > min(
-        2, policy.repair_limit
+    if value["policy_digest"] != policy.digest or value["attempt"] > repair_limit(
+        run.configuration_snapshot, policy.repair_limit
     ):
         raise RunConflict("Native dispatch exceeds its frozen policy/repair limit.")
     kind, data = value["kind"], value["data"]
     if kind == "agent" and hasattr(run, "delivery_recovery"):
         raise RunConflict("Delivery-only recovery cannot dispatch another agent.")
+    factory_enabled = (
+        run.configuration_snapshot["effective"].get("factory", {}).get("enabled")
+    )
+    if kind == "agent" and (factory is not None or factory_enabled):
+        if factory is None:
+            raise RunConflict("Factory dispatch requires a typed role intent.")
+        from .factory_native import dispatch_binding
+
+        dispatch_binding(run, value, ctx, policy)
+        require_prior_terminal(run)
+        return
     if kind == "revision":
         bind_revision_intent(run, value)
         return
@@ -815,6 +860,9 @@ def validate_intent_binding(run, value, operation_id=None):
                 raise RunConflict(
                     "Independent validation must pass before publication."
                 )
+            from .factory_delivery import validate_factory_workspace
+
+            validate_factory_workspace(run, data["workspace"], ctx)
     existing = {
         operation
         for entry in all_intents(run)
@@ -871,6 +919,28 @@ def validate_agent_binding(run, value):
 def validate_workspace_binding(run, value):
     ctx = context(run, value["context_id"], value["context_digest"])
     intent = saved(run, value["agent_intent_id"], "native_intent").payload
+    factory_enabled = (
+        run.configuration_snapshot["effective"].get("factory", {}).get("enabled")
+        is True
+    )
+    if factory_enabled and "factory_paths" not in value:
+        raise RunConflict(
+            "Factory candidate import requires its trusted changed-path inventory."
+        )
+    role = intent["data"].get("factory", {}).get("role")
+    if (factory_enabled or role is not None) and role != "build":
+        raise RunConflict("Only a factory builder may import candidate changes.")
+    if factory_enabled:
+        descriptor = intent["data"]["factory"]
+        plan = run.plans.filter(pk=run.plan_reference, context=ctx).first()
+        if (
+            plan is None
+            or descriptor.get("specification_id") != str(plan.pk)
+            or descriptor.get("specification_digest") != plan.digest
+        ):
+            raise RunConflict(
+                "Factory candidate import differs from its dispatched specification."
+            )
     result = run.evidence.filter(
         kind="native_agent",
         payload__intent_id=value["agent_intent_id"],
@@ -888,7 +958,8 @@ def validate_workspace_binding(run, value):
     if value["export_digest"] != result.payload["receipt"]["export_digest"]:
         raise RunConflict("Native workspace differs from the verified agent export.")
     check_workspace(run, value["workspace"], ctx)
-    if value["attempt"]:
+    generation_attempt = ctx.document.get("factory_generation", {}).get("attempt", 0)
+    if value["attempt"] != generation_attempt:
         previous = workspace_fact(run, intent["data"]["workspace_id"], ctx).payload
         if (
             value["workspace"]["base_revision"]
@@ -1053,8 +1124,10 @@ def bind_artifact(run, claim_token, kind, value, operation_id=None):
         run, claim_token, reporting=kind != "native_intent" or completion
     )
     if kind == "native_intent":
+        from .factory_delivery import validate_delivery_policy
         from .merge_services import completion_authority
 
+        validate_delivery_policy(run, value)
         if completion:
             completion_authority(run, document)
         else:
@@ -1180,4 +1253,7 @@ def validate_delivery(run, value):
         from .merge_services import validate_merged_delivery
 
         validate_merged_delivery(run, value, workspace)
+    from .factory_delivery import validate_factory_workspace
+
+    validate_factory_workspace(run, value["workspace"], ctx)
     return value

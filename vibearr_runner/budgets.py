@@ -63,6 +63,35 @@ class ActiveBudget:
             )
         return self.remaining(self.stage) > 0
 
+    def charge(
+        self, stage: str, operation_id: str, elapsed: float, *, enforce: bool = True
+    ) -> None:
+        if stage not in self.limits["stages"]:
+            raise ValueError("Choose a configured execution stage.")
+        if not isinstance(operation_id, str) or not 1 <= len(operation_id) <= 200:
+            raise ValueError("Supply a bounded execution operation identity.")
+        if (
+            type(elapsed) not in {int, float}
+            or not math.isfinite(elapsed)
+            or elapsed < 0
+        ):
+            raise ValueError("Elapsed execution time must be finite and nonnegative.")
+        if self.data["active"] is not None:
+            raise BudgetExceeded(
+                "Reconcile the active budget segment before accounting."
+            )
+        charges = self.data.setdefault("charges", {})
+        previous = charges.get(operation_id)
+        if previous and (previous["stage"] != stage or previous["elapsed"] > elapsed):
+            raise BudgetExceeded("Recorded operation accounting cannot be rewritten.")
+        delta = elapsed - (previous["elapsed"] if previous else 0.0)
+        charges[operation_id] = {"stage": stage, "elapsed": elapsed}
+        self.data["total"] += delta
+        self.data["stages"][stage] = self.data["stages"].get(stage, 0.0) + delta
+        self.journal.save(self.state)
+        if enforce and self.remaining(stage) <= 0:
+            raise BudgetExceeded("Active task or stage timeout exhausted.")
+
     def run(self, stage: str | None, operation: Callable[[float], T]) -> T:
         remaining = self.remaining(stage)
         if remaining <= 0:

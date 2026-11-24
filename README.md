@@ -1,9 +1,9 @@
 # vibearr
 
 For Docker setup, qualification, backup and recovery, see
-[Docker operations](docs/docker-operations.md). The stack has three containers:
-app, PostgreSQL, and one coding runner. Keep processing disabled until the current
-runner boot and selected agent/account/model have passed acceptance.
+[Docker operations](docs/docker-operations.md). The stack has four containers:
+app, PostgreSQL, trusted runner and one execution worker. Keep processing disabled
+until the current worker boot and selected agent/account/model pass acceptance.
 
 A self-hosted *arr app for vibe coding with Codex, Claude Code, and OpenCode.
 
@@ -22,15 +22,36 @@ it alone when everything is working.
    must pass before a change can be delivered.
 2. **Add work.** Write a GitHub issue or submit a task from the queue. Give it a
    clear outcome and any acceptance criteria the agent will need.
-3. **Let the queue run.** The worker picks up eligible work during its processing
-   window, prepares an isolated checkout, and gives the agent the issue context.
-4. **Check the result.** The agent implements the change and runs validation.
-   Failed checks get a bounded repair attempt; unresolved failures stay visible.
-5. **Deliver the change.** Passing work becomes a pull request linked to the
-   original issue. Projects configured for automatic merge can finish the job
-   once the required GitHub checks pass.
+3. **Scope the work.** The target runner performs intake, records risk and affected
+   surfaces, and saves a specification with acceptance criteria.
+4. **Build and review.** A builder implements the spec in an isolated workspace.
+   Trusted checks run before separate code review and any required security, UX
+   or UI reviews. Failures return to the builder within a shared repair budget.
+5. **Deliver the change.** The supervisor verifies the checks and reviews, then
+   publishes one pull request linked to the issue, with check and review evidence.
+   A human reviews and merges it after the required GitHub checks pass.
 
-Routine work should finish without approval prompts. Connecting a project sets
+This is the [Codex-first software factory](docs/software-factory-plan.md),
+inspired by the ZazenCodes v2 workflow. Codex implements the full role pipeline
+first; Claude Code and OpenCode follow the same contract. The role pipeline and
+immutable round artifacts are implemented in this source.
+Live execution stays disabled until the current worker boot and selected
+provider/account/model pass qualification and live release acceptance.
+
+The Compose stack has **four always-on containers**: app, PostgreSQL, runner and
+one execution worker. The app handles issue-import scheduling; runner owns account
+and network mediation; worker runs setup, coding, reviews, checks and disposable
+test/browser processes sequentially. Celery/Beat, Valkey and the separate gateway,
+proxy, account and test-database containers are absent from this runtime. The
+[S1–S4 targets](docs/docker-only-runtime-plan.md#required-simplification-branches)
+remain the footprint and acceptance contract for these implemented boundaries.
+
+Human merging is required through the MVP and factory rollout. Automatic merging
+is deferred until sustained operation demonstrates maturity and a human explicitly
+approves a separate rollout; agent review never grants merge permission.
+
+Routine execution through PR delivery should finish without command or plan
+approval prompts. Connecting a project sets
 the boundaries for its agents: which issues they can work on, what they can
 access, how long they can run, and how changes are delivered. Setup, investigation,
 editing, and tests happen inside those boundaries. Work that cannot proceed
@@ -65,7 +86,7 @@ vibearr's own GitHub issue tracker is its development backlog. The intended
 loop is the same one used for any other project:
 
 ```text
-Issue → Queue → Agent → Tests → Pull request → Merge
+Issue → Intake → Spec → Build → Checks → Reviews → Decision → PR → Human merge
 ```
 
 Each feature gets its own issue, branch, and PR. Dependencies keep later features
@@ -75,12 +96,14 @@ Automatic updates extend it from merged code to the running installation.
 
 The [development plan](docs/autonomous-ai-queue-plan.md) lays out the implementation
 milestones: the application rename, autonomous execution, an isolated runtime,
-native agent integrations, issue selection, automatic merging, the operations UI,
-and self-updates.
+native agent integrations, issue selection, human-reviewed delivery, the factory role
+pipeline, the operations UI, and self-updates. The
+[factory branch sequence](docs/software-factory-plan.md#branch-sequence-and-acceptance)
+defines F1–F8 and their acceptance gates.
 
 The [MVP release contract](docs/vibearr-mvp.md) defines the first complete loop:
-two dependent issues implemented, tested, and merged automatically, with the second
-starting from the first change. That is the starting point for building vibearr
+two dependent issues implemented and tested, with a human merging each PR and the
+second starting from the first verified merge. That is the starting point for building vibearr
 through its own queue.
 
 For existing installations, follow the [vibearr upgrade guide](docs/vibearr-upgrade.md)
@@ -91,7 +114,7 @@ to preserve database, volume, and runner identities while adopting the new names
 Docker Engine and Compose are the only runtime prerequisites. The web app uses
 port **7777** by default. Every service, worker, test, browser and operational tool
 runs in a container. The [Docker-only runtime plan](docs/docker-only-runtime-plan.md)
-defines the integrated runner and its qualification gates. Codex and Claude Code
+defines the compact runner/worker boundary and its qualification gates. Codex and Claude Code
 use subscription login; OpenCode uses an external Ollama server/model that you
 provide. No model API keys or bundled Ollama service are required.
 
@@ -114,11 +137,13 @@ stop startup. Preserve the original database/user and volume settings on upgrade
 | `VIBEARR_CREDENTIAL_KEY` | Original encryption key on upgrade; generated for a fresh install |
 | `DJANGO_SECRET_KEY` | Original Django key on upgrade; generated for a fresh install |
 
-`run.sh` builds the images, binds the runner's actual image ID, and starts all
-three services. To start previously built images directly, supply that image ID:
+`run.sh` builds the worker toolchain and pinned browser layer, binds the runner and
+worker's actual image IDs, and starts all four services. To start previously built
+images directly, supply both actual IDs:
 
 ```sh
 export VIBEARR_RUNNER_IMAGE_ID=$(docker image inspect vibearr-runner:local --format '{{.Id}}')
+export VIBEARR_WORKER_IMAGE_ID=$(docker image inspect vibearr-worker:local --format '{{.Id}}')
 docker compose up -d --wait
 ```
 
@@ -138,8 +163,9 @@ Use the Delete links on queue rows and configuration lists to remove work items,
 projects, credentials, coding runners, and schedules. Confirmation pages explain
 affected settings and retained history. See [UI deletion](docs/ui-deletion.md).
 
-All three services start together. The runner contains the three native CLIs and
-executes one task at a time, including setup and validation. Save a **Runner
+All four services start together. The runner owns delivery, persistent accounts
+and scoped network mediation. One worker contains the native CLIs and executes
+setup, agent/reviewer and independent validation phases sequentially. Save a **Runner
 subscription login** credential for Codex or Claude Code, then follow its Connect
 subscription instructions. For OpenCode, save your external Ollama endpoint and
 select an already installed model. See [Docker operations](docs/docker-operations.md).
@@ -175,16 +201,19 @@ errors exit nonzero. The compatibility `nq` module is also available in the imag
 
 Django owns the queue, settings, credentials, and run history. A supervised
 scheduler in the app executes durable PostgreSQL import jobs. The runner claims
-work over HTTP and owns agent processes, workspaces, validation and Git delivery.
+work over HTTP and owns private journals, selected accounts and Git/PR delivery.
 Celery, Beat and Valkey are not used.
 
-The runner's controller and execution phases share one container, using separate
-OS users and protected state. Test PostgreSQL runs temporarily inside it; the
-runner cannot access the production database network or credentials. Released
-images contain source, and writable data uses named volumes and bounded tmpfs.
-There is no Docker daemon access. GitHub issue text and repository content cannot
-grant new permissions. This is a single-operator boundary with less phase
-isolation than the retired worker fleet.
+The worker is separate from the trusted runner and production networks. Its
+authenticated private API accepts registered phases; candidate code cannot read
+runner journals, publication credentials or persistent logins. Test PostgreSQL,
+candidate apps and browsers run only while needed inside that worker, under its
+actual resource limits. Source, environment, selected credentials and test state
+reset between phases. Validation uses fresh snapshots and trusted image tools.
+Neither runner nor worker receives production database credentials. There is no
+Docker daemon access. GitHub issue text and repository content cannot grant new
+permissions. Phases share one worker namespace, so current-boot isolation and
+cleanup probes remain mandatory. See the [factory plan](docs/software-factory-plan.md).
 
 | Directory | Responsibility |
 | --- | --- |
@@ -214,14 +243,16 @@ docker compose run --rm app python manage.py check
 
 The [Docker checks](docs/docker-operations.md#development-and-ci) use disposable
 projects for Git acceptance, distribution builds, qualification, browser captures
-and backup/restore. CI uses the same three-service stack. Missing
+and backup/restore. CI uses the same four-service stack. Missing
 container tooling does not permit host
 Python, pip, Git task execution, browsers, services or package installation.
 
-Native agents use pinned executables in one runner image and explicitly selected
+Native agents use pinned executables in one worker image and explicitly selected
 connections. The [runtime contract](docs/docker-only-runtime-plan.md) and
 [operations guide](docs/docker-operations.md) supersede historical host/fleet
 instructions. Fixture responses and old proofs do not establish live readiness.
+[Automatic merge](docs/automatic-merge.md) is deferred and must remain disabled
+during this rollout; agent review does not grant merge permission.
 
 ## Keeping your data
 
