@@ -295,3 +295,61 @@ python() { if [[ $* == '-m vibearr_runner.verify' ]]; then mkdir permission-prob
         self.assertEqual(arguments[arguments.index("--memory") + 1], "128m")
         self.assertEqual(arguments[arguments.index("--pids-limit") + 1], "16")
         self.assertEqual(arguments[arguments.index("--cpus") + 1], "1")
+
+
+class NativeCodexImageFailureTests(unittest.TestCase):
+    def run_check(self, directory, commit, docker_status=31):
+        script = Path(__file__).with_name("check-native-codex.sh")
+        stub = (
+            "docker() { echo DOCKER_CALLED; return "
+            + str(docker_status)
+            + "; }; export -f docker; "
+        )
+        command = (
+            stub
+            + "VIBEARR_CHECK_OUTPUT="
+            + shlex.quote(str(Path(directory) / "evidence"))
+            + " bash "
+            + shlex.quote(str(script))
+            + " --candidate "
+            + shlex.quote(directory)
+            + " --commit "
+            + shlex.quote(commit)
+        )
+        return subprocess.run(
+            ["bash", "-c", command], capture_output=True, text=True, timeout=10
+        )
+
+    def test_invalid_candidate_sha_stops_before_docker(self):
+        with TemporaryDirectory() as directory:
+            result = self.run_check(directory, "main")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertNotIn("DOCKER_CALLED", result.stdout)
+
+    def test_failed_bootstrap_build_preserves_exact_exit_status(self):
+        with TemporaryDirectory() as directory:
+            result = self.run_check(directory, "a" * 40)
+        self.assertEqual(result.returncode, 31, result.stderr)
+
+    def test_version_mismatch_fails_before_contract_tests(self):
+        script = Path(__file__).with_name("check-native-codex.sh").read_text()
+        block = script[script.index("expected=$(docker run") :]
+        stub = """set -euo pipefail
+output=$1
+tools=tools
+runner=runner
+docker() {
+    if [[ $* == *'--entrypoint python '* ]]; then echo 'codex-cli 0.169.0'; return; fi
+    if [[ $* == *'--entrypoint codex '* ]]; then echo 'codex-cli 0.168.0'; return; fi
+    echo CONTRACT_TESTS_CALLED
+}
+"""
+        with TemporaryDirectory() as directory:
+            result = subprocess.run(
+                ["bash", "-c", stub + block, "check", directory],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertNotIn("CONTRACT_TESTS_CALLED", result.stdout)

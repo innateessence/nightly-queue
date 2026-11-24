@@ -12,13 +12,14 @@ concurrency:
   group: docker-test-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
-  test:
-    name: Application, runtime and recovery
+  unit:
+    name: Run test.sh
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    env:
-      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Check out exact candidate for operator image builds
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -26,7 +27,31 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Run disposable Docker checks without model credentials
+      - name: Run actual Docker checks without model credentials
+        env:
+          VIBEARR_CHECK_OUTPUT: ${{ runner.temp }}/docker-checks
+        run: bash deploy/docker/checks.sh unit --candidate "$GITHUB_WORKSPACE" --commit "$CANDIDATE_SHA"
+      - name: Upload bounded Docker evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: docker-test-evidence-${{ github.job }}
+          path: ${{ runner.temp }}/docker-checks
+          if-no-files-found: error
+          retention-days: 7
+
+  candidate:
+    name: Validate candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact candidate for operator image builds
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run actual Docker checks without model credentials
         env:
           VIBEARR_CHECK_OUTPUT: ${{ runner.temp }}/docker-checks
         run: bash deploy/docker/checks.sh full --candidate "$GITHUB_WORKSPACE" --commit "$CANDIDATE_SHA"
@@ -34,7 +59,55 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: docker-test-evidence
+          name: docker-test-evidence-${{ github.job }}
+          path: ${{ runner.temp }}/docker-checks
+          if-no-files-found: error
+          retention-days: 7
+
+  boundary:
+    name: Qualify OCI executor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact candidate for operator image builds
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run actual Docker checks without model credentials
+        env:
+          VIBEARR_CHECK_OUTPUT: ${{ runner.temp }}/docker-checks
+        run: bash deploy/docker/checks.sh boundary --candidate "$GITHUB_WORKSPACE" --commit "$CANDIDATE_SHA"
+      - name: Upload bounded Docker evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: docker-test-evidence-${{ github.job }}
+          path: ${{ runner.temp }}/docker-checks
+          if-no-files-found: error
+          retention-days: 7
+
+  native_codex:
+    name: Check native Codex image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact candidate for operator image builds
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run actual Docker checks without model credentials
+        env:
+          VIBEARR_CHECK_OUTPUT: ${{ runner.temp }}/docker-checks
+        run: bash deploy/docker/check-native-codex.sh --candidate "$GITHUB_WORKSPACE" --commit "$CANDIDATE_SHA"
+      - name: Upload bounded Docker evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: docker-test-evidence-${{ github.job }}
           path: ${{ runner.temp }}/docker-checks
           if-no-files-found: error
           retention-days: 7
