@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "repository": "innateessence/nightly-queue",
+  "base_sha": "b03776d52a43532e85b2dbca72d3ed7b58beec8e",
+  "base_tree": "45216068e50d933e3540b4a4a2c5524a99503c1b",
+  "dependency_sha": "25a3c786d977facb304868dcfd94d3901a916df1",
+  "dependency_tree": "1f36d99a28b64aacfd054aa9a3246af289f9a709",
+  "prerequisites": []
+}
