@@ -5,4 +5,5 @@
 {% block content %}
 <p class="field-hint">A snapshot of saved runner reports. Refresh to see updates; private worker logs remain in the worker.</p>
 <div class="queue-items activity-items">{% for run in runs %}{% include "runner_control/_run_card.html" %}{% empty %}<section class="panel empty-state"><p class="eyebrow">NOTHING RUNNING</p><h2>No active work</h2><p>Eligible tasks wait in Queue. Check System for processing settings and reported blockers.</p><div class="inline-actions"><a href="{% url 'index' %}">Open queue</a><a href="{% url 'runner_system' %}">Check system</a></div></section>{% endfor %}</div>
+{% if page.paginator.num_pages > 1 %}<nav class="pagination" aria-label="Activity pages">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">Previous attempts</a>{% endif %}<span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?page={{ page.next_page_number }}">More attempts</a>{% endif %}</nav>{% endif %}
 {% endblock %}

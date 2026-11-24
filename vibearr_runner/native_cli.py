@@ -16,6 +16,7 @@ from .native_codex import (
 from .native_sessions import NativeSession, NativeSessionError
 from .policy import ExecutionPolicy
 from .opencode_connection import valid_model
+from .native_claude import consume_claude
 
 
 class NativeEvents(CodexEvents):
@@ -53,6 +54,8 @@ class NativeEvents(CodexEvents):
         return "Selected native CLI failed; inspect its protected diagnostics before retrying."
 
     def line(self, line):
+        if self.provider == "claude":
+            return consume_claude(self, line)
         if self.provider == "opencode":
             from .native_opencode import consume
 
@@ -177,9 +180,16 @@ class NativeCLIAdapter(NativeCodexAdapter):
 
     def selected_profile(self, policy, _kind):
         capabilities = self.client.capabilities()
-        if capabilities.get("runtime") != RUNTIME or not capabilities.get("qualified"):
+        if (
+            capabilities.get("runtime")
+            not in {
+                RUNTIME,
+                "compact-worker-v1",
+            }
+            or capabilities.get("qualified") is not True
+        ):
             raise NativeSessionError(
-                "Qualify the current integrated runner boot before coding."
+                "Qualify the current execution worker boot before coding."
             )
         for value in capabilities["profiles"]:
             if (
@@ -190,6 +200,8 @@ class NativeCLIAdapter(NativeCodexAdapter):
             profile = Profile.parse(
                 {key: entry for key, entry in value.items() if key != "profile_digest"}
             )
+            if value.get("profile_digest") != profile.digest:
+                raise NativeSessionError("Registered native profile digest differs.")
             desired = {
                 "cpu": policy.cpu_limit,
                 "memory_mb": policy.memory_mb,
@@ -205,15 +217,31 @@ class NativeCLIAdapter(NativeCodexAdapter):
             return profile
         raise NativeSessionError("Selected native runner profile is unavailable.")
 
-    def context(self, account, prompt, kind):
-        return {
+    def context(
+        self, account, prompt, kind, *, factory_role=None, browser_capture=None
+    ):
+        value = {
             "schema_version": 1,
             "adapter": self.provider,
             "model": account["model"],
             "prompt": prompt,
             "auth_kind": kind,
             "account_digest": digest(canonical(account)),
+            "credential_id": account["credential_id"],
         }
+        if factory_role is not None:
+            from .native_conformance import FACTORY_ROLES
+
+            if factory_role not in FACTORY_ROLES:
+                raise NativeSessionError("Unknown native factory role.")
+            value["factory_role"] = factory_role
+        if browser_capture is not None:
+            from .native_conformance import validate_browser_capture
+
+            value["browser_capture"] = validate_browser_capture(
+                factory_role, browser_capture
+            )
+        return value
 
     def prepare(
         self,
@@ -226,6 +254,8 @@ class NativeCLIAdapter(NativeCodexAdapter):
         policy,
         deadline,
         credential,
+        factory_role=None,
+        browser_capture=None,
     ):
         if not valid_model(model):
             raise NativeSessionError(
@@ -248,7 +278,15 @@ class NativeCLIAdapter(NativeCodexAdapter):
             "credential_version": reference["version"],
             "model": model,
         }
-        context = canonical(self.context(account, prompt, reference["kind"]))
+        context = canonical(
+            self.context(
+                account,
+                prompt,
+                reference["kind"],
+                factory_role=factory_role,
+                browser_capture=browser_capture,
+            )
+        )
         manifest = {
             "schema_version": 1,
             "run_id": run_id,

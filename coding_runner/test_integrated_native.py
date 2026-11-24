@@ -22,6 +22,7 @@ class NativeEventTests(unittest.TestCase):
                 "subtype": "success",
                 "is_error": False,
                 "session_id": "real-session",
+                "result": "Completed.",
                 "usage": {"input_tokens": 10},
             },
         ]

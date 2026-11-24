@@ -19,6 +19,7 @@ OVERRIDE_FIELDS += (
     "repository_credential_id",
     "execution_policy",
     "merge_profile",
+    "factory",
 )
 
 
@@ -116,7 +117,10 @@ def validate_overrides(value):
             )
         if set(entry) - {"mode", "value"}:
             raise ValidationError("Unknown override property.")
-        if key in {"execution_policy", "merge_profile"} and entry["mode"] == "clear":
+        if (
+            key in {"execution_policy", "merge_profile", "factory"}
+            and entry["mode"] == "clear"
+        ):
             raise ValidationError(
                 "Execution policy cannot be cleared; inherit or replace it."
             )
@@ -127,6 +131,10 @@ def validate_overrides(value):
             validate_execution_policy(replacement)
         elif key == "merge_profile":
             validate_merge_profile(replacement)
+        elif key == "factory":
+            from .factory_configuration import validate_factory_configuration
+
+            validate_factory_configuration(replacement)
         elif key.endswith("commands"):
             validate_commands(replacement)
         elif key.endswith("credential_id"):

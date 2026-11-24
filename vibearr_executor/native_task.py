@@ -56,29 +56,9 @@ def command(provider, model, home, *, factory_role=None):
         arguments.extend(["--enable", "code_mode_host", "-"])
         return arguments
     if provider == "claude":
-        os.environ.update(
-            CLAUDE_CONFIG_DIR=str(home / ".claude"),
-            DISABLE_AUTOUPDATER="1",
-            DISABLE_TELEMETRY="1",
-            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
-        )
-        return [
-            "/usr/local/bin/claude",
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--model",
-            model,
-            "--permission-mode",
-            "bypassPermissions",
-            "--setting-sources",
-            "user",
-            "--strict-mcp-config",
-            "--mcp-config",
-            '{"mcpServers":{}}',
-            "--disable-slash-commands",
-        ]
+        from .claude_task import command as claude_command
+
+        return claude_command(model, home, factory_role=factory_role)
     if provider != "opencode":
         raise ValueError("Unsupported coding agent.")
     from .opencode_task import command as opencode_command
@@ -99,6 +79,8 @@ def main():
     connection = json.loads(
         Path(os.environ["VIBEARR_BACKEND_SECRET_FILE"]).read_bytes()
     )
+    if connection.get("schema_version") == 1 and "scope" in connection:
+        connection = connection["connection"]
     if connection["provider"] != provider:
         raise ValueError("Selected connection differs from the task provider.")
     if any(
@@ -116,9 +98,14 @@ def main():
     home = Path(os.environ["HOME"])
     if provider != "opencode":
         install_login(provider, connection["files"], home)
+    from urllib.parse import urlsplit
+
+    bypass = "127.0.0.1,localhost"
+    if os.environ.get("VIBEARR_OLLAMA_URL"):
+        bypass += "," + (urlsplit(os.environ["VIBEARR_OLLAMA_URL"]).hostname or "")
     os.environ.update(
-        NO_PROXY="127.0.0.1,localhost",
-        no_proxy="127.0.0.1,localhost",
+        NO_PROXY=bypass,
+        no_proxy=bypass,
         XDG_CONFIG_HOME=str(home / ".config"),
         XDG_DATA_HOME=str(home / ".local/share"),
         XDG_CACHE_HOME=str(home / ".cache"),
