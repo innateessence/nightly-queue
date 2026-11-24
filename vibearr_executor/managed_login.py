@@ -83,7 +83,17 @@ def collect(provider, home):
         finally:
             os.close(directory)
     if ".claude.json" in files:
+        account = files[".claude.json"].get("oauthAccount", {})
+        identity = {
+            key: account[key]
+            for key in ("accountUuid", "organizationUuid")
+            if isinstance(account, dict)
+            and isinstance(account.get(key), str)
+            and account[key]
+        }
         files[".claude.json"] = {"hasCompletedOnboarding": True}
+        if identity:
+            files[".claude.json"]["oauthAccount"] = identity
     return validate(provider, files)
 
 
@@ -118,6 +128,10 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise SystemExit("Stop active coding work before changing a login.")
+        if (ROOT / "execution-lease.json").exists():
+            raise SystemExit(
+                "Reconcile the prior coding operation before changing a login."
+            )
         target = login_path(args.provider, args.credential_id)
         if args.action == "logout":
             shutil.rmtree(target, ignore_errors=True)
@@ -132,6 +146,8 @@ def main():
             return
         home = Path("/login-work") / f"{args.provider}-{args.credential_id}"
         home.mkdir(mode=0o700, parents=True, exist_ok=False)
+        mediation = None
+        grant = None
         try:
             os.chown(home, 1000, 1000)
             environment = {
@@ -144,6 +160,18 @@ def main():
                 "HTTP_PROXY": "http://127.0.0.1:3128",
                 "NO_PROXY": "localhost,127.0.0.1",
             }
+            controller_token = os.environ.get("VIBEARR_MEDIATION_CONTROLLER_TOKEN_FILE")
+            if controller_token:
+                from vibearr_runner.compact_connections import MediationClient
+
+                mediation = MediationClient(
+                    "http://127.0.0.1:8792", Path(controller_token).read_text().strip()
+                )
+                grant = mediation.request(
+                    "/v4/logins/begin", {"provider": args.provider}
+                )
+                proxy = "http://grant:" + grant["token"] + "@127.0.0.1:3128"
+                environment.update(HTTPS_PROXY=proxy, HTTP_PROXY=proxy)
             if args.provider == "codex":
                 config = home / ".codex"
                 config.mkdir(mode=0o700)
@@ -169,7 +197,11 @@ def main():
             save_login(args.provider, args.credential_id, collect(args.provider, home))
             print("Subscription login saved in the runner volume.")
         finally:
-            shutil.rmtree(home)
+            try:
+                if mediation is not None and grant is not None:
+                    mediation.request("/v4/logins/end", {"token": grant["token"]})
+            finally:
+                shutil.rmtree(home)
 
 
 if __name__ == "__main__":

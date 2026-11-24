@@ -45,6 +45,7 @@ def external_endpoint(value):
         "app",
         "postgres",
         "runner",
+        "worker",
         "vibearr",
         "localhost",
         "runner-ollama",
@@ -95,6 +96,8 @@ class Relay(ThreadingHTTPServer):
     daemon_threads = True
     endpoint = ""
     model = ""
+    select_connection = None
+    denied: set[str] = set()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -116,7 +119,7 @@ class Handler(BaseHTTPRequestHandler):
             self.connection.settimeout(30)
             if (
                 self.path not in PATHS
-                or not self.server.endpoint
+                or (not self.server.endpoint and self.server.select_connection is None)
                 or self.headers.get("Transfer-Encoding")
             ):
                 raise ValueError
@@ -126,14 +129,26 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(length)
             if len(body) != length:
                 raise ValueError
+            model = self.server.model
+            endpoint = self.server.endpoint
+            payload = None
             if self.command == "POST":
                 payload = json.loads(body)
-                if (
-                    not isinstance(payload, dict)
-                    or payload.get("model") != self.server.model
-                ):
+                if not isinstance(payload, dict):
                     raise ValueError("Use the selected installed Ollama model.")
-            parsed, address, port = resolve_endpoint(self.server.endpoint)
+            token = self.headers.get("X-Vibearr-Grant", "")
+            if self.server.select_connection is not None:
+                selected = self.server.select_connection(
+                    token, payload.get("model") if payload else None
+                )
+                endpoint, model = selected["endpoint"], selected["model"]
+            if payload is not None and payload.get("model") != model:
+                raise ValueError("Use the selected installed Ollama model.")
+            parsed, address, port = resolve_endpoint(endpoint)
+            if address in self.server.denied:
+                raise ValueError(
+                    "External Ollama resolved to an internal control service."
+                )
             if parsed.scheme == "https":
                 connection = http.client.HTTPSConnection(
                     parsed.hostname, port, timeout=30
@@ -162,9 +177,13 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             received = 0
             while True:
+                if self.server.select_connection is not None:
+                    self.server.select_connection(token, model)
                 chunk = response.read1(65536)
                 if not chunk:
                     break
+                if self.server.select_connection is not None:
+                    self.server.select_connection(token, model)
                 received += len(chunk)
                 if received > 64 * 1024 * 1024:
                     break
