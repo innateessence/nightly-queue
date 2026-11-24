@@ -1,0 +1,1072 @@
+{
+  "schema_version": 1,
+  "repository": "innateessence/nightly-queue",
+  "base_sha": "b03776d52a43532e85b2dbca72d3ed7b58beec8e",
+  "base_tree": "45216068e50d933e3540b4a4a2c5524a99503c1b",
+  "dependency_sha": "25a3c786d977facb304868dcfd94d3901a916df1",
+  "dependency_tree": "1f36d99a28b64aacfd054aa9a3246af289f9a709",
+  "prerequisites": [
+    {
+      "path": ".env.example",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "506838361e83fe129335e943fbe5654b6dcb0e22"
+    },
+    {
+      "path": ".github/workflows/runner-deployment-boundary.yml",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ba906ae1cc3df24fd3187303ed9299abc3cbbc7d"
+    },
+    {
+      "path": "AGENTS.md",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "725c66c69d5d8de5130b92f21115ac7231f15675"
+    },
+    {
+      "path": "Dockerfile",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "4186ca867083419759e68e7e0a1baaf758c3eac0"
+    },
+    {
+      "path": "README.md",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "3c025bf6f77bfd41a1d7df1b85af48d30c8391c4"
+    },
+    {
+      "path": "coding_runner/acceptance/test_factory_opencode_cli.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "48ab31e7e46a021f1dcd6a406a827d65e0410792"
+    },
+    {
+      "path": "coding_runner/test_automatic_merge.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "73fe391b45fa1072a2cb52854862553a31c6f59d"
+    },
+    {
+      "path": "coding_runner/test_browser_receipts.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "cac093545d951c96e59c68edad50113b258549cb"
+    },
+    {
+      "path": "coding_runner/test_budgets.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a41e6dda4280664994339eab19f247cc11e53282"
+    },
+    {
+      "path": "coding_runner/test_factory_acceptance.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "0f854af54431786e8551bbfcb01beec1beea8e3e"
+    },
+    {
+      "path": "coding_runner/test_factory_claude.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "0149b6261527c8807b6e1af92f738e06f1b5b450"
+    },
+    {
+      "path": "coding_runner/test_factory_contract.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "bc5efc5bb851e45bb20abd8d85c1102d6193fe47"
+    },
+    {
+      "path": "coding_runner/test_factory_delivery.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "cc9187b2e20959ab77bdf9d2b765ba1ee7810766"
+    },
+    {
+      "path": "coding_runner/test_factory_generation.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "7475ab3d0b45b8b11010c7abacb781dfed523822"
+    },
+    {
+      "path": "coding_runner/test_factory_opencode.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "fb148a598dddbb9962b01450f51cffbb8cf3d609"
+    },
+    {
+      "path": "coding_runner/test_factory_readback.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "7eeac7a35672b2f0dc783cc67e46b59c36b589f5"
+    },
+    {
+      "path": "coding_runner/test_factory_recovery.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "520a6688cfe38fe8137bade18f5408b55b48c772"
+    },
+    {
+      "path": "coding_runner/test_factory_reviews.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ba4713444d0aa49ed3e38f16dd67ffe08668f30a"
+    },
+    {
+      "path": "coding_runner/test_factory_routing.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "9f73d72f52a656a24fbd910fbf2f4af81c0fc914"
+    },
+    {
+      "path": "coding_runner/test_factory_scenarios.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ddb16a550ca649b66aba3d93b7a03828bff2e34f"
+    },
+    {
+      "path": "coding_runner/test_factory_spec_sessions.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "745474a975c4e79de6fbe60653ff0aa58a2e5d46"
+    },
+    {
+      "path": "coding_runner/test_integrated_native.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "7514b19283e8bbf2f269f0dd1929e3c59b30f069"
+    },
+    {
+      "path": "coding_runner/test_native_conformance.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "3b74a3ceb9a8ac9aca110158d930f33c73a3c40b"
+    },
+    {
+      "path": "coding_runner/test_native_delivery.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "683c2083422cf530a5a384bb454fdf4191d2bdfa"
+    },
+    {
+      "path": "coding_runner/test_native_lifecycle.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "561d2c5c3575fd2d99e1364d3d68006b839de533"
+    },
+    {
+      "path": "coding_runner/test_native_preflight.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a94f3122a9c7a690fa556fcd9beac8125e73653e"
+    },
+    {
+      "path": "deploy/docker/application.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "1eff7f3d874aa96e779622de20d7ea8fac10f0cb"
+    },
+    {
+      "path": "deploy/docker/audit.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "8ebcbe47d1856adc7e111ee5fb0fd02bdb5b8676"
+    },
+    {
+      "path": "deploy/docker/bootstrap.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "f446197c19497fdcbd9dbbdb1791f89ab9a133ab"
+    },
+    {
+      "path": "deploy/docker/checks.sh",
+      "mode": "100755",
+      "type": "blob",
+      "blob": "21357279117cb0702eaf463de13fbf894aefad8a"
+    },
+    {
+      "path": "deploy/docker/dependency_smoke.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "726381b62614d0a25a0396e251ae1bc4a0ba43cb"
+    },
+    {
+      "path": "deploy/docker/test_application.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "0caf6143a6b414890bf5a20d598022ecd5eba4fc"
+    },
+    {
+      "path": "deploy/docker/test_audit.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "82aa59d9046b8866cc9431f5a1abf69762ed493f"
+    },
+    {
+      "path": "deploy/docker/test_bootstrap.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "b9d022c2676822c39b8f8846a83018c6b7706c17"
+    },
+    {
+      "path": "deploy/docker/test_check_commands.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "5f164603ca6370e35a029ccd153a7478d3b126bf"
+    },
+    {
+      "path": "docker-compose.yml",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "96a0a1064e24835b4ab8892cae3dfc2165bd18fd"
+    },
+    {
+      "path": "docs/docker-only-runtime-plan.md",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "aa2b65827df92a6db965f751b55ca6966ab0e8c6"
+    },
+    {
+      "path": "docs/factory-acceptance.md",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "510c13c451851acf100413ff23e4cea93ca21ab0"
+    },
+    {
+      "path": "docs/factory-opencode.md",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "6ce8f7f68a0725d4374235829e218ab228138bf0"
+    },
+    {
+      "path": "docs/factory-routing.md",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "6bb4455f194bcadcbab91c3b53e1c1ffd12b5e2b"
+    },
+    {
+      "path": "docs/native-claude-factory.md",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "59b44a3c1b7a70d01330c541c9f90c702a57b484"
+    },
+    {
+      "path": "docs/native-factory-conformance.md",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "9b69da44132ea7ab7846da56b2b783a97f567ab4"
+    },
+    {
+      "path": "docs/screenshots/factory/active-detail/queue-desktop-dark.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "f249c090c7bf3a97abd27bded409afce3453525f"
+    },
+    {
+      "path": "docs/screenshots/factory/active-detail/queue-desktop-light.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "201c7edaf8705ac8958c5c9eb1dfd74ee258c468"
+    },
+    {
+      "path": "docs/screenshots/factory/active-detail/queue-mobile-dark.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ce5d06f3006714b92219bb2eee358c4324048712"
+    },
+    {
+      "path": "docs/screenshots/factory/active-detail/queue-mobile-light.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "3ff3e45567d82f2eef730720fe85be5cfffaa2d8"
+    },
+    {
+      "path": "docs/screenshots/factory/active-detail/report.json",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a95567e70f5c817436f56415a054c90ad33376ac"
+    },
+    {
+      "path": "docs/screenshots/factory/activity/queue-desktop-dark.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "7fed7196e321c5f6c42189fea4db2233db1112ae"
+    },
+    {
+      "path": "docs/screenshots/factory/activity/queue-desktop-light.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "c8fd10719986a22bebd1ceafa4fda4a017475a13"
+    },
+    {
+      "path": "docs/screenshots/factory/activity/queue-mobile-dark.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "b783de82f186a9b9c1e8796cb8588b06ad085e7a"
+    },
+    {
+      "path": "docs/screenshots/factory/activity/queue-mobile-light.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "333a2149aef599ae2083241d1827e90b67492b08"
+    },
+    {
+      "path": "docs/screenshots/factory/activity/report.json",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "841f13d3e3bd7a1ad9d8d92b34a1d15ca673285b"
+    },
+    {
+      "path": "docs/screenshots/factory/delivered-detail/queue-desktop-dark.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "91e12fcbdceb7edbffe1ee1126572966669862cd"
+    },
+    {
+      "path": "docs/screenshots/factory/delivered-detail/queue-desktop-light.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "5063a21dd505d362ee2bff70808a64d0be199a4c"
+    },
+    {
+      "path": "docs/screenshots/factory/delivered-detail/queue-mobile-dark.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a643555f18fc86117b746a17fc552539cebe6162"
+    },
+    {
+      "path": "docs/screenshots/factory/delivered-detail/queue-mobile-light.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "081bb9f7b5d7276772263d1ca1bc389419c7ce4f"
+    },
+    {
+      "path": "docs/screenshots/factory/delivered-detail/report.json",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "5a7462ce791284e84b928a1214751afc1a822377"
+    },
+    {
+      "path": "docs/screenshots/factory/history/queue-desktop-dark.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "013e9f5e966a8f0e7510b330877602f9ad162b51"
+    },
+    {
+      "path": "docs/screenshots/factory/history/queue-desktop-light.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "8fa48e2a3c4b9835598abb6589c345d291bbe680"
+    },
+    {
+      "path": "docs/screenshots/factory/history/queue-mobile-dark.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "834e805f99f2fb27fa5862d9ad38617a019d7a79"
+    },
+    {
+      "path": "docs/screenshots/factory/history/queue-mobile-light.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "1b411b49036162f1ec065b9a623889abb758f143"
+    },
+    {
+      "path": "docs/screenshots/factory/history/report.json",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d39480f4366036a9644cbf75c50ec20a59737528"
+    },
+    {
+      "path": "docs/screenshots/factory/manifest.json",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "b566111f715b75618c5cfdfe2d35abd1cf19c23e"
+    },
+    {
+      "path": "docs/screenshots/factory/settings/README.md",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "8e275523bb939ff357f3a02c0b80b843973bc18f"
+    },
+    {
+      "path": "docs/screenshots/factory/settings/browser-report.json",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d4a3d8992a3c4867ddad0c3a7d2fd3dd938cd371"
+    },
+    {
+      "path": "docs/screenshots/factory/settings/desktop-dark.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ba0689efebf1c8a8fa767453937c171a8c34960a"
+    },
+    {
+      "path": "docs/screenshots/factory/settings/desktop-light.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "fa64e1f0a4cca10f8e5790523db12dc8e9b21ef7"
+    },
+    {
+      "path": "docs/screenshots/factory/settings/dom-qa.json",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "e69dc38386ed273ee5311d20b47b75a75ed5d9de"
+    },
+    {
+      "path": "docs/screenshots/factory/settings/manifest.json",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "14d6fdef824f20db14d211eb11ee0e0a655b43e4"
+    },
+    {
+      "path": "docs/screenshots/factory/settings/mobile-dark.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "10de8e25985963532615ff45c96e7a487db32ce1"
+    },
+    {
+      "path": "docs/screenshots/factory/settings/mobile-light.png",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "7d39b8b871952255edaf3e172f057e2e86c006e6"
+    },
+    {
+      "path": "docs/screenshots/factory/settings/operation.json",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "4844329acd7c5f0024afece2bb1a4335cd20af05"
+    },
+    {
+      "path": "projects/templates/projects/_form.html",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "640cc164da532992d1af9c2b3ebcefa6c7c52ed8"
+    },
+    {
+      "path": "run.sh",
+      "mode": "100755",
+      "type": "blob",
+      "blob": "68c6d7c4b71ec917e707adea29bee08aeefd5362"
+    },
+    {
+      "path": "runner_control/configuration.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "84a1910669458920278e8d4c5eb41e697043bc23"
+    },
+    {
+      "path": "runner_control/delivery_recovery.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "f47cbe2c03bd473cca9df89c3d7144828009d593"
+    },
+    {
+      "path": "runner_control/factory_api.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "deab3b97736d3cfae9338230c75f9ddbe8c7e851"
+    },
+    {
+      "path": "runner_control/factory_configuration.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "1284ea608fcc37fafa0db1a0b2d2251036d8cf40"
+    },
+    {
+      "path": "runner_control/factory_delivery.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "70f7ca7f8b60188694fcfeb2c396e1dae302e769"
+    },
+    {
+      "path": "runner_control/factory_models.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "cbcf7b955f006415c051591f42023c05c4d282c1"
+    },
+    {
+      "path": "runner_control/factory_native.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "e041ff824891a18dbefb419c3ec556edb7e384d3"
+    },
+    {
+      "path": "runner_control/factory_presentation.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "af393a223717a6945b9cf448dd7ca408fdbcf30b"
+    },
+    {
+      "path": "runner_control/factory_services.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d288f0efa7c2a2f1ac5be9cce2a55c39f12fcd98"
+    },
+    {
+      "path": "runner_control/migrations/0017_factory_artifacts.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a9c0e198e12724713705ce71ed7601f82671332e"
+    },
+    {
+      "path": "runner_control/models.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d90ed6fe677059d28be8c0670e60632740812b18"
+    },
+    {
+      "path": "runner_control/native_services.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ef6bdebf766d498fda787fcb434b5d82ae888290"
+    },
+    {
+      "path": "runner_control/plan_presentation.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "85293f7c08a703b80d7811700611c2f83bc6aad5"
+    },
+    {
+      "path": "runner_control/plan_views.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "8cdda4cff995727cf63aa873bdef4c1ecd5854c0"
+    },
+    {
+      "path": "runner_control/publication_observations.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "41cae8c7dfe11a82082d8b9b554d89e855e205b6"
+    },
+    {
+      "path": "runner_control/retention.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "1c51137cf54aedd538af49fc1b670f55654cad47"
+    },
+    {
+      "path": "runner_control/services.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "de92044bb370943e645676ec4fcfb67fe78c96a2"
+    },
+    {
+      "path": "runner_control/settings_forms.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "0bd3d51a7383f6e7af244204257a7859bc823529"
+    },
+    {
+      "path": "runner_control/templates/runner_control/_factory_artifacts.html",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ea58ca967d58ea8cb4df5c25b133bf13605f570a"
+    },
+    {
+      "path": "runner_control/templates/runner_control/_factory_status.html",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ba390b1cb5b27981909ced932da8b4d0e7dd2899"
+    },
+    {
+      "path": "runner_control/templates/runner_control/_factory_summary.html",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "46d5dfeecfc54229aa26691abbdd0f44e6a8e852"
+    },
+    {
+      "path": "runner_control/templates/runner_control/_run_card.html",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "9c61193e564e0e629ac7fe0be518c25b21942d91"
+    },
+    {
+      "path": "runner_control/templates/runner_control/activity.html",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "2091335aa25c34ab19a3735e2f9b318423ce416d"
+    },
+    {
+      "path": "runner_control/templates/runner_control/plan_detail.html",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a7e502bebe04638072d65821812cdd8b07f78638"
+    },
+    {
+      "path": "runner_control/templates/runner_control/plan_history.html",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a1e6e998781505803c008bded5aac5886f494e89"
+    },
+    {
+      "path": "runner_control/test_automatic_merge.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "51a03317a372025fab93e3ec280be2aa031414d2"
+    },
+    {
+      "path": "runner_control/test_delivery_recovery.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d2d48e99f2370af41aaa838f6c34c29f4de58752"
+    },
+    {
+      "path": "runner_control/test_factory_artifacts.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "504cb7aa4188bc3fec9d6eafd9200cfbc8e926a1"
+    },
+    {
+      "path": "runner_control/test_factory_configuration.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "c6f4128355676b08278a93faa5b4a5a447706474"
+    },
+    {
+      "path": "runner_control/test_factory_delivery.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "9d151f871c1bf61337fad2377349e088181dc17b"
+    },
+    {
+      "path": "runner_control/test_factory_native.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "79bccb0ee64b5287479c4f37851e30364e3b778d"
+    },
+    {
+      "path": "runner_control/test_factory_publication.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "0c4617a74396bd6c0276caa1048154cb84767a59"
+    },
+    {
+      "path": "runner_control/test_factory_ui.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "5c45df40acc60b263694b387bbdf9d72b2391935"
+    },
+    {
+      "path": "runner_control/test_multiple_runners.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "65965f8c61a2f6aacac0206b39194d1cebc4653f"
+    },
+    {
+      "path": "runner_control/test_native_supervision.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a69a07b364aa420eb223f743b4c55898859bbecd"
+    },
+    {
+      "path": "runner_control/test_secrets.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "23a794b7dcafcf998dea5da085b781b99060a90e"
+    },
+    {
+      "path": "runner_control/urls.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "1c131087642b3697716a0c1961e26cae90053446"
+    },
+    {
+      "path": "runner_control/validators.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d46e8954ebecf426741ab280bab408b748cae931"
+    },
+    {
+      "path": "vibearr/test_compose.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "f784713ca48397335b804a0810a3846414ceea68"
+    },
+    {
+      "path": "vibearr/test_distributions.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "fc5cd913a208b798b90197176e897a559082dd67"
+    },
+    {
+      "path": "vibearr_executor/Worker.Dockerfile",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "7388227b9335d8917dc8e48e5a0cd51707312911"
+    },
+    {
+      "path": "vibearr_executor/browser_fixture.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "9d1287b3b796f633639c003e1ef111eef9255149"
+    },
+    {
+      "path": "vibearr_executor/claude_task.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "35c1769d6da0bcec1ca4512cb1faf66a4acb0711"
+    },
+    {
+      "path": "vibearr_executor/client.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "cf21fa8b5b32b42382f7ec25ac6ef56805632172"
+    },
+    {
+      "path": "vibearr_executor/compact_connections.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "eaa212a4882c1010eb09e69dcfe9318be9f8852f"
+    },
+    {
+      "path": "vibearr_executor/compact_profiles.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "e2ae3e5bf2bcf66edb0e2a3be73eecb40f5a19d0"
+    },
+    {
+      "path": "vibearr_executor/compact_protocol.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "6009935c5e09046210b59e91b03d05b2543de6cd"
+    },
+    {
+      "path": "vibearr_executor/compact_role_qualification.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "6ee10cd7120385779d311d9742fdd91993339429"
+    },
+    {
+      "path": "vibearr_executor/compact_worker.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "604d1d585d68970bf934400da43538d56bc2508c"
+    },
+    {
+      "path": "vibearr_executor/control_token.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "436f491f11c70ec7325a8b57812e261624183587"
+    },
+    {
+      "path": "vibearr_executor/integrated_validate.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "e614dc5ea3434031c7e1f28850693ab2664b46e0"
+    },
+    {
+      "path": "vibearr_executor/local_app.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "50ab38684e568f18058ee3df8cfda0524ee63828"
+    },
+    {
+      "path": "vibearr_executor/local_browser_task.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "3bb132d1d522ed29e0697e368bb5357c846c40f6"
+    },
+    {
+      "path": "vibearr_executor/local_database.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "e3c75854ba9a4ff0461174818e99cf3236acc3c2"
+    },
+    {
+      "path": "vibearr_executor/local_services.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "2e2960bcfffbb7aaee0a65bdae7b38c1f38e63ce"
+    },
+    {
+      "path": "vibearr_executor/managed_login.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a679d2749341dba33c378ca2fb18d657bd882243"
+    },
+    {
+      "path": "vibearr_executor/native_task.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "15cbcfd27d92ff16d53ebcc214b300ccda22f9a4"
+    },
+    {
+      "path": "vibearr_executor/ollama_relay.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "94382b428149ea8974de4519a396b42daf203ccd"
+    },
+    {
+      "path": "vibearr_executor/opencode_task.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "b6f23b60a513faa2eaa145ba795a63d81d1d82dd"
+    },
+    {
+      "path": "vibearr_executor/proxy.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "4eb81187b85f30ecc61bada9340651e20a637114"
+    },
+    {
+      "path": "vibearr_executor/slot_network.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "9856b7859e69361bcc66dc23a6697ab602fffb9f"
+    },
+    {
+      "path": "vibearr_executor/slot_processes.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "894c3f543c0b54dad2d07f12425e811d5ea9633a"
+    },
+    {
+      "path": "vibearr_executor/slots.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "1eda6ea06280846ccbcda66947e267a3093968c1"
+    },
+    {
+      "path": "vibearr_executor/test_compact_connection_http.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ff76e0e1f2eefa255ad64e196e917655e0369a2c"
+    },
+    {
+      "path": "vibearr_executor/test_compact_connections.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "95de092f3b5b32500f0029bbd20a2d942cdff4cc"
+    },
+    {
+      "path": "vibearr_executor/test_compact_database_policy.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "228b93beb6e587fb9afcd950540477af7515f023"
+    },
+    {
+      "path": "vibearr_executor/test_compact_permissions.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ff1091c898d4ad320f9a3d32baaca34a6ea98274"
+    },
+    {
+      "path": "vibearr_executor/test_compact_protocol.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "dc817f4e10b87c8d66c79aebc2c2de432714c092"
+    },
+    {
+      "path": "vibearr_executor/test_compact_targets.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ded50645136a3e4563fea0ec4a152d3ea180141f"
+    },
+    {
+      "path": "vibearr_executor/test_compact_worker.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a8da921659598210773e50a47edd7712565284aa"
+    },
+    {
+      "path": "vibearr_executor/test_control_token.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d2f1d8fa4312bf9eb10e13b9ac699a95d87150e2"
+    },
+    {
+      "path": "vibearr_executor/test_integrated_validate.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ed7af0b248394368b13455702a76f23c87bc4463"
+    },
+    {
+      "path": "vibearr_executor/test_local_database.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "9a688236ffd2046bef4a323e99d4c8c0a034ac38"
+    },
+    {
+      "path": "vibearr_executor/test_local_services.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "125cabb634a41c9c9cb0c6268e9fba89230a2c49"
+    },
+    {
+      "path": "vibearr_executor/test_slot_network.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a4e330b765ec4a9fb8e3920f1925d011f40dea07"
+    },
+    {
+      "path": "vibearr_executor/test_slot_startup.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "48ce6423c616663119e9aee1cb1e30a9acdb6d6b"
+    },
+    {
+      "path": "vibearr_runner/browser_receipts.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "e5be3e968423f2f607ee2d4c7823261840901fc4"
+    },
+    {
+      "path": "vibearr_runner/budgets.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "bfd7bbc78b937a3f74f5d6b5f3f7de66b55c2ad4"
+    },
+    {
+      "path": "vibearr_runner/compact_connections.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "3fa76c4fabcc48e9775a7d443533b9c13ca640f5"
+    },
+    {
+      "path": "vibearr_runner/factory_acceptance.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "0c1102d6ae75b7df2c5f1dbc5c4997ae371e1019"
+    },
+    {
+      "path": "vibearr_runner/factory_contract.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "40ce52a858190bd64cf48b5e6603bffec3f4f52f"
+    },
+    {
+      "path": "vibearr_runner/factory_delivery.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "ba79eaf5885e54f1091cf7b32455c95d72aa80de"
+    },
+    {
+      "path": "vibearr_runner/factory_generation.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "87e118339fc9f306d52c7d84316037a02b41896d"
+    },
+    {
+      "path": "vibearr_runner/factory_lifecycle.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "3b12db8054a9269cab0c89952cb5f91dd8d7bdcd"
+    },
+    {
+      "path": "vibearr_runner/factory_recovery.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a5951aafe6ba7df99cf300212065819c5805849c"
+    },
+    {
+      "path": "vibearr_runner/factory_reviews.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "a5834b53953aeae7b1ae4706f48e78415fb0c1ea"
+    },
+    {
+      "path": "vibearr_runner/factory_roles.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d397d061dbb5318b3f360abc7ce3a7106194109e"
+    },
+    {
+      "path": "vibearr_runner/factory_routing.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "579e59ab8a0cb1ca661e330b1bf2675fe5f52cc7"
+    },
+    {
+      "path": "vibearr_runner/factory_scenarios.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "672ad1e130362cf0d11e4e8b725215b689daa327"
+    },
+    {
+      "path": "vibearr_runner/native_claude.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "9900715085455d3ad4a54cb98d25a9854c26293a"
+    },
+    {
+      "path": "vibearr_runner/native_cli.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "430349fa8816e048a1dd956ab3cfc3036873fe85"
+    },
+    {
+      "path": "vibearr_runner/native_conformance.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "0a27b41415d76597612d4d51bc82b0eef478590a"
+    },
+    {
+      "path": "vibearr_runner/native_contract.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "53b40c8b7a6d37edb7c71bdd9e7a36a2c7b8de3e"
+    },
+    {
+      "path": "vibearr_runner/native_delivery.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "271227c0e93074fb19e4b7d0daf9af1f4d5790b7"
+    },
+    {
+      "path": "vibearr_runner/native_lifecycle.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d57d7af9fb7303cda45fd6119eb10f0fc11eb7c9"
+    },
+    {
+      "path": "vibearr_runner/native_merge.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "51c8d0fd72d9c39734905fd79af262d000c339d9"
+    },
+    {
+      "path": "vibearr_runner/native_opencode.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "01d947ca0ab0c313307192593dc0884ed7fe598a"
+    },
+    {
+      "path": "vibearr_runner/native_preflight.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d3a3c167f0fa5a3525ff4178e1c562b6043a7f39"
+    },
+    {
+      "path": "vibearr_runner/native_revision.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "2fd082c4cdcc6d6bb2ce430f97a197dc8d2f0be1"
+    },
+    {
+      "path": "vibearr_runner/native_runtime.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "cce6534b7b57cf64c26c240e4b51b062fb04bd55"
+    },
+    {
+      "path": "vibearr_runner/native_sessions.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "316d27384e1154f200fbfc314e0a9bfcd55b393d"
+    },
+    {
+      "path": "vibearr_runner/native_validation.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "54d18b849945d4a58ae316e3a4267ed0d7c95ede"
+    },
+    {
+      "path": "work_queue/management/commands/run_scheduler.py",
+      "mode": "100644",
+      "type": "blob",
+      "blob": "1b2948975e60550f842c3b77624058313cb6d060"
+    }
+  ]
+}
