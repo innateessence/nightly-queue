@@ -21,15 +21,36 @@ it alone when everything is working.
    must pass before a change can be delivered.
 2. **Add work.** Write a GitHub issue or submit a task from the queue. Give it a
    clear outcome and any acceptance criteria the agent will need.
-3. **Let the queue run.** The worker picks up eligible work during its processing
-   window, prepares an isolated checkout, and gives the agent the issue context.
-4. **Check the result.** The agent implements the change and runs validation.
-   Failed checks get a bounded repair attempt; unresolved failures stay visible.
-5. **Deliver the change.** Passing work becomes a pull request linked to the
-   original issue. Projects configured for automatic merge can finish the job
-   once the required GitHub checks pass.
+3. **Scope the work.** The target runner performs intake, records risk and affected
+   surfaces, and saves a specification with acceptance criteria.
+4. **Build and review.** A builder implements the spec in an isolated workspace.
+   Trusted checks run before separate code review and any required security, UX
+   or UI reviews. Failures return to the builder within a shared repair budget.
+5. **Deliver the change.** The supervisor verifies the checks and reviews, then
+   publishes one pull request linked to the issue, with check and review evidence.
+   A human reviews and merges it after the required GitHub checks pass.
 
-Routine work should finish without approval prompts. Connecting a project sets
+This is the planned [Codex-first software factory](docs/software-factory-plan.md),
+inspired by the ZazenCodes v2 workflow. Codex implements the full role pipeline
+first; Claude Code and OpenCode follow the same contract. Intake, routed reviews
+and round artifacts remain implementation work, and live execution stays disabled
+until Docker qualification passes.
+
+The release target is **four always-on containers**: app, PostgreSQL, runner and
+one execution worker. The app handles issue-import scheduling; runner owns account
+and network mediation; worker runs setup, coding, reviews, checks and disposable
+test/browser processes sequentially. Celery/Beat, Valkey and the separate gateway,
+proxy, account and test-database containers are being removed from the target.
+This simplification is planned implementation work in
+[S1–S4](docs/docker-only-runtime-plan.md#required-simplification-branches), not a
+claim that the current Compose stack already has four containers.
+
+Human merging is required through the MVP and factory rollout. Automatic merging
+is deferred until sustained operation demonstrates maturity and a human explicitly
+approves a separate rollout; agent review never grants merge permission.
+
+Routine execution through PR delivery should finish without command or plan
+approval prompts. Connecting a project sets
 the boundaries for its agents: which issues they can work on, what they can
 access, how long they can run, and how changes are delivered. Setup, investigation,
 editing, and tests happen inside those boundaries. Work that cannot proceed
@@ -64,7 +85,7 @@ vibearr's own GitHub issue tracker is its development backlog. The intended
 loop is the same one used for any other project:
 
 ```text
-Issue → Queue → Agent → Tests → Pull request → Merge
+Issue → Intake → Spec → Build → Checks → Reviews → Decision → PR → Human merge
 ```
 
 Each feature gets its own issue, branch, and PR. Dependencies keep later features
@@ -74,12 +95,15 @@ Automatic updates extend it from merged code to the running installation.
 
 The [development plan](docs/autonomous-ai-queue-plan.md) lays out the implementation
 milestones: the application rename, autonomous execution, an isolated runtime,
-native agent integrations, issue selection, automatic merging, the operations UI,
-and self-updates.
+native agent integrations, issue selection, human-reviewed delivery, the factory role
+pipeline, the operations UI, and self-updates. The
+[factory branch sequence](docs/software-factory-plan.md#branch-sequence-and-acceptance)
+defines F1–F8 and their acceptance gates.
 
 The [MVP release contract](docs/vibearr-mvp.md) defines the first complete loop:
-two dependent issues implemented, tested, and merged automatically, with the second
-starting from the first change. That is the starting point for building vibearr
+two dependent issues implemented and tested automatically, with a human merging
+each PR and the second starting from the first verified merge. That is the
+starting point for building vibearr
 through its own queue.
 
 For existing installations, follow the [vibearr upgrade guide](docs/vibearr-upgrade.md)
@@ -92,6 +116,10 @@ port **7777** by default. Every service, worker, test, browser and operational t
 runs in a container. The [Docker-only runtime plan](docs/docker-only-runtime-plan.md)
 defines the complete worker stack and its qualification gates. Autonomous execution
 stays disabled until that container boundary is implemented and verified.
+
+The commands below describe the current Compose implementation. The compact
+four-container deployment requires S1–S4; this documentation PR does not replace
+Compose services or change an installation.
 
 Copy the environment file and build the images:
 
@@ -167,16 +195,21 @@ errors exit nonzero. The compatibility `nq` module is also available in the imag
 
 ## How it fits together
 
-Django owns the queue, settings, credentials, and run history. Celery and Beat
-discover GitHub issues. The independent runner claims work over HTTP and owns
-agent processes, task workspaces, validation, and Git delivery. PostgreSQL stores
-application data; Valkey supports the background task services.
+In the compact target, Django owns the queue, settings, credentials and run history.
+One supervised import loop in the app discovers GitHub issues using existing
+services and database leases. Production PostgreSQL stores application data. The
+independent runner claims work over HTTP and owns private state, selected backend
+accounts, scoped egress and Git/PR delivery. It calls one authenticated worker
+directly; no gateway or Docker daemon access is needed.
 
-The Docker-only target gives the runner its own image and state volume. It calls
-authenticated preprovisioned worker slots, with no Docker daemon access. Released
-images contain source; workspaces and artifacts stay in named volumes and bounded
-tmpfs. Agents cannot access host paths, controller journals or production data. GitHub issue text and repository content describe the task; they
-cannot grant new permissions.
+The worker switches between setup, agent/reviewer and trusted validation phases,
+with fresh source, credentials and local test databases for each phase. Browser
+and test-service subprocesses run inside that worker only while needed. Images
+contain pinned tools and released source; state stays in named volumes/bounded
+tmpfs. Candidate code cannot access host paths, controller journals, publication
+credentials or production data. GitHub issue text and repository content describe
+the task; they cannot grant new permissions. The existing larger Compose topology
+must be replaced and these boundaries requalified before release.
 
 | Directory | Responsibility |
 | --- | --- |
@@ -186,7 +219,7 @@ cannot grant new permissions.
 | `runner_control/` | Runner APIs, configuration, run records, and operator views |
 | `vibearr_runner/` | Independent supervisor, backends, workspaces, recovery, and delivery |
 | `vibearr/` | Standalone command-line client |
-| `vibearr_app/` | Django and Celery configuration |
+| `vibearr_app/` | Django and current Celery configuration; S1 replaces background scheduling |
 
 ## Development
 
@@ -215,8 +248,9 @@ Python, pip, Git task execution, browsers, services or package installation.
 
 Native agent integrations use pinned CLI images and explicitly selected connections.
 [Native Codex](docs/native-codex.md), [unattended execution](docs/native-queue.md),
-[validation](docs/isolated-validation.md) and [automatic merge](docs/automatic-merge.md)
-describe the retained contracts. Their host-launcher implementation references
+[validation](docs/isolated-validation.md) describe the retained contracts.
+[Automatic merge](docs/automatic-merge.md) is a deferred capability and must stay
+disabled during this rollout. Their host-launcher implementation references
 cannot qualify Docker-only execution. D1–D4 must pass the actual worker boundary
 and dependent two-issue scenario before enabling claims.
 
