@@ -181,12 +181,6 @@
       "blob": "f446197c19497fdcbd9dbbdb1791f89ab9a133ab"
     },
     {
-      "path": "deploy/docker/checks.sh",
-      "mode": "100755",
-      "type": "blob",
-      "blob": "21357279117cb0702eaf463de13fbf894aefad8a"
-    },
-    {
       "path": "deploy/docker/dependency_smoke.py",
       "mode": "100644",
       "type": "blob",
@@ -209,12 +203,6 @@
       "mode": "100644",
       "type": "blob",
       "blob": "b9d022c2676822c39b8f8846a83018c6b7706c17"
-    },
-    {
-      "path": "deploy/docker/test_check_commands.py",
-      "mode": "100644",
-      "type": "blob",
-      "blob": "5f164603ca6370e35a029ccd153a7478d3b126bf"
     },
     {
       "path": "docker-compose.yml",
