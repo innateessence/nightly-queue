@@ -1,6 +1,7 @@
 import hashlib
 import ipaddress
 import json
+import math
 import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -182,6 +183,39 @@ class Manifest:
 
     @classmethod
     def parse(cls, data: Any, profile: Profile) -> "Manifest":
+        return cls._parse(data, profile, datetime.now(timezone.utc))
+
+    @classmethod
+    def parse_archived(cls, data: Any, profile: Profile, started_at: Any) -> "Manifest":
+        """Validate only after the completed record's receipt and identity checks."""
+        return cls._parse_observed(data, profile, started_at)
+
+    @classmethod
+    def parse_reconciled(cls, data: Any, profile: Profile, ended_at: Any) -> "Manifest":
+        """Validate only an authenticated restart receipt without a recorded start."""
+        return cls._parse_observed(data, profile, ended_at)
+
+    @classmethod
+    def _parse_observed(
+        cls, data: Any, profile: Profile, observed_at: Any
+    ) -> "Manifest":
+        if (
+            type(observed_at) not in (int, float)
+            or observed_at <= 0
+            or observed_at >= 253402300800
+            or not math.isfinite(observed_at)
+        ):
+            raise Rejected(
+                "Historical validation requires a sealed observation timestamp."
+            )
+        try:
+            admitted = datetime.fromtimestamp(observed_at, timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            raise Rejected("Historical operation timestamp is invalid.") from None
+        return cls._parse(data, profile, admitted)
+
+    @classmethod
+    def _parse(cls, data: Any, profile: Profile, admitted: datetime) -> "Manifest":
         if not isinstance(data, dict) or set(data) != set(cls.__dataclass_fields__):
             raise Rejected(
                 "Supply the complete versioned job manifest; commands and mounts are forbidden."
@@ -205,7 +239,7 @@ class Manifest:
             raise Rejected("Requested resources exceed the registered profile.")
         try:
             deadline = datetime.fromisoformat(data["deadline"])
-            remaining = (deadline - datetime.now(timezone.utc)).total_seconds()
+            remaining = (deadline - admitted).total_seconds()
         except (TypeError, ValueError):
             raise Rejected("Deadline must be a timezone-aware ISO timestamp.") from None
         if not 0 < remaining <= 3600:

@@ -12,6 +12,7 @@ from .native_resources import NativeResources
 from .native_sessions import NativeBackendRegistry, NativeSession, NativeSessionError
 from .policy import ExecutionPolicy
 from .workspaces import WorkspaceError
+from .factory_delivery import require_human_delivery
 
 
 def now():
@@ -78,9 +79,15 @@ class NativePreflight:
             data["projects"][str(project_id)] = report
             try:
                 policy = ExecutionPolicy.from_data(project["execution_policy"])
+                require_human_delivery(policy)
                 validation = validation_diagnostics(policy, self.executor, self.profile)
                 if validation.get("ready") is not True:
                     raise NativeSessionError(validation["reason"])
+                from .factory_routing import require_factory_capabilities
+
+                require_factory_capabilities(
+                    project["effective"].get("factory"), self.executor.capabilities()
+                )
                 repository_grant = self.selected_grant(project, "repository")
                 report["repository"] = self.github_check(repository_grant, project)
                 if policy.delivery_mode == "merge":

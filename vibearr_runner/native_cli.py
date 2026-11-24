@@ -16,6 +16,7 @@ from .native_codex import (
 from .native_sessions import NativeSession, NativeSessionError
 from .policy import ExecutionPolicy
 from .opencode_connection import valid_model
+from .native_claude import consume_claude
 
 
 class NativeEvents(CodexEvents):
@@ -53,6 +54,12 @@ class NativeEvents(CodexEvents):
         return "Selected native CLI failed; inspect its protected diagnostics before retrying."
 
     def line(self, line):
+        if self.provider == "claude":
+            return consume_claude(self, line)
+        if self.provider == "opencode":
+            from .native_opencode import consume
+
+            return consume(self, line)
         if self.provider == "codex":
             try:
                 event = json.loads(line)
@@ -162,16 +169,11 @@ class NativeCLIAdapter(NativeCodexAdapter):
                 "Select a runner subscription login or external Ollama connection."
             )
         if self.provider == "opencode":
-            from vibearr_executor.ollama_relay import external_endpoint
+            from .native_opencode import connection
 
-            connection = json.loads(credential["material"]["secret"])
-            if connection["provider"] != "ollama" or connection.get("api_key"):
-                raise NativeSessionError(
-                    "OpenCode requires external Ollama without cloud API keys."
-                )
             return {
                 "provider": "opencode",
-                "endpoint": external_endpoint(connection["base_url"]),
+                "endpoint": connection(credential["material"]["secret"]),
                 "credential_id": reference["id"],
             }
         return {"provider": self.provider, "credential_id": reference["id"]}
@@ -215,8 +217,10 @@ class NativeCLIAdapter(NativeCodexAdapter):
             return profile
         raise NativeSessionError("Selected native runner profile is unavailable.")
 
-    def context(self, account, prompt, kind):
-        return {
+    def context(
+        self, account, prompt, kind, *, factory_role=None, browser_capture=None
+    ):
+        value = {
             "schema_version": 1,
             "adapter": self.provider,
             "model": account["model"],
@@ -225,6 +229,19 @@ class NativeCLIAdapter(NativeCodexAdapter):
             "account_digest": digest(canonical(account)),
             "credential_id": account["credential_id"],
         }
+        if factory_role is not None:
+            from .native_conformance import FACTORY_ROLES
+
+            if factory_role not in FACTORY_ROLES:
+                raise NativeSessionError("Unknown native factory role.")
+            value["factory_role"] = factory_role
+        if browser_capture is not None:
+            from .native_conformance import validate_browser_capture
+
+            value["browser_capture"] = validate_browser_capture(
+                factory_role, browser_capture
+            )
+        return value
 
     def prepare(
         self,
@@ -237,6 +254,8 @@ class NativeCLIAdapter(NativeCodexAdapter):
         policy,
         deadline,
         credential,
+        factory_role=None,
+        browser_capture=None,
     ):
         if not valid_model(model):
             raise NativeSessionError(
@@ -259,7 +278,15 @@ class NativeCLIAdapter(NativeCodexAdapter):
             "credential_version": reference["version"],
             "model": model,
         }
-        context = canonical(self.context(account, prompt, reference["kind"]))
+        context = canonical(
+            self.context(
+                account,
+                prompt,
+                reference["kind"],
+                factory_role=factory_role,
+                browser_capture=browser_capture,
+            )
+        )
         manifest = {
             "schema_version": 1,
             "run_id": run_id,
