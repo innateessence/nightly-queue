@@ -1,0 +1,92 @@
+{
+  "schema_version": 3,
+  "kind": "compact-worker-browser-acceptance",
+  "browser": "chromium",
+  "fixture_only": true,
+  "source_binding": {
+    "application_image": "sha256:940d0bb06a9e39de45005538850b101a86c605c0d125164c233378d14e800949",
+    "browser_image": "sha256:940d0bb06a9e39de45005538850b101a86c605c0d125164c233378d14e800949",
+    "revision": "b8551191d87d252538346b0412110578afaa7198",
+    "schema_version": 1,
+    "source_digest": "879982273b5f22b6a23fdbbd0e82b11c5ddba5552f224862d3a8af522e07e46e",
+    "tree_sha": "e9cac7aa6fcd90ecf353b8c03c9aad9d933f166b"
+  },
+  "worker_binding": {
+    "execution_identity": {
+      "binding_digest": "e56dde176751d37a573cf0bd49d8c0924dd9743762d02f4cd986653aacd754ce",
+      "instance_id": "d2724c74-1c83-4695-ad57-92acaf7867c7",
+      "protocol_version": 2,
+      "runtime": "compact-worker-v1",
+      "worker_boot": "c0a5d5e8-70c0-4ae0-862c-f63cf7d2e5db"
+    },
+    "operation_id": "97219020-380d-4162-b138-4c813a322695",
+    "profile_digest": "e4e20f59c6f7d423534c87d8e0700fb2ff606138ba0b616d948593cbaca7c5dc",
+    "profile_id": "browser-ui",
+    "run_id": "6334cbab-27b6-435b-be66-7457ce6cb097"
+  },
+  "boundary_checks": {
+    "control_paths_denied": true,
+    "credentials_scoped": true,
+    "source_write_denied": true
+  },
+  "page_errors": [],
+  "failed_requests": [],
+  "screenshots": [
+    {
+      "file": "queue-desktop-light.png",
+      "sha256": "87f8a3d6b261a1d110f6b6ce007d112c7e7763d81d937c760401ec9e19a98e36",
+      "bytes": 309507,
+      "captured_at": "2026-11-23T01:43:31.779656+00:00",
+      "viewport": {
+        "height": 1000,
+        "width": 1440
+      },
+      "theme": "light",
+      "fixture_path": "/runner/runs/00000000-0000-4000-8000-000000000002/?theme=light",
+      "capture_path": "/screenshots/capture-46e69cf6511f410db731b70942263841/queue-desktop-light.png",
+      "full_page": true
+    },
+    {
+      "file": "queue-desktop-dark.png",
+      "sha256": "8afbf49db64db88efa8f61c5366cc65aad4f3954817456a3f9bc8f5ef3a173cc",
+      "bytes": 316254,
+      "captured_at": "2026-11-23T01:43:32.460489+00:00",
+      "viewport": {
+        "height": 1000,
+        "width": 1440
+      },
+      "theme": "dark",
+      "fixture_path": "/runner/runs/00000000-0000-4000-8000-000000000002/?theme=dark",
+      "capture_path": "/screenshots/capture-46e69cf6511f410db731b70942263841/queue-desktop-dark.png",
+      "full_page": true
+    },
+    {
+      "file": "queue-mobile-light.png",
+      "sha256": "ff65e4c4144f75d1cf16ae636ab4d3afc8ff01034e213199f66833b590bc2486",
+      "bytes": 271094,
+      "captured_at": "2026-11-23T01:43:33.121579+00:00",
+      "viewport": {
+        "height": 844,
+        "width": 390
+      },
+      "theme": "light",
+      "fixture_path": "/runner/runs/00000000-0000-4000-8000-000000000002/?theme=light",
+      "capture_path": "/screenshots/capture-46e69cf6511f410db731b70942263841/queue-mobile-light.png",
+      "full_page": true
+    },
+    {
+      "file": "queue-mobile-dark.png",
+      "sha256": "3b8b943adeadf746afed93b2808e8cf99cf6854ddeb07cda393b29420efc2984",
+      "bytes": 278187,
+      "captured_at": "2026-11-23T01:43:34.112717+00:00",
+      "viewport": {
+        "height": 844,
+        "width": 390
+      },
+      "theme": "dark",
+      "fixture_path": "/runner/runs/00000000-0000-4000-8000-000000000002/?theme=dark",
+      "capture_path": "/screenshots/capture-46e69cf6511f410db731b70942263841/queue-mobile-dark.png",
+      "full_page": true
+    }
+  ]
+}

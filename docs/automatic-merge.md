@@ -1,5 +1,13 @@
 # Automatic PR merge
 
+> **Deferred capability — human merges required (2026-11-22):** The
+> [current factory plan](software-factory-plan.md#later-automatic-merge-maturity-gate)
+> and [MVP contract](vibearr-mvp.md) require a human to review and merge every PR.
+> Keep `delivery_mode: "pull_request"` and GitHub auto-merge disabled. This document
+> preserves implementation detail for a later explicitly approved rollout after
+> sustained maturity evidence. Its setup commands are not rollout authorization,
+> and its historical autonomous-MVP acceptance below is superseded.
+
 > **Docker-only runtime requirement:** Follow the [Docker-only runtime plan](docker-only-runtime-plan.md)
 > and [deployment contract](mvp-deployment.md). Every Python, Git, coding CLI,
 > packaging, test, qualification and browser command in this reference executes
