@@ -32,13 +32,14 @@ services:
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY-}"
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
-      VIBEARR_RUNTIME_PROTOCOL: integrated-runner-v1
+      VIBEARR_RUNTIME_PROTOCOL: compact-worker-v1
       VIBEARR_RUNNER_NAME: "${VIBEARR_RUNNER_NAME:-docker-runner}"
     ports: ["${VIBEARR_BIND:-127.0.0.1}:${PORT:-7777}:8000"]
     volumes:
       - application-secrets:/run/vibearr/application
       - database-secrets:/run/vibearr/database
       - runner-secrets:/run/vibearr/runner
+      - worker-secrets:/run/vibearr/worker
       - postgres-data:/var/lib/existing-postgres:ro
     networks:
       database: {}
@@ -81,6 +82,51 @@ services:
     build: {context: ., target: runner}
     image: "${VIBEARR_RUNNER_IMAGE:-vibearr-runner:local}"
     user: "0:0"
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETUID, SETGID]
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1
+    tmpfs:
+      - "/tmp:rw,nosuid,nodev,size=64m,mode=1777"
+      - "/login-work:rw,nosuid,nodev,exec,size=128m,mode=0711"
+    environment:
+      VIBEARR_URL: http://app:8000
+      VIBEARR_RUNNER_STATE_DIR: /var/lib/vibearr
+      VIBEARR_RUNNER_API_TOKEN_FILE: /run/vibearr/runner/api-token
+      VIBEARR_RUNNER_IMAGE_ID: "${VIBEARR_RUNNER_IMAGE_ID:-}"
+      VIBEARR_WORKER_IMAGE_ID: "${VIBEARR_WORKER_IMAGE_ID:-}"
+      VIBEARR_RUNTIME_PROTOCOL: compact-worker-v1
+      VIBEARR_EXECUTOR_URL: http://worker:8791
+      VIBEARR_EXECUTOR_TOKEN_FILE: /run/vibearr/worker/control-token
+      VIBEARR_MEDIATION_TOKEN_FILE: /run/vibearr/worker/mediation-token
+      VIBEARR_MEDIATION_CONTROLLER_TOKEN_FILE: /var/lib/vibearr/mediation-controller-token
+    volumes:
+      - runner-data:/var/lib/vibearr
+      - runner-data:/var/lib/coding-runner
+      - runner-secrets:/run/vibearr/runner
+      - worker-secrets:/run/vibearr/worker:ro
+      - runner-logins:/logins
+    networks: [runner-api, worker-control, runner-egress]
+    depends_on:
+      app: {condition: service_healthy}
+      worker: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -I, -m, vibearr_runner.compact_connections, health]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
+
+  worker:
+    <<: *security
+    build:
+      context: .
+      dockerfile: vibearr_executor/Worker.Dockerfile
+      args:
+        RUNTIME_IMAGE: "${VIBEARR_WORKER_BASE_IMAGE:-vibearr-worker-base:local}"
+        RUNTIME_IMAGE_ID: "${VIBEARR_WORKER_BASE_IMAGE_ID:-}"
+    image: "${VIBEARR_WORKER_IMAGE:-vibearr-worker:local}"
+    user: "0:0"
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETUID, SETGID, SETPCAP, NET_ADMIN]
     mem_limit: 4096m
     memswap_limit: 4096m
@@ -93,22 +139,21 @@ services:
       - "/secrets:rw,nosuid,nodev,noexec,size=64k,mode=0711"
       - "/opt/candidate:rw,nosuid,nodev,exec,size=512m,mode=0755"
       - "/test-database:rw,nosuid,nodev,noexec,size=1024m,mode=0700"
-      - "/login-work:rw,nosuid,nodev,exec,size=128m,mode=0711"
+      - "/browser-services:rw,nosuid,nodev,exec,size=128m,mode=0711"
     environment:
-      VIBEARR_URL: http://app:8000
-      VIBEARR_RUNNER_IMAGE_ID: "${VIBEARR_RUNNER_IMAGE_ID:-}"
-      VIBEARR_RUNTIME_PROTOCOL: integrated-runner-v1
+      VIBEARR_WORKER_IMAGE_ID: "${VIBEARR_WORKER_IMAGE_ID:-}"
+      VIBEARR_RUNTIME_PROTOCOL: compact-worker-v1
+      VIBEARR_EXECUTOR_TOKEN_FILE: /run/vibearr/worker/control-token
+      VIBEARR_MEDIATION_URL: http://runner:8792
+      VIBEARR_MEDIATION_TOKEN_FILE: /run/vibearr/worker/mediation-token
     volumes:
-      - runner-data:/var/lib/vibearr
-      - runner-data:/var/lib/coding-runner
-      - runner-control:/control
-      - runner-secrets:/run/vibearr/runner
-      - runner-logins:/logins
-    networks: [runner-api, runner-egress]
+      - worker-control:/control
+      - worker-secrets:/run/vibearr/worker:ro
+    networks: [worker-control]
     depends_on:
       app: {condition: service_healthy}
     healthcheck:
-      test: [CMD, python, -I, -m, vibearr_executor.integrated_health]
+      test: [CMD, python, -I, -m, vibearr_executor.compact_worker, health]
       interval: 10s
       timeout: 5s
       start_period: 20s
@@ -117,6 +162,7 @@ services:
 networks:
   database: {internal: true}
   runner-api: {internal: true}
+  worker-control: {internal: true}
   app-egress:
   runner-egress:
 
@@ -130,3 +176,5 @@ volumes:
     name: "${VIBEARR_DATA_PROJECT:-${COMPOSE_PROJECT_NAME:-nightly-queue}}_runner-data"
   runner-control:
   runner-logins:
+  worker-control:
+  worker-secrets:

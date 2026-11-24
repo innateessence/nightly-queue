@@ -190,6 +190,16 @@ class NativePreflightTests(unittest.TestCase):
         self.assertEqual(self.adapter.prepared, [])
         self.assertEqual(len(self.queue.calls), 1)
 
+    def test_merge_policy_is_rejected_before_secrets_or_paid_probe(self):
+        for project in self.configuration["projects"]:
+            project["execution_policy"]["delivery_mode"] = "merge"
+        self.assertEqual(self.preflight.select(self.configuration, self.state), [])
+        self.assertEqual(self.adapter.prepared, [])
+        self.assertEqual(self.adapter.starts, [])
+        self.assertEqual(len(self.queue.calls), 1)
+        for report in self.state["native_preflight"]["projects"].values():
+            self.assertIn("human", report["reason"])
+
     def test_eligible_projects_share_one_journaled_authentication_operation(self):
         self.assertEqual(self.preflight.select(self.configuration, self.state), [])
         self.assertEqual(len(self.adapter.starts), 1)

@@ -3,6 +3,7 @@ import hashlib
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from functools import wraps
 from threading import Barrier
 from unittest.mock import Mock, patch
 from uuid import UUID, uuid4, uuid5
@@ -23,11 +24,28 @@ from work_queue.models import MergeEvidence, QueueItem
 from .configuration import configuration_document
 from .merge_services import provider_completed, provider_merged, reserve_fence
 from .models import RepositoryMergeFence, Run, RunnerIdentity
+from .plan_models import ContextSnapshot, PlanVersion
 from .native_services import authorize, check_workspace
 from .secrets import secret_document
 from .services import RunConflict, finish_run
 from .settings_models import RunnerSettings
 from .test_native_protocol import NativeProtocolMixin
+
+
+def historical_fixture(operation):
+    """Load pre-rollout transcripts directly while runtime authorization stays active."""
+
+    @wraps(operation)
+    def load(self, *args, **kwargs):
+        previous = getattr(self, "loading_history", False)
+        self.loading_history = True
+        try:
+            return operation(self, *args, **kwargs)
+        finally:
+            self.loading_history = previous
+            self.run.refresh_from_db()
+
+    return load
 
 
 def trusted_profile(repository_id=123, *, reviews=False):
@@ -61,6 +79,40 @@ def trusted_profile(repository_id=123, *, reviews=False):
 
 
 class MergeProtocolMixin(NativeProtocolMixin):
+    def write(self, kind, payload, operation_id=None):
+        if not getattr(self, "loading_history", False):
+            return super().write(kind, payload, operation_id)
+        contract.validate_native_artifact(kind, payload)
+        identity = operation_id or uuid4()
+        entry = self.run.evidence.create(
+            operation_id=identity, kind=kind, payload=payload
+        )
+        if (
+            kind == "native_intent"
+            and payload["kind"] == "merge"
+            and payload["data"]["stage"] == "merge"
+        ):
+            reserve_fence(self.run, payload["data"], identity)
+        if kind == "native_merge" and self.item.source == "github":
+            from work_queue.services import record_verified_merge
+
+            record_verified_merge(
+                repository_id=123,
+                issue_number=1,
+                pull_number=9,
+                merge_sha=payload["merge"]["commit_sha"],
+                merged_at=contract.timestamp(payload["merge"]["merged_at"]),
+                provenance="github:merge:v1",
+                operation_id=f"native-merge:{self.run.pk}:{payload['publication_id']}",
+            )
+        if kind == "native_completion":
+            RepositoryMergeFence.objects.filter(run=self.run).update(state="completed")
+        return entry
+
+    @historical_fixture
+    def complete_delivery(self):
+        return super().complete_delivery()
+
     def setUp(self):
         super().setUp()
         saved = RunnerSettings.objects.get(pk=1)
@@ -142,7 +194,47 @@ class MergeProtocolMixin(NativeProtocolMixin):
     def prepare_context(self):
         self.run.source_snapshot["repository_id"] = 123
         self.run.save(update_fields=["source_snapshot"])
-        with patch("runner_control.test_native_protocol.refresh_issue_for_launch"):
+
+        def saved_context(**values):
+            document = values["document"]
+            result = ContextSnapshot.objects.create(
+                run=self.run,
+                operation_id=values["operation_id"],
+                sequence=1,
+                document=document,
+                digest=contract.digest(document),
+                reason="Historical fixture",
+                discussion_digest=contract.digest(document["source"]),
+                inspected_base_commit=values["base_commit"],
+                resolved_base_branch=values["resolved_base_branch"],
+            )
+            Run.objects.filter(pk=self.run.pk).update(context_reference=str(result.pk))
+            return result
+
+        def saved_plan(**values):
+            document = values["document"]
+            result = PlanVersion.objects.create(
+                run=self.run,
+                context=self.context,
+                operation_id=values["operation_id"],
+                version=1,
+                document=document,
+                digest=contract.digest(document),
+                reason="Historical fixture",
+            )
+            Run.objects.filter(pk=self.run.pk).update(plan_reference=str(result.pk))
+            return result
+
+        with (
+            patch("runner_control.test_native_protocol.refresh_issue_for_launch"),
+            patch(
+                "runner_control.test_native_protocol.save_context",
+                side_effect=saved_context,
+            ),
+            patch(
+                "runner_control.test_native_protocol.save_plan", side_effect=saved_plan
+            ),
+        ):
             super().prepare_context()
 
     def receipt(self):
@@ -218,6 +310,7 @@ class MergeProtocolMixin(NativeProtocolMixin):
             },
         )
 
+    @historical_fixture
     def start_merge(self):
         self.complete_delivery()
         payload = self.merge_intent()
@@ -228,6 +321,7 @@ class MergeProtocolMixin(NativeProtocolMixin):
             self.merge_intent_entry = self.write("native_intent", payload)
         self.intent_ids.append(str(self.merge_intent_entry.operation_id))
 
+    @historical_fixture
     def complete_merge(self):
         self.start_merge()
         self.merged = {
@@ -247,6 +341,7 @@ class MergeProtocolMixin(NativeProtocolMixin):
         with patch("runner_control.merge_services.provider_merged"):
             self.write("native_merge", self.merged)
 
+    @historical_fixture
     def complete_reporting(self):
         self.complete_merge()
         intents = []
@@ -316,6 +411,7 @@ class MergeProtocolMixin(NativeProtocolMixin):
             },
         )
 
+    @historical_fixture
     def complete_revision(self):
         self.complete_delivery()
         value = self.revision_intent()
@@ -345,6 +441,7 @@ class MergeProtocolMixin(NativeProtocolMixin):
         self.revision_entry = self.write("native_revision", result)
         return result
 
+    @historical_fixture
     def local_validation(self, workspace, *, archive=None, finished=True):
         archive = self.changed if archive is None else archive
         candidate = workspace.payload
@@ -416,6 +513,7 @@ class MergeProtocolMixin(NativeProtocolMixin):
             workspace_id=str(workspace.operation_id),
         )
 
+    @historical_fixture
     def remote_repair_candidate(self):
         self.complete_delivery()
         revision = self.revision_intent(reason="ci_repair")
@@ -500,25 +598,20 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
         )
         self.assertFalse(self.run.evidence.filter(kind="native_review").exists())
 
-    def test_failed_local_validation_after_base_update_allows_remaining_agent_repair(
+    def test_failed_local_validation_after_base_update_rejects_new_automatic_work(
         self,
     ):
         self.complete_revision()
         validation = self.local_validation(self.revision_entry)
         self.assertEqual(validation.payload["state"], "failed")
         self.assertEqual(len(validation.payload["checks"]), 9)
-        accepted = self.write(
-            "native_intent", self.repair_invocation(self.revision_entry)
-        )
-        self.assertEqual(accepted.payload["attempt"], 2)
-        self.assertEqual(
-            accepted.payload["data"]["session"]["manifest"]["deadline"], self.deadline
-        )
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
+            self.write("native_intent", self.repair_invocation(self.revision_entry))
         self.assertEqual(
             self.run.evidence.filter(
                 kind="native_intent", payload__kind="agent"
             ).count(),
-            2,
+            1,
         )
         self.assertFalse(
             self.run.evidence.filter(
@@ -526,7 +619,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
             ).exists()
         )
 
-    def test_failed_local_validation_after_remote_ci_repair_allows_remaining_repair(
+    def test_failed_local_validation_after_remote_ci_repair_rejects_new_automatic_work(
         self,
     ):
         workspace, archive = self.remote_repair_candidate()
@@ -535,36 +628,31 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
             entry for entry in validation.payload["checks"] if entry["id"] == "cli"
         )
         self.assertEqual(cli["receipt"]["exit_code"], 1)
-        accepted = self.write("native_intent", self.repair_invocation(workspace))
-        self.assertEqual(accepted.payload["attempt"], 2)
-        self.assertEqual(
-            accepted.payload["data"]["session"]["manifest"]["deadline"], self.deadline
-        )
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
+            self.write("native_intent", self.repair_invocation(workspace))
         self.assertEqual(
             self.run.evidence.filter(
                 kind="native_intent", payload__kind="agent"
             ).count(),
-            3,
+            2,
         )
 
     def test_unpublished_revision_cannot_start_repair_without_failed_validation(self):
         self.complete_revision()
-        with self.assertRaisesMessage(RunConflict, "latest failed local validation"):
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
             self.write("native_intent", self.repair_invocation(self.revision_entry))
 
     def test_pending_latest_validation_cannot_reuse_older_local_failure(self):
         self.complete_revision()
         self.local_validation(self.revision_entry)
         self.local_validation(self.revision_entry, finished=False)
-        with self.assertRaisesMessage(RunConflict, "latest failed local validation"):
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
             self.write("native_intent", self.repair_invocation(self.revision_entry))
 
     def test_published_candidate_still_requires_explicit_remote_repair_intent(self):
         self.complete_delivery()
         self.local_validation(self.workspace_entry)
-        with self.assertRaisesMessage(
-            RunConflict, "explicit publication revision intent"
-        ):
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
             self.write(
                 "native_intent", self.repair_invocation(self.workspace_entry, attempt=1)
             )
@@ -575,7 +663,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
         deadline = (
             datetime.fromisoformat(self.deadline) + timedelta(seconds=60)
         ).isoformat()
-        with self.assertRaisesMessage(RunConflict, "original stage deadline"):
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
             self.write(
                 "native_intent",
                 self.repair_invocation(self.revision_entry, deadline=deadline),
@@ -584,7 +672,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
     def test_local_repair_cannot_use_older_inspected_workspace(self):
         self.complete_revision()
         self.local_validation(self.revision_entry)
-        with self.assertRaisesMessage(RunConflict, "latest inspected workspace"):
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
             self.write("native_intent", self.repair_invocation(self.workspace_entry))
 
     def test_malformed_intent_data_rejects_without_server_error(self):
@@ -608,7 +696,10 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
         saved.save()
         project = configuration_document()["projects"][0]
         self.assertFalse(project["structurally_valid"])
-        self.assertEqual(project["errors"][0]["field"], "merge_profile")
+        self.assertIn("merge_profile", {entry["field"] for entry in project["errors"]})
+        self.assertIn(
+            "human_merge_required", {entry["code"] for entry in project["errors"]}
+        )
 
     def test_pending_repository_fence_blocks_another_merge(self):
         self.complete_delivery()
@@ -625,7 +716,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
             "runner_control.merge_services.provider_authorization",
             return_value=value["data"]["receipt"],
         ):
-            with self.assertRaisesMessage(RunConflict, "pending merge owns"):
+            with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
                 self.write("native_intent", value)
 
     def test_stale_claim_cannot_register_merge(self):
@@ -662,10 +753,12 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
             workspace_id=str(self.revision_entry.operation_id),
             workspace=revision["workspace"],
         )
-        with self.assertRaisesMessage(RunConflict, "validation must pass"):
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
             self.write("native_intent", intent)
 
-    def test_base_only_revision_then_agent_repair_uses_shared_attempt_two(self):
+    def test_historical_base_revision_does_not_authorize_new_revision_or_paid_repair(
+        self,
+    ):
         revision = self.complete_revision()
         self.workspace = revision["workspace"]
         self.workspace_entry = self.revision_entry
@@ -684,8 +777,10 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
         )
         self.pull = pull
         value = self.revision_intent(reason="ci_repair", attempt=2)
-        with patch("runner_control.merge_services.provider_revision"):
-            self.write("native_intent", value)
+        with patch("runner_control.merge_services.provider_revision") as provider:
+            with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
+                self.write("native_intent", value)
+        provider.assert_not_called()
         manifest = {
             **self.session.manifest,
             "operation_id": str(uuid4()),
@@ -697,15 +792,12 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
             session=session,
             workspace_id=str(self.revision_entry.operation_id),
         )
-        accepted = self.write("native_intent", agent)
-        self.assertEqual(accepted.payload["attempt"], 2)
-        self.assertEqual(
-            accepted.payload["data"]["session"]["manifest"]["deadline"], self.deadline
-        )
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
+            self.write("native_intent", agent)
 
     def test_revision_after_merge_attempt_is_forbidden(self):
         self.start_merge()
-        with self.assertRaisesMessage(RunConflict, "merge intent already owns"):
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
             self.write("native_intent", self.revision_intent())
 
     def test_pr_only_delivery_cannot_finish_merge_policy(self):
@@ -743,7 +835,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
             "runner_control.merge_services.provider_authorization",
             return_value=observed,
         ):
-            with self.assertRaisesMessage(RunConflict, "Current provider"):
+            with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
                 self.write("native_intent", value)
         self.assertFalse(RepositoryMergeFence.objects.exists())
 
@@ -752,7 +844,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
         self.complete_delivery()
         value = self.merge_intent()
         value["data"]["receipt"]["reviews"][0]["report"]["head_sha"] = "b" * 40
-        with self.assertRaisesMessage(ValidationError, "exact candidate"):
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
             self.write("native_intent", value)
 
     def test_two_reviews_cannot_reuse_same_ai_session(self):
@@ -761,7 +853,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
         value = self.merge_intent()
         reviews = value["data"]["receipt"]["reviews"]
         reviews[1]["report"]["session_id"] = reviews[0]["report"]["session_id"]
-        with self.assertRaisesMessage(RunConflict, "distinct sessions"):
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
             self.write("native_intent", value)
 
     def test_changed_merge_profile_fences_new_merge(self):
@@ -770,7 +862,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
         saved = RunnerSettings.objects.get(pk=1)
         saved.merge_profile["ci_timeout_seconds"] = 60
         saved.save()
-        with self.assertRaisesMessage(RunConflict, "merge profile changed"):
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
             self.write("native_intent", value)
 
     def test_actual_merge_records_dependency_before_completion(self):
@@ -827,24 +919,27 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
         self.assertEqual(RepositoryMergeFence.objects.get().state, "completed")
         self.assertFalse(MergeEvidence.objects.exists())
 
-    def test_completion_authority_survives_own_issue_close_and_pause(self):
+    def test_historical_merge_does_not_authorize_new_completion_intent_after_pause(
+        self,
+    ):
         self.github_source()
         self.complete_merge()
         QueueItem.objects.filter(pk=self.item.pk).update(issue_state="closed")
         saved = RunnerSettings.objects.get(pk=1)
         saved.paused = True
         saved.save()
-        self.write("native_intent", self.merge_intent("comment"))
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
+            self.write("native_intent", self.merge_intent("comment"))
         grant = secret_document(
             {
-                "scope": "completion",
+                "scope": "reconciliation",
                 "run_id": str(self.run.pk),
                 "claim_token": str(self.claim),
                 "purpose": "repository",
             },
             self.runner,
         )
-        self.assertEqual(grant["access_mode"], "completion-reporting-only")
+        self.assertEqual(grant["access_mode"], "reconciliation-read-only")
 
     def test_completion_scope_requires_actual_merge(self):
         self.start_merge()
@@ -949,7 +1044,7 @@ class AutomaticMergeTests(MergeProtocolMixin, TestCase):
         self.complete_merge()
         self.run.item.refresh_from_db()
         self.run.item.issue_state = "closed"
-        with self.assertRaisesMessage(RunConflict, "Issue is closed"):
+        with self.assertRaisesMessage(RunConflict, "configuration is unavailable"):
             authorize(self.run)
 
 

@@ -224,6 +224,16 @@ class FactoryGenerationTests(unittest.TestCase):
         )
         self.assertNotIn("plan", self.native)
 
+    def test_zero_factory_repair_limit_blocks_base_generation(self):
+        engine = self.engine()
+        engine.snapshot["effective"]["factory"]["max_repairs"] = 0
+        self.native["factory"].pop("recovery")
+        self.recovery().base_changed(self.observation)
+        with self.assertRaisesRegex(BudgetExceeded, "shared repair"):
+            FactoryBaseUpdate(engine).cleanup(self.native["factory_base_update"])
+        self.assertEqual(self.native["attempt"], 0)
+        self.assertEqual(self.native["context"], self.old["context"])
+
     def test_exhausted_repair_budget_cannot_start_a_base_generation(self):
         self.native["attempt"] = 2
         self.native["factory"]["round"] = 3

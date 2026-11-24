@@ -1,4 +1,5 @@
 from datetime import timedelta
+from uuid import uuid4
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -20,6 +21,8 @@ PRESERVED_EVIDENCE = {
     "cancellation",
     "finish",
     "release",
+    "factory_retention",
+    "publication_observation",
 }
 PRESERVED_EVIDENCE.update(ARTIFACT_KINDS)
 
@@ -175,8 +178,21 @@ def purge_run(run_id, now=None):
         if not run.approvals.exists() and retention.documents_removed_at is None:
             plans = PlanVersion.objects.filter(run=run)
             contexts = ContextSnapshot.objects.filter(run=run)
-            count = plans.count() + contexts.count()
+            artifacts = run.factory_artifacts.all()
+            summaries = list(artifacts.values("sequence", "role", "round", "digest"))
+            count = plans.count() + contexts.count() + len(summaries)
+            if summaries:
+                run.evidence.create(
+                    operation_id=uuid4(),
+                    kind="factory_retention",
+                    payload={
+                        "schema_version": 1,
+                        "count": len(summaries),
+                        "digest": digest(summaries),
+                    },
+                )
             # Reverse version references are removed together; external references still PROTECT.
+            models.QuerySet.delete(artifacts)
             models.QuerySet.update(plans, supersedes=None)
             models.QuerySet.delete(plans)
             models.QuerySet.delete(contexts)
@@ -185,6 +201,10 @@ def purge_run(run_id, now=None):
             if run.configuration_snapshot.get("execution_kind") == "native":
                 original = run.source_snapshot
                 tombstone = {"purged": True, "digest": digest(original)}
+                if run.native_outcome == "delivered":
+                    for field in ("repository_id", "issue_number"):
+                        if type(original.get(field)) is int:
+                            tombstone[field] = original[field]
                 Run.objects.filter(pk=run.pk).update(source_snapshot=tombstone)
                 from work_queue.models import QueueItem
 

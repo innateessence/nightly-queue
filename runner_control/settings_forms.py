@@ -104,13 +104,15 @@ class ProjectRunnerSettingsForm(forms.Form):
         saved = instance.overrides if instance else {}
         for key in OVERRIDE_FIELDS:
             label = key.replace("_id", "").replace("_", " ").title()
+            choices = [
+                ("inherit", "Inherit runner settings"),
+                ("replace", "Use project value"),
+            ]
+            if key != "factory":
+                choices.append(("clear", "Clear value"))
             mode = forms.ChoiceField(
                 label=f"{label}: source",
-                choices=[
-                    ("inherit", "Inherit runner settings"),
-                    ("replace", "Use project value"),
-                    ("clear", "Clear value"),
-                ],
+                choices=choices,
                 required=False,
             )
             self.fields[f"{key}_mode"] = mode
@@ -138,6 +140,7 @@ class ProjectRunnerSettingsForm(forms.Form):
             elif key.endswith("commands") or key in {
                 "execution_policy",
                 "merge_profile",
+                "factory",
             }:
                 value = ConfigurationJSONField(
                     required=False,
@@ -158,6 +161,11 @@ class ProjectRunnerSettingsForm(forms.Form):
             if key.endswith("model"):
                 value.help_text = "Use the configured backend model. Native adapters must qualify before execution."
                 value.widget.attrs["list"] = "runner-claude-models"
+            if key == "factory":
+                value.help_text = (
+                    "To disable factory execution for this project, choose Use project value "
+                    'and enter {"enabled": false}.'
+                )
             self.fields[key] = value
             entry = saved.get(key, {})
             self.initial[f"{key}_mode"] = entry.get("mode", "inherit")
@@ -170,7 +178,13 @@ class ProjectRunnerSettingsForm(forms.Form):
             mode = data.get(f"{key}_mode") or "inherit"
             value = data.get(key)
             if mode == "replace" and value in (None, ""):
-                self.add_error(key, "Enter a project value or choose Clear value.")
+                message = "Enter a project value or choose Clear value."
+                if key == "factory":
+                    message = (
+                        "Enter factory JSON or choose Inherit runner settings. "
+                        'To disable factory execution, use {"enabled": false}.'
+                    )
+                self.add_error(key, message)
                 continue
             if key.endswith("credential_id") and value:
                 value = value.pk
