@@ -21,6 +21,7 @@ from .contracts import (
     Conflict,
     Manifest,
     NotFound,
+    PhaseEvidenceRejected,
     Rejected,
     canonical,
     digest,
@@ -35,6 +36,14 @@ from .worker import terminate_children
 PROTOCOL_VERSION = 2
 RUNTIME = "compose-slot-v2"
 MAX_ARTIFACT_STORAGE = 512 * 1024**2
+
+
+class PreparationCancellation:
+    def __init__(self, event, deadline):
+        self.event, self.deadline = event, deadline
+
+    def is_set(self):
+        return self.event.is_set() or time.time() >= self.deadline
 
 
 class SlotRuntime:
@@ -255,6 +264,7 @@ class SlotRuntime:
                 "state": "prepared",
                 "worker_boot": self.boot,
                 "execution_identity": self.execution_identity(),
+                "task_launch_intent": False,
             }
             self.save(record)
             return self.public(record)
@@ -307,99 +317,146 @@ class SlotRuntime:
             profile = self.profile_for(record["manifest"])
             if profile is None:
                 raise Rejected("The prepared recipe is no longer installed.")
-            manifest = Manifest.parse(record["manifest"], profile)
+            Manifest.parse(record["manifest"], profile)
             secret_path = self.path(operation_id) / "backend-secret"
             if profile.backend_secret_env and not secret_path.exists():
                 raise Conflict("Supply the selected model credential before start.")
-            self.reset()
-            destinations = self.configure_network(profile)
-            database_url = (
-                self.database.prepare(operation_id)
-                if profile.database_image and self.database
-                else ""
-            )
-            if profile.database_image and not database_url:
-                raise Rejected("This profile requires an isolated test database slot.")
-            extract((self.artifacts / manifest.source_digest).read_bytes(), self.work)
-            dependency = None
-            if profile.phase == "validation":
-                requirements = self.work / "requirements.txt"
-                baseline = Path("/opt/validation/project-requirements.txt")
-                if (
-                    requirements.exists()
-                    and baseline.exists()
-                    and digest(requirements.read_bytes())
-                    != digest(baseline.read_bytes())
-                ):
-                    dependency = self.dependency_artifacts.install(
-                        manifest.run_id, digest(requirements.read_bytes())
-                    )
-            for parent, directories, names in os.walk(self.work):
-                for name in directories + names:
-                    os.chown(Path(parent) / name, 1000, 1000)
-            context = self.inputs / "context"
-            durable(
-                self.inputs / "source.tar",
-                (self.artifacts / manifest.source_digest).read_bytes(),
-                0o444,
-            )
-            context.write_bytes((self.artifacts / manifest.context_digest).read_bytes())
-            context.chmod(0o444)
-            secret = secret_path.read_bytes() if secret_path.exists() else b""
-            environment = {
-                "PATH": "/usr/local/bin:/usr/bin:/bin",
-                "HOME": str(self.home),
-                "LANG": "C.UTF-8",
-                "PYTHONUNBUFFERED": "1",
-                "PYTHONDONTWRITEBYTECODE": "1",
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_CONFIG_GLOBAL": "/dev/null",
-                "VIBEARR_CONTEXT": str(context),
-                "VIBEARR_PHASE": profile.phase,
-                "TMPDIR": "/tmp",
-            }
-            if destinations:
-                proxy = f"http://{destinations[0][0]}:{destinations[0][1]}"
-                environment.update(
-                    HTTP_PROXY=proxy,
-                    HTTPS_PROXY=proxy,
-                    http_proxy=proxy,
-                    https_proxy=proxy,
-                )
-            if database_url:
-                environment["DATABASE_URL"] = database_url
-                environment["VIBEARR_DISPOSABLE_DATABASE_URL"] = database_url
-            if secret:
-                target = self.secrets / "backend"
-                target.write_bytes(secret)
-                target.chmod(0o400)
-                os.chown(target, 1000, 1000)
-                environment["VIBEARR_BACKEND_SECRET_FILE"] = str(target)
-            record["dependency_artifact"] = dependency
-            record["execution_identity"] = self.execution_identity()
+            if record["execution_identity"] != self.execution_identity():
+                raise Conflict("Prepared execution boundary changed before launch.")
             record.update(
                 state="launching",
-                worker_boot=self.boot,
-                database_url=database_url,
+                task_launch_intent=False,
                 paused=False,
             )
+            self.save(record)
             self.active = operation_id
             self.cancel.clear()
-            self.save(record)
             self.thread = threading.Thread(
                 target=self.run,
-                args=(operation_id, profile, environment, secret),
+                args=(operation_id, profile),
                 daemon=True,
             )
-            self.thread.start()
+            try:
+                self.thread.start()
+            except Exception:
+                self.fenced = "Preparation thread did not start; reconcile the worker before reuse."
+                record.update(
+                    state="unknown",
+                    descendants_terminated=False,
+                    wait_reason=self.fenced,
+                )
+                self.save(record)
+                self.active, self.thread = "", None
+                raise Conflict(self.fenced) from None
             return self.public(record)
+
+    def check_preparation(self, record):
+        deadline = datetime.fromisoformat(record["manifest"]["deadline"]).timestamp()
+        if self.cancel.is_set() or time.time() >= deadline:
+            raise Rejected("Operation stopped or expired before task launch.")
+
+    def prepare_database(self, operation_id, deadline):
+        return self.database.prepare(operation_id)
+
+    def prepare_phase(self, operation_id, profile, record):
+        self.check_preparation(record)
+        self.reset()
+        self.check_preparation(record)
+        destinations = self.configure_network(profile)
+        self.check_preparation(record)
+        deadline = datetime.fromisoformat(record["manifest"]["deadline"]).timestamp()
+        database_url = (
+            self.prepare_database(operation_id, deadline)
+            if profile.database_image and self.database
+            else ""
+        )
+        record["database_url"] = database_url
+        with self.lock:
+            self.save(record)
+        if profile.database_image and not database_url:
+            raise Rejected("This profile requires an isolated test database slot.")
+        self.check_preparation(record)
+        data = record["manifest"]
+        extract((self.artifacts / data["source_digest"]).read_bytes(), self.work)
+        dependency = None
+        if profile.phase == "validation":
+            requirements = self.work / "requirements.txt"
+            baseline = Path("/opt/validation/project-requirements.txt")
+            if (
+                requirements.exists()
+                and baseline.exists()
+                and digest(requirements.read_bytes()) != digest(baseline.read_bytes())
+            ):
+                dependency = self.dependency_artifacts.install(
+                    data["run_id"], digest(requirements.read_bytes())
+                )
+        for parent, directories, names in os.walk(self.work):
+            for name in directories + names:
+                os.chown(Path(parent) / name, 1000, 1000)
+        context = self.inputs / "context"
+        durable(
+            self.inputs / "source.tar",
+            (self.artifacts / data["source_digest"]).read_bytes(),
+            0o444,
+        )
+        context.write_bytes((self.artifacts / data["context_digest"]).read_bytes())
+        context.chmod(0o444)
+        self.prepare_source(profile, record)
+        self.check_preparation(record)
+        secret_path = self.path(operation_id) / "backend-secret"
+        secret = secret_path.read_bytes() if secret_path.exists() else b""
+        environment = {
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "HOME": str(self.home),
+            "LANG": "C.UTF-8",
+            "PYTHONUNBUFFERED": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "VIBEARR_CONTEXT": str(context),
+            "VIBEARR_PHASE": profile.phase,
+            "TMPDIR": "/tmp",
+        }
+        if destinations:
+            proxy = f"http://{destinations[0][0]}:{destinations[0][1]}"
+            environment.update(
+                HTTP_PROXY=proxy, HTTPS_PROXY=proxy, http_proxy=proxy, https_proxy=proxy
+            )
+        if database_url:
+            environment.update(
+                DATABASE_URL=database_url, VIBEARR_DISPOSABLE_DATABASE_URL=database_url
+            )
+        if secret:
+            target = self.secrets / "backend"
+            target.write_bytes(secret)
+            target.chmod(0o400)
+            os.chown(target, 1000, 1000)
+            environment["VIBEARR_BACKEND_SECRET_FILE"] = str(target)
+        environment = self.task_environment(operation_id, profile, environment)
+        self.check_preparation(record)
+        record["dependency_artifact"] = dependency
+        with self.lock:
+            self.save(record)
+        return environment, secret
 
     def protected_material(self, secret, record):
         return protection_material(secret, record.get("database_url", ""))
 
-    def run(self, operation_id, profile, environment, secret):
+    def prepare_source(self, profile, record):
+        pass
+
+    def finish_source(self, profile, record):
+        pass
+
+    def task_environment(self, operation_id, profile, environment):
+        return environment
+
+    def end_phase(self, operation_id):
+        pass
+
+    def run(self, operation_id, profile, environment=None, secret=b""):
         record = self.record(operation_id)
-        protected = self.protected_material(secret, record)
+        protected = protection_material(secret, record.get("database_url", ""))
         logs = bytearray()
         result = {
             "schema_version": 1,
@@ -413,12 +470,14 @@ class SlotRuntime:
             "log_truncated": False,
             "started_at": time.time(),
         }
+        deadline = float("inf")
         try:
             deadline = datetime.fromisoformat(
                 record["manifest"]["deadline"]
             ).timestamp()
-            if self.cancel.is_set():
-                raise Rejected("Operation stopped before launch.")
+            if environment is None:
+                environment, secret = self.prepare_phase(operation_id, profile, record)
+            protected = self.protected_material(secret, record)
             command = [
                 "/usr/local/bin/python",
                 "-I",
@@ -426,15 +485,18 @@ class SlotRuntime:
                 "vibearr_executor.slot_child",
                 *profile.argv,
             ]
-            self.process = subprocess.Popen(
-                command,
-                cwd="/opt/executor",
-                env=environment,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
             with self.lock:
+                self.check_preparation(record)
+                record["task_launch_intent"] = True
+                self.save(record)
+                self.process = subprocess.Popen(
+                    command,
+                    cwd="/opt/executor",
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
                 record["state"] = "running"
                 self.save(record)
             assert self.process.stdout is not None
@@ -486,6 +548,7 @@ class SlotRuntime:
                 result["dependency_artifact"] = record["dependency_artifact"]
             if not self.cancel.is_set() and not result["timed_out"]:
                 protected = self.protected_material(secret, record)
+                self.finish_source(profile, record)
                 source = snapshot(self.work)
                 if contains_secret(source, protected):
                     raise Rejected(
@@ -497,18 +560,32 @@ class SlotRuntime:
                 result["artifact"] = result_manifest(original, source)
                 durable(self.path(operation_id) / "source.tar", source)
         except Exception:
+            if record.get("task_launch_intent") is not True:
+                result["timed_out"] = time.time() >= deadline
             result["export_error"] = (
                 "Worker task failed; inspect bounded redacted diagnostics."
             )
         finally:
             try:
-                if self.process is not None and self.process.poll() is None:
-                    self.process.kill()
-                    result["exit_code"] = self.process.wait(timeout=10)
-                terminate_children()
-                if self.database and record.get("database_url"):
-                    self.database.reset(operation_id)
-                self.reset()
+                try:
+                    if self.process is not None and self.process.poll() is None:
+                        self.process.kill()
+                        result["exit_code"] = self.process.wait(timeout=10)
+                    terminate_children()
+                    try:
+                        self.end_phase(operation_id)
+                    except PhaseEvidenceRejected:
+                        result["export_error"] = (
+                            "Phase evidence was rejected after confirmed process cleanup."
+                        )
+                        result.pop("artifact", None)
+                        (self.path(operation_id) / "source.tar").unlink(missing_ok=True)
+                finally:
+                    try:
+                        if self.database and profile.database_image:
+                            self.database.reset(operation_id)
+                    finally:
+                        self.reset()
                 result["terminated"] = True
             except Exception:
                 self.fenced = "Termination or reset is unknown; worker remains fenced."
@@ -540,6 +617,7 @@ class SlotRuntime:
             return self.public(self.record(operation_id))
 
     def stop(self, operation_id):
+        thread = None
         with self.lock:
             record = self.record(operation_id)
             if record["state"] == "prepared":
@@ -569,8 +647,13 @@ class SlotRuntime:
                 self.seal(record)
             elif operation_id == self.active:
                 self.cancel.set()
-        if operation_id == self.active and self.thread:
-            self.thread.join(timeout=20)
+                thread = self.thread
+        if thread is not None:
+            thread.join(timeout=20)
+            if thread.is_alive():
+                self.fenced = (
+                    "Phase cancellation did not finish; worker remains fenced."
+                )
         return self.status(operation_id)
 
     def pause(self, operation_id):
@@ -585,7 +668,7 @@ class SlotRuntime:
             ):
                 raise Conflict("Only a running operation can pause.")
             os.killpg(self.process.pid, signal.SIGSTOP)
-            signal_tasks(signal.SIGSTOP)
+            signal_tasks(signal.SIGSTOP, getattr(self, "task_uids", (1000,)))
             record["paused"] = True
             self.save(record)
             return self.public(record)
@@ -602,7 +685,7 @@ class SlotRuntime:
             ):
                 raise Conflict("Operation is not paused in this worker boot.")
             os.killpg(self.process.pid, signal.SIGCONT)
-            signal_tasks(signal.SIGCONT)
+            signal_tasks(signal.SIGCONT, getattr(self, "task_uids", (1000,)))
             record["paused"] = False
             self.save(record)
             return self.public(record)

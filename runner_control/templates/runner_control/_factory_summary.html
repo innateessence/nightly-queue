@@ -1,0 +1,23 @@
+{% if run.factory.present %}
+<section class="factory-summary" aria-label="Factory evidence summary">
+  <h3>Factory{% if run.factory.round %} · Round {{ run.factory.round }}{% endif %}</h3>
+  {% if run.factory.unavailable %}
+  <p role="status">Factory evidence is unavailable or hidden. No review pass can be established.</p>
+  {% else %}
+  <p>{% if run.factory.ready %}<span class="status-pill status-succeeded">{% if run.publication.status == 'merged' or run.publication.status == 'closed_unmerged' %}Factory evidence complete{% else %}Ready for human review{% endif %}</span>{% else %}<span class="status-pill status-queued">Current evidence incomplete</span>{% endif %}{% if run.publication.status != 'merged' and run.publication.status != 'closed_unmerged' %} Human review and merge are required.{% endif %}</p>
+  <dl class="run-facts">
+    <div><dt>Risk</dt><dd>{{ run.factory.risk }}</dd></div>
+    <div><dt>Surfaces</dt><dd>{{ run.factory.surfaces|join:", "|default:"Not reported" }}</dd></div>
+    <div><dt>Recorded checks</dt><dd>{{ run.factory.checks }}</dd></div>
+    <div><dt>Recorded decision</dt><dd>{{ run.factory.decision }}</dd></div>
+  </dl>
+  <p class="field-hint">Required reviews{% if not run.factory.ready %} · routing and review authority are not fully verified; additional reviews may be required{% endif %}</p>
+  <ul>{% for review in run.factory.reviewers %}<li>{{ review.label }} · <span class="status-pill {% if review.verdict == 'pass' and run.factory.ready %}status-succeeded{% elif review.verdict == 'changes' or review.verdict == 'blocked' %}status-failed{% else %}status-queued{% endif %}">{% if review.verdict == 'pass' and not run.factory.ready %}recorded {% endif %}{{ review.verdict }}</span></li>{% endfor %}</ul>
+  {% if not compact %}
+  <p><strong>Scope:</strong> {{ run.factory.scope }}</p>
+  <p>Candidate tree <code>{{ run.factory.tree_sha }}</code><br>Specification <code>{{ run.factory.specification_id|default:"Not recorded" }}</code><br>Specification digest <code>{{ run.factory.specification_digest|default:"Not recorded" }}</code></p>
+  <p class="field-hint">Only evidence for this candidate, specification and round contributes to readiness. Usage and billed cost: unavailable in saved role artifacts.</p>
+  {% endif %}
+  {% endif %}
+</section>
+{% endif %}

@@ -9,11 +9,22 @@ from . import (
     secrets,
     operations_api,
     native_api,
+    factory_api,
 )
 
 from . import recovery_api, source_api
 
 urlpatterns = [
+    path(
+        "runs/<uuid:run_id>/factory/artifacts/",
+        factory_api.artifacts,
+        name="runner_factory_artifacts",
+    ),
+    path(
+        "runs/<uuid:run_id>/factory/artifacts/<uuid:artifact_id>/",
+        factory_api.detail,
+        name="runner_factory_artifact",
+    ),
     path(
         "runs/<uuid:run_id>/native/delivery-recovery/",
         native_api.delivery_recovery,

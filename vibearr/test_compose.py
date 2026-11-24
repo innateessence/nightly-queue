@@ -12,9 +12,10 @@ class ComposeTests(unittest.TestCase):
     def configuration(self):
         return json.loads(Path(os.environ["VIBEARR_COMPOSE_CONFIG"]).read_text())
 
-    def test_default_stack_has_exactly_three_services(self):
+    def test_default_stack_has_exactly_four_services(self):
         self.assertEqual(
-            set(self.configuration()["services"]), {"app", "postgres", "runner"}
+            set(self.configuration()["services"]),
+            {"app", "postgres", "runner", "worker"},
         )
 
     def test_runner_cannot_access_database_network_or_app_secrets(self):
@@ -32,6 +33,43 @@ class ComposeTests(unittest.TestCase):
         for name, service in self.configuration()["services"].items():
             with self.subTest(service=name):
                 self.assertEqual(bool(service.get("ports")), name == "app")
+
+    def test_worker_has_only_execution_control_and_dedicated_channel_secrets(self):
+        worker = self.configuration()["services"]["worker"]
+        self.assertEqual(set(worker["networks"]), {"worker-control"})
+        mounts = {mount["source"]: mount for mount in worker["volumes"]}
+        self.assertEqual(set(mounts), {"worker-control", "worker-secrets"})
+        self.assertTrue(mounts["worker-secrets"]["read_only"])
+
+    def test_only_worker_receives_task_network_and_uid_capabilities(self):
+        services = self.configuration()["services"]
+        self.assertIn("NET_ADMIN", services["worker"]["cap_add"])
+        self.assertIn("SETPCAP", services["worker"]["cap_add"])
+        self.assertNotIn("NET_ADMIN", services["runner"]["cap_add"])
+        self.assertNotIn("SETPCAP", services["runner"]["cap_add"])
+
+    def test_runner_and_worker_use_distinct_actual_image_bindings(self):
+        services = self.configuration()["services"]
+        self.assertIn("VIBEARR_RUNNER_IMAGE_ID", services["runner"]["environment"])
+        self.assertIn("VIBEARR_WORKER_IMAGE_ID", services["worker"]["environment"])
+        self.assertEqual(
+            services["runner"]["environment"]["VIBEARR_EXECUTOR_URL"],
+            "http://worker:8791",
+        )
+
+    def test_mediator_passes_explicit_private_controller_identity(self):
+        environment = self.configuration()["services"]["runner"]["environment"]
+        self.assertEqual(environment["VIBEARR_RUNNER_STATE_DIR"], "/var/lib/vibearr")
+        self.assertEqual(
+            environment["VIBEARR_RUNNER_API_TOKEN_FILE"],
+            "/run/vibearr/runner/api-token",
+        )
+
+    def test_startup_does_not_depend_on_qualified_worker_or_running_mediation(self):
+        services = self.configuration()["services"]
+        self.assertEqual(set(services["worker"]["depends_on"]), {"app"})
+        self.assertEqual(set(services["runner"]["depends_on"]), {"app", "worker"})
+        self.assertEqual(services["worker"]["healthcheck"]["test"][-1], "health")
 
     def test_journal_volume_keeps_legacy_absolute_paths_accessible(self):
         mounts = self.configuration()["services"]["runner"]["volumes"]
