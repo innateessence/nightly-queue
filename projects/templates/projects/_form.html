@@ -26,12 +26,13 @@
 {% endfor %}
 <details{% if runner_form.errors %} open{% endif %}>
   <summary>Coding runner stage overrides</summary>
-  <p class="field-hint">Inherit runner settings uses the assigned runner's value, including when the project input is blank. Use project value replaces it. Clear value explicitly removes it and may leave required configuration missing. The preview below uses the default runner.</p>
+  <p class="field-hint">Inherit runner settings uses the assigned runner's value, including when the project input is blank. Use project value replaces it. Clear value, where available, explicitly removes it and may leave required configuration missing. The preview below uses the default runner.</p>
   {% include "runner_control/_claude_models.html" %}
   {{ runner_form.non_field_errors }}
   {% for field in runner_form %}
     <div class="field">
       <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+      {% if field.help_text %}<p class="field-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text|truncatechars:500 }}</p>{% endif %}
       {% for error in field.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
     </div>
   {% endfor %}
