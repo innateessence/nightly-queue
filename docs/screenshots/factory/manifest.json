@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "fixture_only": true,
+  "ui_code_head": "8e6c39465b6f4463e55d4f924b8c3bfa3e7ee0ce",
+  "qualification_scope": "Manual UI fixture rendering; no deployed runtime or provider qualification.",
+  "limits": [
+    "These are disposable, synthetic ORM fixtures, not production run history.",
+    "No paid coding provider, live autonomous factory, PR merge, or deployed runtime qualification is claimed.",
+    "The composite capture source includes unmerged prerequisites; it differs from the UI evidence commit and the final assembled release."
+  ],
+  "capture_recipe": {
+    "database": "disposable PostgreSQL15.20",
+    "entrypoint": [
+      "python",
+      "-I",
+      "/opt/ui_probe.py"
+    ],
+    "processing_enabled": false,
+    "runtime": "vibearr_executor/Worker.Dockerfile",
+    "views": "desktop1440x1000/mobile390x844; light/dark; first factory artifact expanded",
+    "application_uid": 10003,
+    "browser_uid": 1000,
+    "console_errors_monitored": true,
+    "http_error_responses_monitored": true,
+    "host_checkout_runtime_mount": false,
+    "source_tree_verified": true
+  },
+  "source_binding": {
+    "application_image": "sha256:940d0bb06a9e39de45005538850b101a86c605c0d125164c233378d14e800949",
+    "browser_image": "sha256:940d0bb06a9e39de45005538850b101a86c605c0d125164c233378d14e800949",
+    "revision": "b8551191d87d252538346b0412110578afaa7198",
+    "schema_version": 1,
+    "source_digest": "879982273b5f22b6a23fdbbd0e82b11c5ddba5552f224862d3a8af522e07e46e",
+    "tree_sha": "e9cac7aa6fcd90ecf353b8c03c9aad9d933f166b"
+  },
+  "prerequisite_heads": {
+    "r5": "2fec64eb5dd373d5d202cb3fbf7bbb91ed0e8212",
+    "routing": "5594b49e1144e25cdb900e22d6ed17f205391a47"
+  },
+  "pages": {
+    "activity": {
+      "report": "activity/report.json",
+      "original_report": "activity/capture-6ab55480539040a3b1bd3be33bd2d8f5/browser.json",
+      "archive_sha256": "8ff3c262fee3f40bf00909dd4a89814d9e123ccc18a271f4591e9a334cccd70e",
+      "worker_binding": {
+        "execution_identity": {
+          "binding_digest": "e56dde176751d37a573cf0bd49d8c0924dd9743762d02f4cd986653aacd754ce",
+          "instance_id": "d2724c74-1c83-4695-ad57-92acaf7867c7",
+          "protocol_version": 2,
+          "runtime": "compact-worker-v1",
+          "worker_boot": "c0a5d5e8-70c0-4ae0-862c-f63cf7d2e5db"
+        },
+        "operation_id": "1659c7b2-fe54-43a1-9c55-f08cd53e8287",
+        "profile_digest": "e4e20f59c6f7d423534c87d8e0700fb2ff606138ba0b616d948593cbaca7c5dc",
+        "profile_id": "browser-ui",
+        "run_id": "c6ec7e92-6db7-4f98-b68d-1c6de73b3726"
+      },
+      "frames": [
+        {
+          "file": "activity/queue-desktop-light.png",
+          "sha256": "28dbbcceadaefaf17da3097d31b6b3d968d0060a48c736947016b0fb7ab7773c",
+          "bytes": 95997,
+          "theme": "light",
+          "viewport": {
+            "height": 1000,
+            "width": 1440
+          }
+        },
+        {
+          "file": "activity/queue-desktop-dark.png",
+          "sha256": "f152adada1e50ad50ecdab35805f226ec3938085e53a48b5366f442955177eed",
+          "bytes": 96491,
+          "theme": "dark",
+          "viewport": {
+            "height": 1000,
+            "width": 1440
+          }
+        },
+        {
+          "file": "activity/queue-mobile-light.png",
+          "sha256": "7b784de195dcd79dbdec5ce95a9512809b2141b90c5c0f996f2dd328cf3ff978",
+          "bytes": 76877,
+          "theme": "light",
+          "viewport": {
+            "height": 844,
+            "width": 390
+          }
+        },
+        {
+          "file": "activity/queue-mobile-dark.png",
+          "sha256": "40a501d8aad0b52aec3ffefcb1e104c61feebcf607a252778d9cb43595464ee6",
+          "bytes": 78396,
+          "theme": "dark",
+          "viewport": {
+            "height": 844,
+            "width": 390
+          }
+        }
+      ]
+    },
+    "history": {
+      "report": "history/report.json",
+      "original_report": "history/capture-2fc6bebeb69246c191f068c1e80efd17/browser.json",
+      "archive_sha256": "f9510236e445d8e0eb6a88d3035b8ead40f326d5af5dbbfdae0ce7b6b5c5cad1",
+      "worker_binding": {
+        "execution_identity": {
+          "binding_digest": "e56dde176751d37a573cf0bd49d8c0924dd9743762d02f4cd986653aacd754ce",
+          "instance_id": "d2724c74-1c83-4695-ad57-92acaf7867c7",
+          "protocol_version": 2,
+          "runtime": "compact-worker-v1",
+          "worker_boot": "c0a5d5e8-70c0-4ae0-862c-f63cf7d2e5db"
+        },
+        "operation_id": "babef81c-2e56-483f-af7f-c3b0705a2513",
+        "profile_digest": "e4e20f59c6f7d423534c87d8e0700fb2ff606138ba0b616d948593cbaca7c5dc",
+        "profile_id": "browser-ui",
+        "run_id": "b6e5e758-2f58-45f6-acea-80b0d874c3ab"
+      },
+      "frames": [
+        {
+          "file": "history/queue-desktop-light.png",
+          "sha256": "994c42712d54075bd52558eeb79c754230de3462cbeadb87f5a76b78116dbe2f",
+          "bytes": 127946,
+          "theme": "light",
+          "viewport": {
+            "height": 1000,
+            "width": 1440
+          }
+        },
+        {
+          "file": "history/queue-desktop-dark.png",
+          "sha256": "e79a17d43f98102542037a7e5adb49c947d387e375f82a93db2e8003ece40180",
+          "bytes": 129155,
+          "theme": "dark",
+          "viewport": {
+            "height": 1000,
+            "width": 1440
+          }
+        },
+        {
+          "file": "history/queue-mobile-light.png",
+          "sha256": "f27e2e42aba05017ab1701e2cf597b0de49348a31d734a904ec498184f113900",
+          "bytes": 58214,
+          "theme": "light",
+          "viewport": {
+            "height": 844,
+            "width": 390
+          }
+        },
+        {
+          "file": "history/queue-mobile-dark.png",
+          "sha256": "01a808efa674b3ff0962cb1f1407fda6565498c23738006db3286caecd1b5554",
+          "bytes": 59172,
+          "theme": "dark",
+          "viewport": {
+            "height": 844,
+            "width": 390
+          }
+        }
+      ]
+    },
+    "active-detail": {
+      "report": "active-detail/report.json",
+      "original_report": "active_detail/capture-5d804b50e2504faa954dc45e6432edfd/browser.json",
+      "archive_sha256": "4b901e31a7ac05bba2460bb8fdedd8b246a4e05111aed947be7f3592e02909fa",
+      "worker_binding": {
+        "execution_identity": {
+          "binding_digest": "e56dde176751d37a573cf0bd49d8c0924dd9743762d02f4cd986653aacd754ce",
+          "instance_id": "d2724c74-1c83-4695-ad57-92acaf7867c7",
+          "protocol_version": 2,
+          "runtime": "compact-worker-v1",
+          "worker_boot": "c0a5d5e8-70c0-4ae0-862c-f63cf7d2e5db"
+        },
+        "operation_id": "e819ebcc-5e7f-4ee7-9be5-85c33c560250",
+        "profile_digest": "e4e20f59c6f7d423534c87d8e0700fb2ff606138ba0b616d948593cbaca7c5dc",
+        "profile_id": "browser-ui",
+        "run_id": "2067d33a-beb1-447a-a312-1222506b4554"
+      },
+      "frames": [
+        {
+          "file": "active-detail/queue-desktop-light.png",
+          "sha256": "669b4cc4df45325da59556acbe4bf501560ea76e68446c92c5e45c705499eaa5",
+          "bytes": 326397,
+          "theme": "light",
+          "viewport": {
+            "height": 1000,
+            "width": 1440
+          }
+        },
+        {
+          "file": "active-detail/queue-desktop-dark.png",
+          "sha256": "ad9b1d8e10f21adb9eb7e30e1ecab2b9768713e781fc324fee5212ae5024b9ef",
+          "bytes": 334243,
+          "theme": "dark",
+          "viewport": {
+            "height": 1000,
+            "width": 1440
+          }
+        },
+        {
+          "file": "active-detail/queue-mobile-light.png",
+          "sha256": "4317a32416dd9c7b6a8e6ff83486e333081aded46990f10276bd825115c80736",
+          "bytes": 291767,
+          "theme": "light",
+          "viewport": {
+            "height": 844,
+            "width": 390
+          }
+        },
+        {
+          "file": "active-detail/queue-mobile-dark.png",
+          "sha256": "cb69ae8dbf070f64ad02c602e0b76cdd8da529535cd20c2632534024b684d8fc",
+          "bytes": 300496,
+          "theme": "dark",
+          "viewport": {
+            "height": 844,
+            "width": 390
+          }
+        }
+      ]
+    },
+    "delivered-detail": {
+      "report": "delivered-detail/report.json",
+      "original_report": "delivered_detail/capture-46e69cf6511f410db731b70942263841/browser.json",
+      "archive_sha256": "e0d27ca6dde0136f27221935eac0ecf29588f0eeb7f9dab943147e8da76b0cea",
+      "worker_binding": {
+        "execution_identity": {
+          "binding_digest": "e56dde176751d37a573cf0bd49d8c0924dd9743762d02f4cd986653aacd754ce",
+          "instance_id": "d2724c74-1c83-4695-ad57-92acaf7867c7",
+          "protocol_version": 2,
+          "runtime": "compact-worker-v1",
+          "worker_boot": "c0a5d5e8-70c0-4ae0-862c-f63cf7d2e5db"
+        },
+        "operation_id": "97219020-380d-4162-b138-4c813a322695",
+        "profile_digest": "e4e20f59c6f7d423534c87d8e0700fb2ff606138ba0b616d948593cbaca7c5dc",
+        "profile_id": "browser-ui",
+        "run_id": "6334cbab-27b6-435b-be66-7457ce6cb097"
+      },
+      "frames": [
+        {
+          "file": "delivered-detail/queue-desktop-light.png",
+          "sha256": "87f8a3d6b261a1d110f6b6ce007d112c7e7763d81d937c760401ec9e19a98e36",
+          "bytes": 309507,
+          "theme": "light",
+          "viewport": {
+            "height": 1000,
+            "width": 1440
+          }
+        },
+        {
+          "file": "delivered-detail/queue-desktop-dark.png",
+          "sha256": "8afbf49db64db88efa8f61c5366cc65aad4f3954817456a3f9bc8f5ef3a173cc",
+          "bytes": 316254,
+          "theme": "dark",
+          "viewport": {
+            "height": 1000,
+            "width": 1440
+          }
+        },
+        {
+          "file": "delivered-detail/queue-mobile-light.png",
+          "sha256": "ff65e4c4144f75d1cf16ae636ab4d3afc8ff01034e213199f66833b590bc2486",
+          "bytes": 271094,
+          "theme": "light",
+          "viewport": {
+            "height": 844,
+            "width": 390
+          }
+        },
+        {
+          "file": "delivered-detail/queue-mobile-dark.png",
+          "sha256": "3b8b943adeadf746afed93b2808e8cf99cf6854ddeb07cda393b29420efc2984",
+          "bytes": 278187,
+          "theme": "dark",
+          "viewport": {
+            "height": 844,
+            "width": 390
+          }
+        }
+      ]
+    }
+  }
+}

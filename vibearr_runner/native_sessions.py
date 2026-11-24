@@ -94,6 +94,8 @@ class NativeAdapter(Protocol):
 
     def events(self, session: NativeSession) -> list[dict]: ...
 
+    def read_events(self, session: NativeSession) -> tuple[object, bytes]: ...
+
     def outcome(self, session: NativeSession, source: bytes) -> dict: ...
 
     def diagnostics(
@@ -116,7 +118,10 @@ class NativeAdapter(Protocol):
 
 class NativeBackendRegistry:
     def create(self, provider: str, client) -> NativeAdapter:
-        if getattr(client, "integrated", False):
+        if (
+            getattr(client, "integrated", False) is True
+            or getattr(client, "compact", False) is True
+        ):
             from .native_cli import NativeCLIAdapter
 
             return NativeCLIAdapter(client, provider)

@@ -22,6 +22,11 @@ class Command(BaseCommand):
                 close_old_connections()
                 Path("/tmp/vibearr-scheduler-heartbeat").write_text(str(time.time()))
                 tick()
+                from runner_control.publication_observations import (
+                    observe_delivered_publications,
+                )
+
+                observe_delivered_publications(limit=1)
                 Path("/tmp/vibearr-scheduler-heartbeat").write_text(str(time.time()))
             except DatabaseError:
                 logging.getLogger(__name__).warning(
