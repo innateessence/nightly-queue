@@ -173,8 +173,11 @@ it. Do not drop journals to make an upgrade appear idle.
 
 Take and verify a quiescent backup using that version's backup job. Version-1
 fleet backups must be restored with the corresponding old image/recipe before
-migration. The integrated runtime writes version-2 backups with its six private
-state volumes. Old backups/volumes are not deleted or silently relabeled.
+migration. Version-2 integrated backups retain their original six-volume recipe.
+The four-service runtime writes version-3 `compact-worker-v1` backups with an exact
+mapping of application-secrets, database-secrets, runner-secrets, runner-data,
+runner-logins, worker-secrets and worker-control. Old backups and volumes remain
+available for rollback and are never relabeled as compact snapshots.
 
 For an already integrated deployment, drain while the controller is running:
 
@@ -229,8 +232,12 @@ bash run.sh --build
 File restoration validates the complete archive before extracting. Database
 restore uses one transaction and verifies table fingerprints, then disables old
 identities and processing. Explicit restored bootstrap archives old controller
-state, preserves history, and creates fresh authority. The new runner needs boot
-qualification and account/delivery acceptance before it can process work. Keep
+state, preserves history, and creates fresh runner authority. It also archives the
+restored worker's control state and rotates both control and mediation tokens
+before the worker can start. Retired tokens and old qualification reports stay in
+private restore history. The new worker needs a forced-restart witness, boundary
+and role/browser qualification; the runner needs account/delivery acceptance
+before it can process work. Keep
 source backups and rollback state until this separate restoration is verified.
 
 ## Browser and artifacts
@@ -239,8 +246,12 @@ source backups and rollback state until this separate restoration is verified.
 bash deploy/docker/operations.sh browser
 ```
 
-This is a one-shot browser container with no credentials or host checkout. Its
+This is a one-shot operator browser container with no credentials or host checkout. Its
 PNGs/report stay in `<project>_browser-artifacts`. Exact-candidate CI supplies
 source/image binding; unbound local smoke captures are not native merge evidence.
 Export selected captures with explicit operator Docker copy and retain them with
-release evidence. Browser artifacts are separate from private-state backups.
+release evidence. The worker's model-free `qualify-roles` step separately runs the
+registered browser profile after boundary qualification and binds its captured
+archive to the current worker boot and immutable source/image identities. Missing
+or stale worker browser proof blocks visual reviewer roles. Browser artifacts
+are separate from private-state backups.
