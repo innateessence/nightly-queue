@@ -19,6 +19,10 @@ class Rejected(ValueError):
     pass
 
 
+class PhaseEvidenceRejected(Rejected):
+    """Evidence failed after all phase processes were confirmed stopped."""
+
+
 class Conflict(Rejected):
     pass
 
