@@ -3,6 +3,9 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 candidate=${CANDIDATE_SHA:?Set the exact component PR head SHA.}
 [[ $candidate =~ ^[a-f0-9]{40}$ ]] || { echo 'Select an exact component SHA.' >&2; exit 2; }
+component_pr=${COMPONENT_PR_NUMBER:?Set the externally supplied pull request number.}
+[[ $component_pr =~ ^[1-9][0-9]{0,8}$ ]] || { echo 'Select a canonical positive PR number of at most nine digits.' >&2; exit 2; }
+manifest_source=.github/component-prerequisites/pr-$component_pr.json
 project=nq-component-ci-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-${RANDOM}
 [[ $project =~ ^nq-component-ci-[a-z0-9-]+$ && ${#project} -le 63 ]] || exit 2
 scratch=$(mktemp -d /tmp/vibearr-component.XXXXXXXX)
@@ -46,12 +49,12 @@ cp -R "$common/refs/." "$scratch/input/git/refs/"
 cp "$git_directory/HEAD" "$scratch/input/git/HEAD"
 if [[ -f $common/packed-refs ]]; then cp "$common/packed-refs" "$scratch/input/git/packed-refs"; else : > "$scratch/input/git/packed-refs"; fi
 cp deploy/docker/{component_ci.py,component-ci.sh,Component.Dockerfile} "$scratch/input/"
-cp .github/component-prerequisites.json "$scratch/input/component-prerequisites.json"
+cp "$manifest_source" "$scratch/input/component-prerequisites.json"
 docker build --file deploy/docker/Component.Dockerfile --tag "$image" "$scratch/input" > "$output/input-build.log" 2>&1
 image_created=true
 docker volume create --label "io.vibearr.component-ci=$project" "$volume" > /dev/null
 volume_created=true
-container=$(docker create --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 1g --pids-limit 64 --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=1024m --mount "type=volume,src=$volume,dst=/output" --label "io.vibearr.component-ci=$project" "$image" assemble --candidate "$candidate")
+container=$(docker create --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 1g --pids-limit 64 --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=1024m --mount "type=volume,src=$volume,dst=/output" --label "io.vibearr.component-ci=$project" "$image" assemble --candidate "$candidate" --manifest-source "$manifest_source")
 assembly_result=0
 docker start --attach "$container" > "$output/assembly.log" 2>&1 || assembly_result=$?
 container_result=$(docker inspect "$container" --format '{{.State.ExitCode}}')

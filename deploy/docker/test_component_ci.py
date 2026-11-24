@@ -1,6 +1,7 @@
 from copy import deepcopy
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -207,6 +208,61 @@ class ComponentSourceTests(unittest.TestCase):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_manifest_source_is_the_unique_canonical_pr_path(self):
+        self.assertEqual(
+            ci.manifest_source(".github/component-prerequisites/pr-169.json"),
+            ".github/component-prerequisites/pr-169.json",
+        )
+
+    def test_invalid_or_shared_manifest_paths_are_rejected(self):
+        paths = (
+            ".github/component-prerequisites.json",
+            ".github/component-prerequisites/pr-0.json",
+            ".github/component-prerequisites/pr-0169.json",
+            ".github/component-prerequisites/pr-1000000000.json",
+            ".github/component-prerequisites/pr--1.json",
+            ".github/component-prerequisites/pr-169.json/extra",
+            ".github/component-prerequisites/../pr-169.json",
+            ".github/component-prerequisites/pr-169\n.json",
+        )
+        for path in paths:
+            with self.subTest(path=path), self.assertRaises(ci.Rejected):
+                ci.manifest_source(path)
+
+    def test_another_pr_manifest_cannot_substitute_for_the_selected_pr(self):
+        content = b"{}"
+        candidate = {
+            ".github/component-prerequisites/pr-170.json": {
+                "mode": "100644",
+                "type": "blob",
+                "blob": ci.blob_identity(content),
+            }
+        }
+        selected = ci.manifest_source(".github/component-prerequisites/pr-169.json")
+        with self.assertRaisesRegex(ci.Rejected, "exact candidate blob"):
+            ci.verify_control_inputs(candidate, {selected: content})
+
+    @unittest.skipUnless(
+        shutil.which("bash"), "Operator wrapper is checked in Docker tools"
+    )
+    def test_wrapper_rejects_bad_external_pr_numbers_before_docker_operations(self):
+        script = Path(__file__).with_name("component-ci.sh")
+        for number in ("0", "0169", "-1", "1000000000", "169/other", "169\n"):
+            with self.subTest(number=number):
+                result = subprocess.run(
+                    ["bash", str(script)],
+                    env={
+                        "PATH": "/usr/local/bin:/usr/bin:/bin",
+                        "CANDIDATE_SHA": "a" * 40,
+                        "COMPONENT_PR_NUMBER": number,
+                    },
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("canonical positive PR number", result.stderr)
+
     def test_duplicate_json_keys_are_rejected_before_schema_validation(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "manifest.json"
