@@ -1,0 +1,29 @@
+<section class="panel plan-section" aria-label="Factory rounds and evidence">
+  <h2>Factory rounds and evidence</h2>
+  {% include "runner_control/_factory_summary.html" %}
+  {% if not run.factory.present %}<p>No factory artifacts were saved for this attempt. Legacy run evidence remains below.</p>{% endif %}
+  {% if factory_error %}<p role="status">{{ factory_error }}</p>{% endif %}
+  {% for artifact in factory_artifacts %}
+  <details>
+    <summary>Round {{ artifact.round }} · {{ artifact.role_label }} · {{ artifact.created_at }}</summary>
+    {% if artifact.unavailable %}<p role="status">Artifact content is unavailable or redacted and cannot establish a review pass.</p>{% else %}
+    {% if not artifact.current %}<p class="notice">Earlier candidate or specification — this evidence does not satisfy the current review requirements.</p>{% endif %}
+    {% if artifact.current_input %}<p class="field-hint">Current linked {{ artifact.role_label|lower }} input, saved before the candidate build.</p>{% endif %}
+    <p>Artifact <code>{{ artifact.id }}</code> · Sequence {{ artifact.sequence }}<br>Candidate tree <code>{{ artifact.document.tree_sha }}</code><br>Source <code>{{ artifact.document.source_digest }}</code><br>Specification <code>{{ artifact.document.specification_id|default:"Not recorded" }}</code></p>
+    {% if artifact.execution %}<p>{{ artifact.execution.adapter }} · {{ artifact.execution.model }} · CLI {{ artifact.execution.agent_version }}<br>Elapsed {{ artifact.elapsed }} · Usage and billed cost unavailable.</p>{% endif %}
+    {% if artifact.payload.scope %}<h3>Scope</h3><p>{{ artifact.payload.scope }}</p>{% endif %}
+    {% if artifact.criteria %}<h3>Acceptance criteria</h3><ul>{% for criterion in artifact.criteria %}<li><code>{{ criterion.id }}</code> · {{ criterion.text }}</li>{% endfor %}</ul>{% endif %}
+    {% if artifact.payload.verdict %}<p>Recorded verdict: <strong>{{ artifact.payload.verdict }}</strong></p>{% endif %}
+    {% if artifact.payload.state %}<p>Recorded check result: <strong>{{ artifact.payload.state }}</strong></p>{% endif %}
+    {% if artifact.findings %}<h3>Review findings</h3>{% for finding in artifact.findings %}<h4>{{ finding.id }}</h4><p>{{ finding.summary }}</p><ul>{% for evidence in finding.evidence %}<li>{{ evidence }}</li>{% endfor %}</ul><p class="field-hint">Criteria: {{ finding.criterion_ids|join:", "|default:"Not mapped" }}</p>{% endfor %}{% endif %}
+    {% if artifact.more_findings %}<p class="field-hint">Only the first 20 findings are expanded here; the saved artifact retains the full bounded result.</p>{% endif %}
+    <details><summary>Saved role payload{% if artifact.payload_truncated %} · display limited to 16,000 characters{% endif %}</summary><pre>{{ artifact.payload_json }}</pre></details>
+    {% endif %}
+  </details>
+  {% empty %}{% if run.factory.present and not factory_error %}<p>No artifacts on this page.</p>{% endif %}{% endfor %}
+  <nav class="pagination" aria-label="Factory artifact pages">
+    {% if factory_artifacts.has_previous %}<a href="?factory_page={{ factory_artifacts.previous_page_number }}&amp;context_page={{ contexts.number }}&amp;plan_page={{ plans.number }}&amp;page={{ evidence_page.number }}">Newer artifacts</a>{% endif %}
+    <span>Artifact page {{ factory_artifacts.number }} of {{ factory_artifacts.paginator.num_pages }}</span>
+    {% if factory_artifacts.has_next %}<a href="?factory_page={{ factory_artifacts.next_page_number }}&amp;context_page={{ contexts.number }}&amp;plan_page={{ plans.number }}&amp;page={{ evidence_page.number }}">Older artifacts</a>{% endif %}
+  </nav>
+</section>

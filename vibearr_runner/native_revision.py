@@ -15,6 +15,10 @@ class NativeRevision:
         self.host, self.native = host, host.native
 
     def prepare(self, reason, detail):
+        if self.native.get("factory"):
+            raise DeliveryError(
+                "Factory CI/base changes require a new context and attempt."
+            )
         if reason != "base_update" and self.native.get("delivery_recovery_generation"):
             raise DeliveryError(
                 "Delivery-only recovery cannot run a model repair: " + detail
@@ -61,6 +65,10 @@ class NativeRevision:
         return "continue"
 
     def step(self):
+        if self.native.get("factory"):
+            raise DeliveryError(
+                "Factory CI/base changes require a new context and attempt."
+            )
         from .processes import ProcessTracker
 
         ProcessTracker(self.host.journal, self.host.state).recover()

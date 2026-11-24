@@ -5,11 +5,17 @@ import time
 from uuid import uuid4
 
 from .delivery import DeliveryError, DeliveryUnknown, SupervisorGit
-from .native_github import NativeGitHub
+from .merge_github import MergeGitHub
 from .native_sessions import NativeSession
 from .processes import current_execution
 from .recovery import ReconciliationRequired
 from .workspaces import git
+from .factory_delivery import (
+    PublicationBaseChanged,
+    factory_delivery_barrier,
+    factory_enabled,
+    require_human_delivery,
+)
 
 
 class NativeDelivery:
@@ -21,7 +27,7 @@ class NativeDelivery:
     def clients(self, *, reconciliation=False):
         grant = self.host.secret("repository", reconciliation=reconciliation)
         token = grant["material"]["secret"]
-        return NativeGitHub(
+        return MergeGitHub(
             token, read_only=reconciliation, read=self.host.read
         ), SupervisorGit(token=token, read_only=reconciliation, read=self.host.read)
 
@@ -41,6 +47,9 @@ class NativeDelivery:
             raise DeliveryError(
                 "Repository default branch changed; retry with a fresh task context."
             )
+        current_base = github.base_sha(workspace)
+        if current_base != workspace["base_revision"]:
+            raise PublicationBaseChanged(workspace, current_base)
         return {**workspace, "repository": identity["repository"]}, replace(
             self.host.workspace(), repository_url=identity["repository_url"]
         )
@@ -63,6 +72,7 @@ class NativeDelivery:
             raise DeliveryError("Publication tree differs from independent validation.")
         if git(["status", "--porcelain", "--untracked-files=all"], workspace.checkout):
             raise DeliveryError("Publication checkout contains uncommitted changes.")
+        factory_delivery_barrier(self.host)
 
     def register(self, stage, workspace):
         from .native_contract import delivery_intent
@@ -110,16 +120,29 @@ class NativeDelivery:
         self.host.artifact("native_delivery", payload, "publication-fact:" + suffix)
 
     def step(self):
+        try:
+            return self._step()
+        except PublicationBaseChanged as observation:
+            if not factory_enabled(getattr(self.host, "snapshot", {})):
+                raise
+            from .factory_recovery import FactoryRecovery
+
+            return FactoryRecovery(self.host, self.native["factory"]).base_changed(
+                observation
+            )
+
+    def _step(self):
+        historical = self.native.get("merge", {})
+        if historical.get("dispatched") or historical.get("merge"):
+            from .native_merge import NativeMerge
+
+            return NativeMerge(self.host).reconcile()
+        require_human_delivery(self.host.policy)
         if self.data.get(
             "checkpoint"
         ) == "reporting_pending" or "termination" in self.native.get("metadata", {}):
             self.host.terminate()
             return self.report()
-        if (
-            self.data.get("checkpoint") == "pr_verified"
-            and self.host.policy.delivery_mode == "merge"
-        ):
-            return self.merge()
         if not self.host.checkpoint(force_source=True):
             return "wait"
         self.verify()
@@ -223,8 +246,6 @@ class NativeDelivery:
             self.host.save()
             return "continue"
         self.verify()
-        if self.host.policy.delivery_mode == "merge":
-            return self.merge()
         evidence = self.evidence(workspace, pull)
         self.host.artifact("verified_delivery", evidence, "verified-delivery")
         self.host.terminate()
@@ -233,29 +254,19 @@ class NativeDelivery:
         return "continue"
 
     def merge(self):
-        from .native_merge import NativeMerge
-        from .merge_github import MergeRepair, MergeWait
-
-        try:
-            return NativeMerge(self.host).step()
-        except MergeWait as exc:
-            return NativeMerge(self.host).wait(str(exc))
-        except MergeRepair as exc:
-            return NativeMerge(self.host).repair("ci_repair", str(exc))
+        raise DeliveryError(
+            "Automatic merge is disabled; a human must merge the pull request."
+        )
 
     def report(self):
+        require_human_delivery(self.host.policy)
         pull = self.data["pull_request"]
         remote = self.host.client.reconcile(self.host.run_id)["run"]
         if remote["state"] == "completed":
             if (
                 remote["result_status"] != "succeeded"
                 or remote["result_url"] != pull["url"]
-                or remote.get("native_outcome")
-                != (
-                    "merged"
-                    if self.host.policy.delivery_mode == "merge"
-                    else "delivered"
-                )
+                or remote.get("native_outcome") != "delivered"
             ):
                 raise ReconciliationRequired(
                     "Recorded completion conflicts with the original native delivery."
@@ -265,6 +276,7 @@ class NativeDelivery:
             raise ReconciliationRequired(
                 "Native publication no longer owns its completion record."
             )
+        factory_delivery_barrier(self.host)
         self.host.status(
             "delivery", detail=pull["url"], validation_status="passed", force=True
         )
@@ -276,11 +288,7 @@ class NativeDelivery:
                 "status": "succeeded",
                 "result_url": pull["url"],
                 "error_summary": "",
-                "outcome": (
-                    "merged"
-                    if self.host.policy.delivery_mode == "merge"
-                    else "delivered"
-                ),
+                "outcome": "delivered",
             },
         )
         return "reporting_pending"
