@@ -686,6 +686,7 @@ class NativeLifecycle:
             validation_profile=self.profile,
             runtime_binding_digest=self.executor.capabilities()["binding_digest"],
             acceptance_criteria=criteria,
+            **self.factory_context(),
         )
         pending = self.native.setdefault(
             "context_request", {"operation_id": str(uuid4()), "document": data}
@@ -710,6 +711,10 @@ class NativeLifecycle:
                 "Saved native context is unavailable or differs from the immutable request."
             )
         self.native["context"] = saved
+        if self.snapshot["effective"].get("factory", {}).get("enabled"):
+            self.native["phase"] = "factory"
+            self.save()
+            return "continue"
         plan = plan_document(
             context_id=saved["id"],
             context_digest=saved["digest"],
@@ -741,6 +746,25 @@ class NativeLifecycle:
         self.native["phase"] = "agent"
         self.save()
         return "continue"
+
+    def factory_context(self):
+        configuration = self.snapshot["effective"].get("factory", {})
+        if not configuration.get("enabled"):
+            return {}
+        from .factory_roles import freeze_context
+
+        return {"factory": freeze_context(configuration, self.executor.capabilities())}
+
+    def factory(self):
+        from .factory_lifecycle import FactoryLifecycle
+
+        return FactoryLifecycle(self).step()
+
+    def require_human_dispatch(self):
+        if self.policy.delivery_mode != "pull_request":
+            raise NativeFailure(
+                "Automatic merge is disabled; a human must merge the pull request."
+            )
 
     def agent_prompt(self):
         parts = [
@@ -798,6 +822,7 @@ class NativeLifecycle:
         ).read_bytes()
         self.resources.reserve(self.run_id, request["operation_id"])
         if not data.get("session"):
+            self.require_human_dispatch()
             grant = self.secret("implementation")
             if (
                 grant["credential"]["id"] != account["credential_id"]
@@ -834,6 +859,7 @@ class NativeLifecycle:
         )
         observed = adapter.reconcile(session)
         if observed["state"] == "not-started":
+            self.require_human_dispatch()
             if not self.checkpoint(force_source=True):
                 return "wait"
             data["start_intent"] = True
@@ -990,6 +1016,13 @@ class NativeLifecycle:
             "tree_sha": source.tree_sha,
             "commit_sha": commit,
         }
+        factory_data = {}
+        if self.snapshot["effective"].get("factory", {}).get("enabled"):
+            from .factory_reviews import collect_factory_paths
+
+            factory_data["factory_paths"] = collect_factory_paths(
+                workspace.checkout, identity["base_revision"], source.commit_sha
+            )
         payload = workspace_record(
             context_id=self.native["context"]["id"],
             context_digest=self.native["context"]["digest"],
@@ -1001,12 +1034,18 @@ class NativeLifecycle:
             requirements_digest=hashlib.sha256(
                 files["requirements.txt"][1]
             ).hexdigest(),
+            **factory_data,
         )
         self.native["workspace_id"] = self.artifact(
             "native_workspace", payload, f"workspace:{operation}"
         )
         self.native["candidate"] = payload
         self.native["phase"] = "validation"
+        if self.snapshot["effective"].get("factory", {}).get("enabled"):
+            from .factory_lifecycle import FactoryLifecycle
+            from .factory_reviews import FactoryReviewLoop
+
+            FactoryReviewLoop(FactoryLifecycle(self)).candidate_imported(source)
         if self.native.get("publication_revision"):
             from .native_revision import NativeRevision
 
@@ -1158,9 +1197,16 @@ class NativeLifecycle:
             provenance=provenance,
             result=observed,
         )
-        self.artifact(
+        data["result_id"] = self.artifact(
             "native_validation", payload, f"validation-result:{session['attempt_id']}"
         )
+        if observed["state"] == "passed":
+            data["evidence"] = observed["validation"]
+        if self.snapshot["effective"].get("factory", {}).get("enabled"):
+            from .factory_lifecycle import FactoryLifecycle
+            from .factory_reviews import FactoryReviewLoop
+
+            return FactoryReviewLoop(FactoryLifecycle(self)).validated(observed)
         if observed["state"] != "passed":
             return self.repair(observed)
         data["evidence"] = observed["validation"]
