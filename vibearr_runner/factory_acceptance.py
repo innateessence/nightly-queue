@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 from .bootstrap_files import private_json
 from .client import APIError
 from .delivery import DeliveryError
+from .factory_contract import repair_limit
 from .native_contract import (
     digest,
     receipt_passed,
@@ -425,7 +426,10 @@ def verify_generations(contexts, run):
             type(attempt) is int
             and 1
             <= attempt
-            <= run["configuration_snapshot"]["execution_policy"]["repair_limit"],
+            <= repair_limit(
+                run["configuration_snapshot"],
+                run["configuration_snapshot"]["execution_policy"]["repair_limit"],
+            ),
             "Base generations exceeded the shared repair budget.",
         )
         identifier(generation["previous_workspace_id"])
@@ -604,7 +608,8 @@ def check_factory_chain(entries, native_entries, run, collected, scenario, docum
     rounds = sorted({document["round"] for document in artifacts})
     require(
         rounds == list(range(1, max(rounds) + 1))
-        and max(rounds) <= policy["repair_limit"] + 1,
+        and max(rounds)
+        <= repair_limit(run["configuration_snapshot"], policy["repair_limit"]) + 1,
         "Factory rounds are missing or exceed the shared repair budget.",
     )
     require(

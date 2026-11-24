@@ -6,13 +6,14 @@
 <section class="panel list-panel" aria-label="Run history">
   <form method="get" class="queue-filters"><label class="sr-only" for="run-state">Filter attempts by state</label><select id="run-state" name="state"><option value="">All attempts</option>{% for value, label in states %}<option value="{{ value }}"{% if value == state_filter %} selected{% endif %}>{{ label }}</option>{% endfor %}</select><button class="button-filter" type="submit">{% include "_icon.html" with name="filter" %}Filter</button></form>
   {% if runs %}
+  <div class="list-toolbar"><p class="field-hint">Scroll the table horizontally to see review and delivery outcomes on smaller screens.</p></div>
   <div class="table-scroll" tabindex="0" role="region" aria-label="Run history table">
     <table class="data-table history-table">
       <thead><tr><th scope="col">State</th><th scope="col" class="title-column">Work item / attempt</th><th scope="col">Outcome</th><th scope="col">Validation</th><th scope="col">Started</th><th scope="col">Runner</th></tr></thead>
       <tbody>{% for run in runs %}<tr>
         <td><span class="status-pill status-{{ run.state }}">{{ run.get_state_display }}</span><span class="cell-note">{{ run.get_stage_display }}</span></td>
         <td><a class="cell-title" href="{% url 'runner_plan_detail' run.pk %}">{{ run.item.title|default:"Empty queue" }}</a><span class="cell-note"><code>{{ run.pk }}</code></span>{% if run.wait_reason %}<p class="field-hint">Waiting: {{ run.wait_reason }}</p>{% endif %}{% if run.error_summary %}<p class="field-error">{{ run.error_summary }}</p>{% endif %}{% if run.cancellation_requested_at %}<p class="field-hint">Cancellation requested. {% if run.cancellation_confirmed_at %}Termination confirmed.{% else %}Waiting for termination confirmation.{% endif %}</p>{% endif %}{% if run.retry_requested_at %}<p class="field-hint">Retry requested; recovery must complete before another attempt.</p>{% endif %}</td>
-        <td><span class="status-pill status-{{ run.result_status }}">{{ run.native_outcome|default:run.result_status|default:"In progress" }}</span>{% if run.result_url %}<span class="cell-note"><a href="{{ run.result_url }}" rel="noreferrer">View pull request {% include "_icon.html" with name="external" %}</a></span>{% endif %}</td>
+        <td><span class="status-pill status-{{ run.result_status }}">{{ run.native_outcome|default:run.result_status|default:"In progress" }}</span>{% include "runner_control/_factory_status.html" %}{% if run.result_url %}<span class="cell-note"><a href="{{ run.result_url }}" rel="noreferrer">View pull request {% include "_icon.html" with name="external" %}</a></span>{% endif %}</td>
         <td>{{ run.native_status.validation_status|default:"Not reported" }}<span class="cell-note">Repairs: {{ run.native_status.repair_count|default:0 }}</span></td>
         <td class="date-cell">{{ run.created_at|date:"M j, Y" }}<span class="cell-note">{{ run.created_at|date:"H:i T" }}</span></td>
         <td>{{ run.runner.name }}</td>
