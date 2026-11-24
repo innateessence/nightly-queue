@@ -1,4 +1,4 @@
-name: Four-container checks
+name: Component prerequisite checks
 
 on:
   pull_request:
@@ -14,23 +14,30 @@ concurrency:
 
 jobs:
   test:
-    name: Application, runtime and recovery
+    name: ${{ github.event_name == 'pull_request' && 'Component with pinned prerequisites' || 'Application, runtime and recovery' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      COMPONENT_PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
-      - name: Check out exact candidate for operator image builds
+      - name: Check out the exact candidate and complete prerequisite objects
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ env.CANDIDATE_SHA }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Run disposable Docker checks without model credentials
+      - name: Run full Docker checks with explicit source provenance
         env:
+          VIBEARR_COMPONENT_OUTPUT: ${{ runner.temp }}/docker-checks
           VIBEARR_CHECK_OUTPUT: ${{ runner.temp }}/docker-checks
-        run: bash deploy/docker/checks.sh full --candidate "$GITHUB_WORKSPACE" --commit "$CANDIDATE_SHA"
-      - name: Upload bounded Docker evidence
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            bash deploy/docker/component-ci.sh
+          else
+            bash deploy/docker/checks.sh full --candidate "$GITHUB_WORKSPACE" --commit "$CANDIDATE_SHA"
+          fi
+      - name: Upload composition provenance and full Docker evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

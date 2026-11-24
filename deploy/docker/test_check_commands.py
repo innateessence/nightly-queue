@@ -20,10 +20,106 @@ class CommandFailureTests(unittest.TestCase):
 
     def test_failed_target_listing_stops_before_inspection(self):
         function = self.section("checks.sh", "qualify_worker() {", "observe_phase() {")
-        stub = "compose() { printf '%064d\\n' 1 2 3; return 23; }; docker() { echo INSPECTED; return 97; };\n"
+        stub = "compose() { printf '%064d\\n' 1 2 3; return 17; }; docker() { echo INSPECTED; return 97; };\n"
+        result = self.run_shell(stub + function + "\nqualify_worker\n")
+        self.assertEqual(result.returncode, 17, result.stderr)
+        self.assertNotIn("INSPECTED", result.stdout)
+        self.assertIn("stage=select status=17", result.stderr)
+
+    def test_failed_target_inspection_records_exact_status(self):
+        function = self.section("checks.sh", "qualify_worker() {", "observe_phase() {")
+        stub = """
+VIBEARR_TOOLS_IMAGE=unused
+compose() { printf '%064d\\n' 1 2 3; }
+docker() { if [[ $1 == inspect ]]; then return 23; fi; cat >/dev/null; echo '{}'; }
+"""
         result = self.run_shell(stub + function + "\nqualify_worker\n")
         self.assertEqual(result.returncode, 23, result.stderr)
-        self.assertNotIn("INSPECTED", result.stdout)
+        self.assertIn("stage=inspect-targets status=23", result.stderr)
+        self.assertNotIn("stage=qualify-cli", result.stderr)
+
+    def qualification_cli(self, status):
+        function = self.section("checks.sh", "qualify_worker() {", "observe_phase() {")
+        stub = """
+VIBEARR_TOOLS_IMAGE=unused
+compose() {
+  if [[ $1 == ps ]]; then printf '%064d\\n' 1 2 3; return; fi
+  if ((CLI_STATUS == 0)); then echo '{"passed":true}'; fi
+  return "$CLI_STATUS"
+}
+docker() { if [[ $1 == inspect ]]; then echo '[]'; return; fi; cat >/dev/null; echo '{}'; }
+"""
+        return self.run_shell(
+            "CLI_STATUS=" + str(status) + "\n" + stub + function + "\nqualify_worker\n"
+        )
+
+    def test_killed_qualification_cli_records_and_preserves_137(self):
+        result = self.qualification_cli(137)
+        self.assertEqual(result.returncode, 137, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("stage=qualify-cli status=137", result.stderr)
+
+    def test_qualification_diagnostics_leave_success_json_on_stdout(self):
+        result = self.qualification_cli(0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '{"passed":true}\n')
+        self.assertIn("stage=qualify-cli status=0", result.stderr)
+
+    def failed_cleanup(self, original_status, extra_stub=""):
+        function = self.section("checks.sh", "cleanup() {", "trap cleanup EXIT")
+        stub = """
+project=probe
+compose() { return 1; }; restored() { return 1; }
+export_volume() { return 1; }; docker() { return 1; }
+failure_state() { echo '{"oom_killed":false}'; }
+"""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = (
+                "output="
+                + shlex.quote(str(root))
+                + "\nscratch="
+                + shlex.quote(str(root / "scratch"))
+                + "\n"
+                + stub
+                + extra_stub
+                + function
+                + "\ntrap cleanup EXIT\nexit "
+                + str(original_status)
+            )
+            result = self.run_shell(script)
+            evidence = (root / "exit-status.json").read_text()
+        return result, evidence
+
+    def test_cleanup_failure_preserves_original_137(self):
+        result, evidence = self.failed_cleanup(137)
+        self.assertEqual(result.returncode, 137, result.stderr)
+        self.assertEqual(
+            evidence, '{"original_status":137,"cleanup_status":1,"final_status":137}\n'
+        )
+
+    def test_cleanup_failure_fails_an_otherwise_successful_run(self):
+        result, evidence = self.failed_cleanup(0)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(
+            evidence, '{"original_status":0,"cleanup_status":1,"final_status":1}\n'
+        )
+
+    def test_scratch_removal_failure_preserves_original_137(self):
+        result, evidence = self.failed_cleanup(137, "rm() { return 31; };\n")
+        self.assertEqual(result.returncode, 137, result.stderr)
+        self.assertIn('"original_status":137', evidence)
+
+    def test_status_write_failure_preserves_original_137(self):
+        result, evidence = self.failed_cleanup(137, "printf() { return 32; };\n")
+        self.assertEqual(result.returncode, 137, result.stderr)
+        self.assertEqual(evidence, "")
+
+    def test_status_write_failure_fails_an_otherwise_successful_run(self):
+        stub = "printf() { return 32; }; export_volume() { :; }; compose() { :; }; restored() { :; };\n"
+        result, evidence = self.failed_cleanup(0, stub)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(evidence, "")
 
     def test_failed_phase_listing_does_not_write_count_proof(self):
         function = self.section("checks.sh", "observe_phase() {", "export_volume() {")
