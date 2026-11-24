@@ -1,19 +1,15 @@
-"""One audited continuation of a terminated, validated publication."""
+"""Historical delivery recovery readback never restores completed claims."""
 
 from datetime import timedelta
-from uuid import uuid4
 
 from django.db import transaction
 from django.utils import timezone
 
 from vibearr_runner import native_contract as contract
-from vibearr_runner.delivery import DeliveryError
-from vibearr_runner.merge_github import exact_pull
 from work_queue.models import QueueItem
 
-from .auth import token_digest
 from .models import NativeDeliveryRecovery, Run, RunRetention
-from .native_services import authorize, native_policy, require_termination
+from .native_services import native_policy, require_termination
 from .services import RunConflict, lock_controller, owned_run
 
 
@@ -185,90 +181,6 @@ def recover_delivery(*, runner, run_id, operation_id, expected):
         return run, previous
     if NativeDeliveryRecovery.objects.filter(operation_id=operation_id).exists():
         raise RunConflict("Recovery operation already belongs to another run.")
-    retention = validate_failed(run, expected)
-    publication = run.evidence.filter(
-        kind="native_delivery", payload__pull_request__isnull=False
-    ).last()
-    if publication is None or publication.payload["pull_request"] is None:
-        raise RunConflict("Recovery requires an existing owned pull request.")
-    if (
-        publication.payload["publication_id"] != expected["expected_publication_id"]
-        or publication.payload["workspace"]["commit_sha"]
-        != expected["expected_head_sha"]
-    ):
-        raise RunConflict(
-            "Recovery publication or candidate differs from the expected identity."
-        )
-    resume = resume_document(run, publication)
-    archive = {
-        "schema_version": 1,
-        "generation": 1,
-        "state": run.state,
-        "stage": run.stage,
-        "result_status": run.result_status,
-        "native_outcome": run.native_outcome,
-        "result_url": run.result_url,
-        "item_result_url": run.item.result_url,
-        "error_summary": run.error_summary,
-        "finish_digest": run.finish_digest,
-        "claim_digest": run.claim_digest,
-        "finished_at": run.finished_at.isoformat(),
-        "native_status": run.native_status,
-        "reporting_acknowledged_at": retention.reporting_acknowledged_at.isoformat(),
-        "publication_operation_id": str(publication.operation_id),
-        "original_deadline": resume["deadline"],
-        "consumed_repairs": resume["attempt"],
-    }
-    token = uuid4()
-    # Changes remain transactional until current configuration and provider facts pass.
-    run.state, run.active_slot, run.stage = Run.State.ACTIVE, 1, Run.Stage.DELIVERY
-    run.claim_digest = token_digest(str(token))
-    run.item.status, run.item.claim_token = QueueItem.Status.RUNNING, token
-    run.item.result_url = ""
-    authorize(run)
-    from .merge_services import provider
-
-    try:
-        github = provider(run)
-        raw = github.pull(
-            publication.payload["workspace"]["repository"],
-            publication.payload["pull_request"]["number"],
-        )
-        exact_pull(
-            raw,
-            publication.payload["workspace"],
-            publication.payload["pull_request"]["number"],
-        )
-        if (
-            raw.get("state") != "open"
-            or raw.get("draft") is not False
-            or raw.get("merged")
-        ):
-            raise RunConflict(
-                "Recovery requires the original open unmerged ready pull request."
-            )
-        github.policy(
-            publication.payload["workspace"],
-            run.configuration_snapshot["effective"]["merge_profile"],
-        )
-    except DeliveryError as exc:
-        raise RunConflict(str(exc)) from None
-    recovery = NativeDeliveryRecovery.objects.create(
-        run=run,
-        operation_id=operation_id,
-        request=expected,
-        archive=archive,
-        resume=resume,
-        claim_token=token,
+    raise RunConflict(
+        "Automatic merge is disabled; repair requires an explicit new attempt retaining the original pull request."
     )
-    run.finished_at = None
-    run.result_status = run.result_url = run.error_summary = run.finish_digest = (
-        run.native_outcome
-    ) = run.wait_reason = ""
-    run.item.finished_at = None
-    run.item.error_summary = run.item.result_url = ""
-    run.item.save()
-    run.save()
-    retention.reporting_acknowledged_at = None
-    retention.save(update_fields=["reporting_acknowledged_at"])
-    return run, recovery

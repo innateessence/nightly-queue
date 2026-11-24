@@ -1,15 +1,44 @@
-"""Operator-invoked nine-check validation through the integrated local service."""
+"""Operator-invoked nine-check validation through the installed local service."""
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
 from .client import Client
-from .contracts import MAX_ARCHIVE, canonical
+from .contracts import MAX_ARCHIVE, Rejected, canonical
 from .validation_profile import ValidationProfile
 from vibearr_runner.native_validation import CandidateSource
 from vibearr_runner.validation_cli import run_candidate
+
+
+def validation_connection():
+    compact = os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "compact-worker-v1"
+    root = Path("/run/vibearr/runner")
+    token_path = Path(
+        os.environ.get("VIBEARR_EXECUTOR_TOKEN_FILE", str(root / "control-token"))
+    )
+    client = Client(
+        "http://127.0.0.1:8791", token_path.read_text().strip(), timeout=180
+    )
+    if compact:
+        observed = client.capabilities()
+        profile = ValidationProfile.parse(observed.get("validation_profile"))
+        if (
+            observed.get("runtime") != "compact-worker-v1"
+            or observed.get("qualified") is not True
+        ):
+            raise Rejected(
+                "Qualify the installed compact worker before operator validation."
+            )
+        if profile.image != os.environ.get("VIBEARR_WORKER_IMAGE_ID"):
+            raise Rejected("Validation tools differ from the installed worker image.")
+        return client, profile
+    profile = ValidationProfile.parse(
+        json.loads((root / "validation-profile.json").read_bytes())
+    )
+    return client, profile
 
 
 def main():
@@ -25,15 +54,7 @@ def main():
     source = CandidateSource(options.commit, options.tree, content)
     if source.digest != options.source_digest:
         raise ValueError("Candidate archive differs from its source binding.")
-    root = Path("/run/vibearr/runner")
-    client = Client(
-        "http://127.0.0.1:8791",
-        (root / "control-token").read_text().strip(),
-        timeout=180,
-    )
-    profile = ValidationProfile.parse(
-        json.loads((root / "validation-profile.json").read_bytes())
-    )
+    client, profile = validation_connection()
     options.state.mkdir(mode=0o700, parents=True, exist_ok=False)
     report = run_candidate(client, source, profile, state=options.state)
     (options.state / "evidence.json").write_bytes(canonical(report) + b"\n")

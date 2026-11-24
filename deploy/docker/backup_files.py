@@ -17,6 +17,15 @@ VOLUMES = (
     "runner-control",
     "runner-logins",
 )
+COMPACT_VOLUMES = (
+    "application-secrets",
+    "database-secrets",
+    "runner-secrets",
+    "runner-data",
+    "runner-logins",
+    "worker-secrets",
+    "worker-control",
+)
 MAX_FILES = 250000
 MAX_BYTES = 64 * 1024**3
 
@@ -29,14 +38,14 @@ def checksum(path):
     return value.hexdigest()
 
 
-def safe_path(name):
+def safe_path(name, volumes=VOLUMES):
     value = PurePosixPath(name)
     if (
         not name
         or str(value) != name
         or value.is_absolute()
         or any(part in {".", ".."} for part in value.parts)
-        or value.parts[0] not in VOLUMES
+        or value.parts[0] not in volumes
         or "\\" in name
         or "\x00" in name
         or len(name.encode()) > 4096
@@ -45,9 +54,9 @@ def safe_path(name):
     return value
 
 
-def inventory(root):
+def inventory(root, volumes=VOLUMES):
     records, total = [], 0
-    for volume in VOLUMES:
+    for volume in volumes:
         directory = root / volume
         paths = [directory, *sorted(directory.rglob("*"))]
         for path in paths:
@@ -68,7 +77,7 @@ def inventory(root):
             if total > MAX_BYTES or len(records) >= MAX_FILES:
                 raise ValueError("Backup volume snapshot exceeds its fixed bounds.")
             name = path.relative_to(root).as_posix()
-            safe_path(name)
+            safe_path(name, volumes)
             records.append(
                 {
                     "path": name,
@@ -83,8 +92,8 @@ def inventory(root):
     return records
 
 
-def capture(root, destination):
-    before = inventory(root)
+def capture(root, destination, volumes=VOLUMES):
+    before = inventory(root, volumes)
     with tarfile.open(destination, "w", format=tarfile.PAX_FORMAT) as archive:
         for entry in before:
             path = root / entry["path"]
@@ -97,33 +106,33 @@ def capture(root, destination):
                 info.size = entry["bytes"]
                 with path.open("rb") as stream:
                     archive.addfile(info, stream)
-    if inventory(root) != before:
+    if inventory(root, volumes) != before:
         raise ValueError(
             "State changed while backing up; stop all state writers first."
         )
     return before
 
 
-def verify_archive(archive, records):
-    if not isinstance(records, list) or not len(VOLUMES) <= len(records) <= MAX_FILES:
+def verify_archive(archive, records, volumes=VOLUMES):
+    if not isinstance(records, list) or not len(volumes) <= len(records) <= MAX_FILES:
         raise ValueError("Backup inventory is missing or exceeds its bounds.")
     entries = {value["path"]: value for value in records}
-    if len(entries) != len(records) or not set(VOLUMES) <= set(entries):
+    if len(entries) != len(records) or not set(volumes) <= set(entries):
         raise ValueError("Backup inventory omits a volume or repeats a path.")
     for name, entry in entries.items():
         if type(entry["bytes"]) is not int or not 0 <= entry["bytes"] <= MAX_BYTES:
             raise ValueError("Backup file size is invalid.")
-        value = safe_path(name)
+        value = safe_path(name, volumes)
         parents = [str(parent) for parent in value.parents if str(parent) != "."]
         if any(
             entries.get(parent, {}).get("kind") != "directory" for parent in parents
         ):
             raise ValueError("Backup path has no declared directory parent.")
-        if name in VOLUMES and entry["kind"] != "directory":
+        if name in volumes and entry["kind"] != "directory":
             raise ValueError("Every backup volume root must be a directory.")
     seen, total = set(), 0
     for member in archive:
-        name = str(safe_path(member.name))
+        name = str(safe_path(member.name, volumes))
         if name in seen or name not in entries:
             raise ValueError("Backup archive differs from its inventory.")
         expected = entries[name]
@@ -154,7 +163,7 @@ def verify_archive(archive, records):
         raise ValueError("Backup archive is incomplete.")
 
 
-def require_capacity(root, records, database_bytes):
+def require_capacity(root, records, database_bytes, volumes=VOLUMES):
     if type(database_bytes) is not int or database_bytes < 0:
         raise ValueError(
             "This backup lacks its database size estimate; create an updated snapshot."
@@ -163,7 +172,7 @@ def require_capacity(root, records, database_bytes):
         raise ValueError("Backup file size is invalid.")
     required = sum(entry["bytes"] for entry in records) + len(records) * 8192
     required += database_bytes * 2 + 256 * 1024**2 + 1024**3
-    for name in VOLUMES:
+    for name in volumes:
         if shutil.disk_usage(root / name).free < required:
             raise ValueError(
                 "Restore storage cannot fit this snapshot and a 1 GiB reserve."
@@ -171,18 +180,18 @@ def require_capacity(root, records, database_bytes):
     return required
 
 
-def restore(source, records, root):
-    for name in VOLUMES:
+def restore(source, records, root, volumes=VOLUMES):
+    for name in volumes:
         directory = root / name
         if directory.is_symlink() or not directory.is_dir() or any(directory.iterdir()):
             raise ValueError(
                 "Restore requires an empty, dedicated target for every volume."
             )
     with tarfile.open(source, "r:") as archive:
-        verify_archive(archive, records)
+        verify_archive(archive, records, volumes)
     with tarfile.open(source, "r:") as archive:
         for member in archive:
-            target = root / str(safe_path(member.name))
+            target = root / str(safe_path(member.name, volumes))
             if member.isdir():
                 target.mkdir(mode=0o700, exist_ok=True)
                 continue
@@ -208,7 +217,7 @@ def restore(source, records, root):
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
-    if inventory(root) != records:
+    if inventory(root, volumes) != records:
         raise ValueError("Restored volume inventory differs from the backup.")
 
 

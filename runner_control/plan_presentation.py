@@ -8,6 +8,7 @@ from credentials.redaction import redact_run_payload, redact_selected_payload
 from credentials.references import configuration_credential_ids, snapshot_credential_ids
 
 from .services import redact_payload
+from .factory_presentation import factory_summary, publication_summary
 
 REDACTION_UNAVAILABLE = (
     "Selected credential redaction is unavailable; saved content is hidden."
@@ -83,6 +84,10 @@ def present_run(run):
             else "Empty queue"
         ),
         *[getattr(run, field) for field in fields],
+        run.runner.name,
+        getattr(run, "_factory_documents", []),
+        getattr(run, "_publication_observation", None),
+        getattr(run, "_factory_authority", {}),
     ]
     data, error = present_payload(run, payload)
     safe.presentation_error = error
@@ -95,8 +100,24 @@ def present_run(run):
         safe.item = copy(run.item)
         safe.item.title = data[0] if data is not None else "Saved content unavailable"
     safe.runner = copy(run.runner)
-    name, error = present_payload(run, run.runner.name)
-    safe.runner.name = name if name is not None else "Runner"
+    safe.runner.name = data[len(fields) + 1] if data is not None else "Runner"
+    safe.factory = (
+        factory_summary(data[len(fields) + 2], data[len(fields) + 4])
+        if data is not None
+        else {
+            "present": bool(getattr(run, "_factory_documents", [])),
+            "unavailable": True,
+            "ready": False,
+        }
+    )
+    observation = data[len(fields) + 3] if data is not None else None
+    safe.publication = publication_summary(
+        observation,
+        safe.result_url,
+        state=safe.state,
+        outcome=safe.native_outcome,
+        cursor=safe.native_status.get("publication_observation"),
+    )
     return safe
 
 

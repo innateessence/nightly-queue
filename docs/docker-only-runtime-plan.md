@@ -1,23 +1,35 @@
-# Three-container Docker runtime
+# Four-container Docker runtime
 
 This contract replaces the preprovisioned worker-slot fleet and its separate
 agent/setup/validation, database, proxy, gateway, and account services. It implements
-[issue #142](https://github.com/innateessence/nightly-queue/issues/142).
+[issue #152](https://github.com/innateessence/nightly-queue/issues/152), adapting
+the existing work in [#142](https://github.com/innateessence/nightly-queue/issues/142)
+to the [factory plan](https://github.com/innateessence/nightly-queue/pull/146).
+
+Delivery policy: humans review and merge every PR throughout the MVP and factory
+rollout. Use `delivery_mode: "pull_request"`; automatic merge is deferred behind
+the [factory maturity gate](software-factory-plan.md#later-automatic-merge-maturity-gate).
+Agent readiness and historical automatic-merge evidence do not authorize its use.
 
 ## Deployment
 
-The canonical Compose stack has three long-running services:
+The canonical Compose stack has exactly four long-running services:
 
 | Service | Responsibility |
 | --- | --- |
 | `app` | Web UI/API, PostgreSQL-backed scheduling, durable manual/scheduled issue imports |
 | `postgres` | Production application database |
-| `runner` | Controller, one selected native CLI, setup, validation, disposable test PostgreSQL, Git delivery |
+| `runner` | Independent controller, private journal, persistent selected logins, scoped network mediation and Git/PR delivery |
+| `worker` | Authenticated execution API; sequential setup, selected native CLI/reviewer and independent validation phases; disposable local PostgreSQL/browser services |
 
-The runner image includes pinned Codex, Claude Code and OpenCode executables. One
-coding task owns the runner at a time; its phases execute sequentially. The runner
+The worker image includes pinned Codex, Claude Code and OpenCode executables. The
+lean runner carries their subscription-login executables but no task tools,
+PostgreSQL, browser or task-network capabilities. One coding task owns the worker
+at a time; its phases execute sequentially. The runner
 starts with the application but processing remains disabled until configured and
 qualified. A failed check or unavailable login must not enable another backend.
+Humans review and merge every PR; keep delivery mode `pull_request` and automatic
+merge disabled. A role's readiness result is not merge authorization.
 
 Codex uses ChatGPT subscription login. Claude Code uses Claude subscription login.
 The application stores a managed-login reference; OAuth login files remain in a
@@ -43,24 +55,29 @@ scratch tmpfs. No host checkout/home/credentials, engine socket/API credentials,
 privileged mode, host namespaces or devices are allowed. Image IDs are supplied
 by explicit operator image inspection; the runtime never controls Docker.
 
-The runner has no production DB network or credentials and no application
-credential encryption key. Root-owned local execution control drops task code to
-UID 1000 with no capabilities or privilege escalation. Controller/Git delivery
-state belongs to UID 10001; temporary test PostgreSQL uses UID 10002. Task code
-cannot modify runtime commands or trusted validation tools.
+Neither runner nor worker has production DB network access, credentials or the
+application encryption key. The worker mounts only its control state and private
+worker-channel secrets. Persistent logins, controller journals and publication
+credentials remain in the runner. The worker has no public egress network.
+Root-owned execution control drops task code to UID 1000 with no capabilities or
+privilege escalation; temporary PostgreSQL administration and candidate app
+services use distinct identities. Task code cannot modify runtime commands,
+image-owned validation tools or trusted control state.
 
-Model/package egress mediation runs inside the runner. Task-UID traffic cannot
-reach the control endpoint or arbitrary public/LAN addresses. The operator's
+Account, model/package and selected Ollama mediation are modules in the trusted
+runner, with one lifecycle/journal rather than standalone daemons or sidecars.
+The worker calls only operation-scoped endpoints/grants. Task-UID traffic cannot
+reach management/login APIs or arbitrary public/LAN addresses. The operator's
 selected external Ollama endpoint is an explicit exception, reached through the
 inference-only relay. Setup has package access; validation has no external
 network. Loopback is available for temporary test databases and test servers.
 
-The container's CPU, memory and PID limits cover the controller, coding phase and
-test services together. Do not present them as separate per-process guarantees.
-There is less isolation between phases than in separate containers: they share a
-kernel namespace and scratch storage that trusted reset must clean. This design
-is intended for the operator's registered repositories, not hostile multi-tenant
-workloads. Do not reuse old fleet proofs as proof of this boundary.
+The worker's CPU, memory and PID limits cover its trusted execution control,
+coding/check phase and local test services together. The runner has separate
+declared control-plane limits; no per-process ceiling is implied. Phases share a
+namespace and scratch storage that trusted reset must clean. This design is for
+the operator's registered repositories, not hostile multi-tenant workloads.
+Integrated-runner and retired fleet proofs cannot qualify this separate boundary.
 
 ## Jobs, validation and recovery
 
@@ -71,7 +88,8 @@ and scheduler are supervised together; coding work happens in the runner and doe
 not block imports.
 
 Each task phase gets a fresh snapshot/home. Confirm task descendants are gone
-before reset or reuse. An uncertain termination fences the runner. The durable
+before reset or reuse. Export a sealed candidate, reset all writable state, and
+import a verified fresh copy for validation or review. An uncertain termination fences the worker. The durable
 controller journal and immutable operation IDs prevent restart from inventing a
 new agent invocation, push or PR for an uncertain existing operation.
 
@@ -87,12 +105,41 @@ reset, cancellation, deadlines and interrupted-operation reconciliation. Every
 restart requires a fresh interrupted witness and a new boot-bound proof. Live account/model and delivery
 acceptance are separate and must report genuine observations, never fixtures.
 
+## Required simplification branches
+
+The S1–S4 targets from the merged factory plan define the required boundaries.
+The current source implements these targets through the compact runtime and
+factory branches; their named checks remain release requirements. D1–D4 describe
+packaging, execution-boundary, validation and operations acceptance categories.
+Earlier fleet reports remain historical and cannot qualify this runtime.
+
+| Order | Branch | Depends on | Deliverable |
+| --- | --- | --- | --- |
+| S1 | `feat/compact-app-scheduler` | Existing app/queue | Extract import services from Celery wrappers; one supervised DB-leased scheduling loop in app, no Celery/Beat/Valkey runtime dependency, ordered idempotent initialization/migrations. Verify duplicate starts, backoff, pause-independent import, child failure/signals, and upgrade without data loss. |
+| S2 | `feat/compact-runner-control` | Existing supervisor | Direct authenticated worker client, account lifecycle and operation-scoped egress mediation as shared runner modules with one journal/lifecycle; remove gateway/account/proxy sidecars and obsolete daemon entrypoints. Test endpoint/phase isolation, selected auth/renewal and restart/lost-operation reconciliation without host credentials. |
+| S3 | `feat/compact-phase-worker` | S2, existing validation contracts | One immutable phase-switching worker with pinned CLI/browser/PostgreSQL tools, local disposable services, fresh independent checks, UID/control separation, reset/stop/export and real resource limits. Test sequential phases, stale grants, cross-phase leaks, DB/admin isolation, OOM/cancel/restart and browser receipts. |
+| S4 | `test/compact-stack-acceptance` | S1–S3 | Replace the old Compose topology with exactly four runtime services and in-service startup steps; preserve production/account/runner state. Qualify D1–D4 engineering gates, CI, CLI, packaging, drain/backup/restore, service count, aggregate limits and failure recovery on that stack. No paid model calls required. |
+
+The implementation is not live release acceptance. Requalify retained features on
+the exact source, images and current worker boot. F6 supplies genuine two-issue
+Codex evidence with human merges after engineering qualification and role
+integration; paid provider calls are not required for engineering checks.
+
 ## Operations and migration
 
 Migrations run inside `app` before the web server and scheduler. Backups, restore,
-browser checks and qualification are explicit short-lived container operations,
-not permanent services. Preserve database names, volume identities, original
+developer/maintenance checks and qualification may use explicit short-lived
+container operations, stopped after use. Normal task checks and browser reviews
+run inside the worker without adding containers. Preserve database names, volume identities, original
 keys, selected credentials, queue/history, journals and unresolved publications.
+
+Drain old controllers and importers and reconcile pending imports before
+transition. Preserve the old Valkey volume for an explicit rollback/retention
+decision; removal from Compose must not delete it. Preserve registered account
+identities and renewal state when moving account storage into runner ownership.
+Never copy old proofs or relabel historical qualification as current readiness.
+Reconcile unfinished GitHub publications before new claims and observe human
+merges through read-only reconciliation.
 
 Drain and back up the old deployment before switching. Test restore into an empty
 separate project. Keep processing disabled during migration and qualification.
@@ -104,3 +151,41 @@ runner is outside this contract.
 See [Docker operations](docker-operations.md) for executable procedures and the
 current verification evidence. Historical slot/host documents describe old
 protocols, not the current deployment contract.
+
+## Release evidence
+
+Qualification and acceptance code runs in containers on the actual target stack.
+Explicit operator Docker/Compose inspection can supply selected configuration
+facts; no qualification container receives a host engine socket.
+
+- A clean machine with existing Docker/Compose starts the complete stack without
+  package, service, shell/profile, home/auth, or security-setting changes.
+- Rendered production Compose has no host-path/socket/device mounts, privileged
+  services, host namespaces or daemon credentials. Only declared volumes/tmpfs
+  are writable; images contain released source.
+- The canonical default runtime declares exactly four long-running
+  containers, including the selected account connection. No init/migration,
+  broker, proxy, gateway, account or test-DB sidecar is required. Temporary operator
+  jobs stop after use; normal build/check/browser phases add no containers.
+- App web/import and runner control/mediation children fail and restart visibly;
+  scheduling leases prevent duplicate imports. Startup is retry-safe after partial
+  initialization/migrations. Restarts cannot duplicate paid sessions or PRs.
+- Local test PostgreSQL/browser/app subprocesses share the worker's enforced CPU,
+  memory, PID, disk and time limits. Cross-phase checks prove no surviving process,
+  source, credential or DB state; failed cleanup fences the slot. Record measured
+  idle and peak use rather than assume a smaller count guarantees lower memory.
+- Real tasks cannot read host sentinels, control the engine, reach LAN/metadata or
+  production services, forge receipts, or survive confirmed cancellation. Verify
+  resource exhaustion, worker restart and cross-job source/secret/DB isolation.
+- All tests, packaging, migrations, backups/restores and actual browser PNGs run
+  in containers. CI uses the same images/profiles. Old host-based reports cannot
+  qualify this release.
+- Two owner issues, B depending on A, are discovered, coded, independently checked
+  and published automatically. A human reviews and merges each PR; B uses A's
+  verified human merge. Delivery releases claim/worker capacity while review waits,
+  and independent work can proceed. Record final trees, CI identities, human merge
+  actors/timestamps, restart/termination/ACK evidence, ancestry, zero runner merge
+  calls and zero command/plan approvals, including failed/recovered generations.
+
+Failure keeps execution disabled. There is no host-runner, socket, privileged-mode
+or per-command/plan approval fallback. Human PR review and merge remain required.

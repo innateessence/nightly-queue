@@ -24,6 +24,10 @@ class GitHub:
         self.creates = 0
         self.lose_create = False
         self.repository_id = 17
+        self.base_revision = "a" * 40
+
+    def base_sha(self, workspace):
+        return self.base_revision
 
     def repository(self, **kwargs):
         return {
@@ -272,6 +276,38 @@ class NativePublicationTests(unittest.TestCase):
         self.assertEqual(self.git.pushes, 1)
         self.assertEqual(self.github.creates, 1)
         self.assertEqual(self.host.native["delivery"]["publication_id"], publication)
+
+    def test_changed_base_cannot_publish_or_trigger_legacy_revision(self):
+        self.github.base_revision = "9" * 40
+        with self.assertRaises(ReconciliationRequired):
+            self.complete()
+        self.assertEqual(self.git.pushes, 0)
+        self.assertEqual(self.github.creates, 0)
+        self.assertNotIn("publication_revision", self.host.native)
+
+    def test_factory_base_change_hands_exact_provider_identities_to_bounded_recovery(
+        self,
+    ):
+        from vibearr_runner.factory_delivery import PublicationBaseChanged
+
+        self.host.snapshot = {"effective": {"factory": {"enabled": True}}}
+        self.host.native["factory"] = {"round": 1}
+        self.github.base_revision = "9" * 40
+        with patch("vibearr_runner.factory_recovery.FactoryRecovery") as recovery:
+            recovery.return_value.base_changed.return_value = "continue"
+            with patch.object(
+                NativeDelivery, "clients", return_value=(self.github, self.git)
+            ):
+                self.assertEqual(NativeDelivery(self.host).step(), "continue")
+        observation = recovery.return_value.base_changed.call_args.args[0]
+        self.assertIsInstance(observation, PublicationBaseChanged)
+        self.assertEqual(observation.old_base, "a" * 40)
+        self.assertEqual(observation.new_base, "9" * 40)
+        self.assertEqual(
+            observation.workspace, self.host.native["candidate"]["workspace"]
+        )
+        self.assertEqual(self.git.pushes, 0)
+        self.assertEqual(self.github.creates, 0)
 
     def test_lost_pr_response_reconciles_the_same_pr_without_another_create(self):
         self.github.lose_create = True
