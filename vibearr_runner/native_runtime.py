@@ -21,7 +21,7 @@ def runtime_diagnostics(policy: dict, client=None, *, validation_profile=None) -
         sha256(capabilities.get("binding_digest"))
         if (
             capabilities.get("runtime")
-            not in {"compose-slot-v2", "integrated-runner-v1"}
+            not in {"compose-slot-v2", "integrated-runner-v1", "compact-worker-v1"}
             or capabilities.get("qualified") is not True
         ):
             raise ValueError(

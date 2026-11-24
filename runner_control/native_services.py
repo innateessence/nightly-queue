@@ -10,6 +10,7 @@ from django.utils import timezone
 from credentials.redaction import redact_run_payload
 from projects.models import Project
 from vibearr_runner import native_contract as contract
+from vibearr_runner.factory_contract import repair_limit
 from vibearr_runner.policy import ExecutionPolicy
 from work_queue.models import QueueItem
 from work_queue.services import (
@@ -269,7 +270,7 @@ def update_status(*, runner, run_id, claim_token, data):
         return run
     if value["repair_count"] < previous.get("repair_count", 0) or value[
         "repair_count"
-    ] > min(2, native_policy(run).repair_limit):
+    ] > repair_limit(run.configuration_snapshot, native_policy(run).repair_limit):
         raise RunConflict("Native repair accounting cannot reset or exceed the policy.")
     run.native_status = value
     run.heartbeat_at = timezone.now()
@@ -626,8 +627,8 @@ def validate_intent_binding(run, value, operation_id=None):
 
     reporting = value["kind"] == "merge" and value["data"]["stage"] != "merge"
     policy = completion_authority(run) if reporting else authorize(run)
-    if value["policy_digest"] != policy.digest or value["attempt"] > min(
-        2, policy.repair_limit
+    if value["policy_digest"] != policy.digest or value["attempt"] > repair_limit(
+        run.configuration_snapshot, policy.repair_limit
     ):
         raise RunConflict("Native dispatch exceeds its frozen policy/repair limit.")
     kind, data = value["kind"], value["data"]
