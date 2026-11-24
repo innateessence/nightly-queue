@@ -732,6 +732,16 @@ class FactoryScenarioTests(unittest.TestCase):
             )
         )
 
+    def test_history_rejects_repairs_above_the_frozen_factory_limit(self):
+        fixture = Fixture(rounds=2)
+        snapshot = fixture.run["configuration_snapshot"]
+        snapshot["effective"]["factory"]["max_repairs"] = 0
+        for entry in fixture.artifacts:
+            entry["document"]["configuration_digest"] = digest(snapshot)
+            entry["digest"] = digest(entry["document"])
+        with self.assertRaisesRegex(ValueError, "shared repair attempts"):
+            fixture.history()
+
     def test_failed_check_then_bounded_repair_has_positive_complete_proof(self):
         fixture = Fixture(rounds=2)
         self.assert_case_passes(fixture, "failed-check-repair")

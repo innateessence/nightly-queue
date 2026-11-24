@@ -2,7 +2,7 @@
 
 from .services import RunConflict
 from vibearr_runner import native_contract as contract
-from vibearr_runner.factory_contract import validate_role_intent
+from vibearr_runner.factory_contract import repair_limit, validate_role_intent
 from vibearr_runner.factory_roles import (
     retain_criteria,
     retain_requested_criteria,
@@ -57,8 +57,8 @@ def generation_binding(run, document, previous):
     candidate_binding(run, plan, workspace.payload)
     plan_binding(run, plan.document, previous)
     expected_attempt = workspace.payload["attempt"] + 1
-    if generation["attempt"] != expected_attempt or expected_attempt > min(
-        2, native_policy(run).repair_limit
+    if generation["attempt"] != expected_attempt or expected_attempt > repair_limit(
+        run.configuration_snapshot, native_policy(run).repair_limit
     ):
         raise RunConflict(
             "Factory base refresh consumes the consecutive shared repair allowance."

@@ -344,6 +344,43 @@ class FactoryRecoveryTests(unittest.TestCase):
                 binding={**binding, "source_digest": "b" * 64},
             )
 
+    def configure_repairs(self, limit):
+        self.native.snapshot["effective"] = {
+            "factory": {"enabled": True, "max_repairs": limit}
+        }
+        self.factory.pop("recovery")
+        self.recovery = FactoryRecovery(self.native, self.factory, clock=self.clock)
+
+    def test_zero_configured_repairs_rejects_first_failed_check_repair(self):
+        self.configure_repairs(0)
+        self.failure()
+        with self.assertRaisesRegex(BudgetExceeded, "shared repair"):
+            self.recovery.repair("checks", "test failed")
+        self.assertEqual(self.native.native["attempt"], 0)
+
+    def test_one_configured_repair_is_shared_by_checks_and_reviews(self):
+        self.configure_repairs(1)
+        self.failure()
+        self.recovery.repair("checks", "test failed")
+        self.failure("reviews")
+        with self.assertRaisesRegex(BudgetExceeded, "shared repair"):
+            self.recovery.repair("reviews", "changes requested")
+        self.assertEqual(self.native.native["attempt"], 1)
+
+    def test_two_configured_repairs_allow_both_failure_sources(self):
+        self.configure_repairs(2)
+        self.failure()
+        self.recovery.repair("checks", "test failed")
+        self.failure("reviews")
+        self.recovery.repair("reviews", "changes requested")
+        self.assertEqual(self.native.native["attempt"], 2)
+
+    def test_configured_limit_cannot_increase_on_restart(self):
+        self.configure_repairs(0)
+        self.native.snapshot["effective"]["factory"]["max_repairs"] = 1
+        with self.assertRaisesRegex(ReconciliationRequired, "controls changed"):
+            FactoryRecovery(self.native, self.factory, clock=self.clock)
+
     def test_repair_budget_is_shared_across_failure_sources(self):
         self.failure()
         self.recovery.repair("checks", "test failed")
