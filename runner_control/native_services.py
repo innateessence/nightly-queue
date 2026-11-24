@@ -392,6 +392,15 @@ def validate_context_binding(run, value, base_commit, resolved_base_branch):
     policy = native_policy(run)
     if document["validation_profile"]["profile_id"] != policy.validation_profile:
         raise RunConflict("Native context selected a different validation recipe.")
+    factory_enabled = (
+        run.configuration_snapshot["effective"].get("factory", {}).get("enabled")
+    )
+    if factory_enabled:
+        from .factory_native import context_binding
+
+        context_binding(run, document)
+    elif "factory" in document:
+        raise RunConflict("Disabled factory execution cannot register role profiles.")
     if registered(run):
         require_termination(run)
         previous = latest_context(run)
@@ -400,6 +409,12 @@ def validate_context_binding(run, value, base_commit, resolved_base_branch):
                 raise RunConflict(
                     "An active native attempt cannot rewrite frozen instructions/policy."
                 )
+        if factory_enabled:
+            from .factory_native import generation_binding
+
+            generation_binding(run, document, previous)
+    elif "factory_generation" in document:
+        raise RunConflict("Initial factory context cannot claim a prior generation.")
     if not run.item.base_branch:
         QueueItem.objects.filter(pk=run.item_id, base_branch="").update(
             base_branch=resolved_base_branch
@@ -416,7 +431,15 @@ def validate_plan_binding(run, value, ctx):
         or document["context_digest"] != ctx.digest
     ):
         raise RunConflict("Native plan must reference the current immutable context.")
-    if document["acceptance_criteria"] != ctx.document["acceptance_criteria"]:
+    if "factory" in ctx.document:
+        from .factory_native import plan_binding
+
+        plan_binding(run, document, ctx)
+    elif "factory_specification_id" in document:
+        raise RunConflict(
+            "Ordinary native context cannot claim a factory specification."
+        )
+    elif document["acceptance_criteria"] != ctx.document["acceptance_criteria"]:
         raise RunConflict("Native plan must retain the frozen acceptance criteria.")
     return document
 
@@ -584,10 +607,17 @@ def validate_intent_binding(run, value, operation_id=None):
     ctx = context(run, value["context_id"], value["context_digest"])
     if str(ctx.pk) != run.context_reference:
         raise RunConflict("Native dispatch requires the current context.")
-    plan = run.plans.filter(pk=run.plan_reference, context=ctx).first()
-    if plan is None:
+    plan = (
+        run.plans.filter(pk=run.plan_reference, context=ctx).first()
+        if run.plan_reference
+        else None
+    )
+    factory = value["data"].get("factory") if value["kind"] == "agent" else None
+    before_plan = factory and factory.get("role") in {"intake", "specification"}
+    if plan is None and not before_plan:
         raise RunConflict("Save a native plan artifact before dispatch.")
-    contract.validate_plan(plan.document)
+    if plan is not None:
+        contract.validate_plan(plan.document)
     from .merge_services import (
         bind_merge_intent,
         bind_revision_intent,
@@ -603,6 +633,17 @@ def validate_intent_binding(run, value, operation_id=None):
     kind, data = value["kind"], value["data"]
     if kind == "agent" and hasattr(run, "delivery_recovery"):
         raise RunConflict("Delivery-only recovery cannot dispatch another agent.")
+    factory_enabled = (
+        run.configuration_snapshot["effective"].get("factory", {}).get("enabled")
+    )
+    if kind == "agent" and (factory is not None or factory_enabled):
+        if factory is None:
+            raise RunConflict("Factory dispatch requires a typed role intent.")
+        from .factory_native import dispatch_binding
+
+        dispatch_binding(run, value, ctx, policy)
+        require_prior_terminal(run)
+        return
     if kind == "revision":
         bind_revision_intent(run, value)
         return
@@ -877,6 +918,28 @@ def validate_agent_binding(run, value):
 def validate_workspace_binding(run, value):
     ctx = context(run, value["context_id"], value["context_digest"])
     intent = saved(run, value["agent_intent_id"], "native_intent").payload
+    factory_enabled = (
+        run.configuration_snapshot["effective"].get("factory", {}).get("enabled")
+        is True
+    )
+    if factory_enabled and "factory_paths" not in value:
+        raise RunConflict(
+            "Factory candidate import requires its trusted changed-path inventory."
+        )
+    role = intent["data"].get("factory", {}).get("role")
+    if (factory_enabled or role is not None) and role != "build":
+        raise RunConflict("Only a factory builder may import candidate changes.")
+    if factory_enabled:
+        descriptor = intent["data"]["factory"]
+        plan = run.plans.filter(pk=run.plan_reference, context=ctx).first()
+        if (
+            plan is None
+            or descriptor.get("specification_id") != str(plan.pk)
+            or descriptor.get("specification_digest") != plan.digest
+        ):
+            raise RunConflict(
+                "Factory candidate import differs from its dispatched specification."
+            )
     result = run.evidence.filter(
         kind="native_agent",
         payload__intent_id=value["agent_intent_id"],
@@ -894,7 +957,8 @@ def validate_workspace_binding(run, value):
     if value["export_digest"] != result.payload["receipt"]["export_digest"]:
         raise RunConflict("Native workspace differs from the verified agent export.")
     check_workspace(run, value["workspace"], ctx)
-    if value["attempt"]:
+    generation_attempt = ctx.document.get("factory_generation", {}).get("attempt", 0)
+    if value["attempt"] != generation_attempt:
         previous = workspace_fact(run, intent["data"]["workspace_id"], ctx).payload
         if (
             value["workspace"]["base_revision"]
