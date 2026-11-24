@@ -6,6 +6,7 @@ candidate=${CANDIDATE_SHA:?Set the exact component PR head SHA.}
 project=nq-component-ci-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-${RANDOM}
 [[ $project =~ ^nq-component-ci-[a-z0-9-]+$ && ${#project} -le 63 ]] || exit 2
 scratch=$(mktemp -d /tmp/vibearr-component.XXXXXXXX)
+export BUILDX_CONFIG=${BUILDX_CONFIG:-$scratch/buildx}
 output=${VIBEARR_COMPONENT_OUTPUT:-/tmp/$project-evidence}
 [[ ! -e $output ]] || { echo 'Choose a fresh component evidence directory.' >&2; exit 2; }
 mkdir -p "$output"
