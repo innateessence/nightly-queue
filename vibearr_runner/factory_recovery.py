@@ -7,6 +7,7 @@ import time
 from uuid import UUID
 
 from .budgets import ActiveBudget, BudgetExceeded
+from .factory_contract import repair_limit
 from .native_contract import digest, receipt_summary
 from .recovery import ReconciliationRequired
 
@@ -26,7 +27,7 @@ class FactoryRecovery:
             controls["task_timeout_seconds"],
             stages,
         )
-        self.limit = min(2, native.policy.repair_limit)
+        self.limit = repair_limit(native.snapshot, native.policy.repair_limit)
         frozen = {
             "repair_limit": self.limit,
             "deadline": native.native["deadline"],

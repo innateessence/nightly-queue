@@ -8,6 +8,7 @@ import socket
 import time
 
 from .bootstrap_files import private_json
+from .factory_contract import repair_limit
 from .native_contract import (
     canonical,
     digest,
@@ -399,7 +400,8 @@ class History:
                 if intent["kind"] == "agent"
             }
         )
-        limit = scenario["repair_limit"]
+        self.repair_limit = repair_limit(snapshot, scenario["repair_limit"])
+        limit = self.repair_limit
         require(
             not self.attempts
             or self.attempts == list(range(max(self.attempts) + 1))
@@ -909,7 +911,7 @@ def checkpoint(value, history, operation_id):
     )
     require(
         type(native["attempt"]) is int
-        and 0 <= native["attempt"] <= history.scenario["repair_limit"],
+        and 0 <= native["attempt"] <= history.repair_limit,
         "Checkpoint repair attempt differs.",
     )
     caps = value["capabilities"]
@@ -1083,7 +1085,7 @@ def verify_case(name, history, *, queue, github, records, operation_id):
         return
     if name == "repair-exhaustion":
         history.terminal_failure()
-        limit = history.scenario["repair_limit"]
+        limit = history.repair_limit
         require(
             history.attempts == list(range(limit + 1)),
             "Exhaustion did not spend the frozen repair allowance.",

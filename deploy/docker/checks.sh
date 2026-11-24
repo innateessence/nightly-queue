@@ -58,11 +58,14 @@ start_runtime() {
 restored() { COMPOSE_PROJECT_NAME=$restore_project VIBEARR_DATA_PROJECT=$restore_project VIBEARR_RUNNER_NAME=restored-check-runner docker compose --file "$recipe/docker-compose.yml" --project-name "$restore_project" "$@"; }
 qualify_worker() {
   local orchestrate=${1:-compose}
+  local status=0
   local targets
   local selected_listing
   local selected_ids=()
-  selected_listing=$("$orchestrate" ps -q runner app postgres) || return
+  printf 'Qualification stage=select orchestrator=%s\n' "$orchestrate" >&2
+  selected_listing=$("$orchestrate" ps -q runner app postgres) || { status=$?; printf 'Qualification stage=select status=%s\n' "$status" >&2; return "$status"; }
   mapfile -t selected_ids <<< "$selected_listing"
+  printf 'Qualification stage=inspect-targets orchestrator=%s\n' "$orchestrate" >&2
   targets=$(docker inspect "${selected_ids[@]}" | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -I -c '
 import ipaddress,json,sys
 containers=json.load(sys.stdin)
@@ -82,8 +85,11 @@ for container in containers:
 if set(targets) != set(networks) or len(projects) != 1:
     raise ValueError("Qualification requires one complete selected Compose project")
 print(json.dumps(targets,sort_keys=True))
-') || return
-  "$orchestrate" exec -T -e "VIBEARR_QUALIFICATION_TARGETS=$targets" worker python -I -m vibearr_executor.compact_worker qualify
+') || { status=$?; printf 'Qualification stage=inspect-targets status=%s\n' "$status" >&2; return "$status"; }
+  printf 'Qualification stage=qualify-cli orchestrator=%s\n' "$orchestrate" >&2
+  "$orchestrate" exec -T -e "VIBEARR_QUALIFICATION_TARGETS=$targets" worker python -I -m vibearr_executor.compact_worker qualify || status=$?
+  printf 'Qualification stage=qualify-cli status=%s\n' "$status" >&2
+  return "$status"
 }
 observe_phase() {
   local phase=$1
@@ -100,23 +106,42 @@ export_volume() {
   mkdir -p "$destination"
   docker run --rm --network none --read-only --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges:true --user 0:0 --memory 128m --pids-limit 16 --cpus 1 --volume "$volume:/data:ro" --entrypoint tar "$VIBEARR_TOOLS_IMAGE" -C /data -cf - . | tar -xf - -C "$destination"
 }
+failure_state() {
+  local orchestrate=$1 listing
+  local selected_ids=()
+  listing=$("$orchestrate" ps -aq worker runner) || return
+  [[ -n $listing ]] || return 0
+  mapfile -t selected_ids <<< "$listing"
+  ((${#selected_ids[@]} <= 2)) || return 1
+  docker inspect --format '{"id":{{json .Id}},"image":{{json .Image}},"status":{{json .State.Status}},"running":{{.State.Running}},"oom_killed":{{.State.OOMKilled}},"exit_code":{{.State.ExitCode}},"started_at":{{json .State.StartedAt}},"finished_at":{{json .State.FinishedAt}},"restart_count":{{.RestartCount}}}' "${selected_ids[@]}"
+}
 cleanup() {
-  local result=$?
+  local original_status=$?
+  local result=$original_status cleanup_status=0
   trap - EXIT
+  if ((original_status != 0)); then
+    failure_state compose > "$output/failure-compose-state.jsonl" 2> "$output/failure-compose-state.log" || true
+    failure_state restored > "$output/failure-restored-state.jsonl" 2> "$output/failure-restored-state.log" || true
+  fi
   compose logs --no-color --tail 100 > "$output/services.log" 2>&1 || true
-  export_volume "${project}_browser-artifacts" "$output/browser" || result=1
-  restored down --volumes --remove-orphans > "$output/restore-cleanup.log" 2>&1 || result=1
-  compose down --volumes --remove-orphans > "$output/cleanup.log" 2>&1 || result=1
+  export_volume "${project}_browser-artifacts" "$output/browser" || cleanup_status=1
+  restored down --volumes --remove-orphans > "$output/restore-cleanup.log" 2>&1 || cleanup_status=1
+  compose down --volumes --remove-orphans > "$output/cleanup.log" 2>&1 || cleanup_status=1
   for volume in "${project}_backup-data" "${project}_browser-artifacts"; do
-    if docker volume inspect "$volume" >/dev/null 2>&1; then docker volume rm "$volume" >> "$output/cleanup.log" 2>&1 || result=1; fi
+    if docker volume inspect "$volume" >/dev/null 2>&1; then docker volume rm "$volume" >> "$output/cleanup.log" 2>&1 || cleanup_status=1; fi
   done
   for role in app tools runner worker worker-base source input packaging browser backup reports; do
     image=$project-$role:checks
     if docker image inspect "$image" >/dev/null 2>&1; then
-      docker image rm --no-prune "$image" >> "$output/image-cleanup.log" 2>&1 || result=1
+      docker image rm --no-prune "$image" >> "$output/image-cleanup.log" 2>&1 || cleanup_status=1
     fi
   done
-  rm -rf "$scratch"
+  rm -rf "$scratch" || cleanup_status=1
+  if ((result == 0)); then result=$cleanup_status; fi
+  if ! printf '{"original_status":%s,"cleanup_status":%s,"final_status":%s}\n' "$original_status" "$cleanup_status" "$result" > "$output/exit-status.json"; then
+    if ((result == 0)); then result=1; fi
+    printf 'Unable to record check exit status.\n' >&2 || true
+  fi
   echo "Docker check artifacts: $output"
   exit "$result"
 }
@@ -197,12 +222,12 @@ if [[ $mode == full || $mode == boundary || $mode == candidate || $mode == opera
   compose exec -T worker python -I -m vibearr_executor.compact_worker restart-witness > "$output/restart-witness.json" 2>&1
   compose kill -s SIGKILL worker > "$output/restart.log" 2>&1
   start_runtime >> "$output/restart.log" 2>&1
-  qualify_worker > "$output/qualification.json" 2>&1
+  qualify_worker > "$output/qualification.json" 2>> "$output/qualification-stages.log"
   compose exec -T worker python -I -m vibearr_executor.compact_worker restart-witness > "$output/second-witness.json" 2>&1
   compose kill -s SIGKILL worker >> "$output/restart.log" 2>&1
   start_runtime >> "$output/restart.log" 2>&1
   compose exec -T worker python -I -c 'from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path("/run/vibearr/worker/control-token").read_text().strip()); assert c.capabilities()["qualified"] is False' > "$output/restart-proof.log" 2>&1
-  qualify_worker > "$output/requalified.json" 2>&1
+  qualify_worker > "$output/requalified.json" 2>> "$output/qualification-stages.log"
   compose exec -T worker python -I -m vibearr_executor.compact_worker qualify-roles > "$output/role-qualification.json" 2>&1
   observe_phase boundary
   compose exec -T worker python -I < deploy/docker/dependency_smoke.py > "$output/dependency-smoke.json" 2>&1
@@ -263,7 +288,7 @@ if [[ $mode == full || $mode == operations ]]; then
   restored exec -T worker python -I -m vibearr_executor.compact_worker restart-witness > "$output/restored-restart-witness.json" 2>&1
   restored kill -s SIGKILL worker > "$output/restored-restart.log" 2>&1
   start_runtime restored >> "$output/restored-restart.log" 2>&1
-  qualify_worker restored > "$output/restored-qualification.json" 2>&1
+  qualify_worker restored > "$output/restored-qualification.json" 2>> "$output/qualification-stages.log"
   restored exec -T worker python -I -m vibearr_executor.compact_worker qualify-roles > "$output/restored-role-qualification.json" 2>&1
   restored exec -T -e VIBEARR_DISPOSABLE_ACCEPTANCE=1 worker python -I - "$backup_id" --worker < deploy/docker/restore_check.py > "$output/restored-worker-authority.json" 2>&1
   restored exec -T worker python -I -c 'import json,os; from pathlib import Path; from vibearr_executor.client import Client; c=Client("http://127.0.0.1:8791",Path(os.environ["VIBEARR_EXECUTOR_TOKEN_FILE"]).read_text().strip()); print(json.dumps(c.capabilities(),sort_keys=True))' > "$output/restored-capabilities.json"

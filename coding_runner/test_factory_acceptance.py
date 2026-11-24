@@ -498,6 +498,14 @@ class FactoryChainTests(unittest.TestCase):
         with self.assertRaises(factory.DeliveryError):
             self.check()
 
+    def test_rounds_cannot_exceed_the_frozen_factory_cap(self):
+        self.run["configuration_snapshot"]["effective"]["factory"]["max_repairs"] = 0
+        later = deepcopy(self.entries[-1])
+        later["document"]["round"] = 2
+        self.entries.append(later)
+        with self.assertRaisesRegex(ValueError, "repair budget"):
+            self.check()
+
     def test_rounds_cannot_reset_the_shared_repair_budget(self):
         for entry in self.entries:
             entry["document"]["round"] = 4
@@ -861,6 +869,13 @@ class GenerationTests(unittest.TestCase):
             "context_reference": identity(2),
             "configuration_snapshot": {"execution_policy": {"repair_limit": 2}},
         }
+
+    def test_generation_cannot_exceed_the_frozen_factory_cap(self):
+        self.run["configuration_snapshot"]["effective"] = {
+            "factory": {"enabled": True, "max_repairs": 0}
+        }
+        with self.assertRaisesRegex(ValueError, "shared repair budget"):
+            factory.verify_generations(self.contexts, self.run)
 
     def test_linked_base_generation_preserves_frozen_authority(self):
         factory.verify_generations(self.contexts, self.run)

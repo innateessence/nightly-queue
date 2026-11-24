@@ -22,7 +22,7 @@ from . import test_native_protocol as native_fixture
 from . import test_factory_artifacts as artifact_fixture
 from .factory_native import candidate_binding, require_artifact_binding
 from .factory_services import save_artifact
-from .native_services import selected_account
+from .native_services import selected_account, update_status
 from .plan_services import save_context, save_plan
 from .services import RunConflict, finish_run
 
@@ -853,3 +853,80 @@ class FactoryCandidateAuthorityTests(artifact_fixture.FactoryFixture, TestCase):
                     RunConflict, "another specification or candidate"
                 ):
                     require_artifact_binding(artifacts, changed)
+
+
+@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+class FactoryRepairLimitTests(FactoryNativeFixture, TestCase):
+    def configure_repairs(self, limit):
+        self.configuration["max_repairs"] = limit
+        self.run.configuration_snapshot["effective"]["factory"] = self.configuration
+        self.run.save(update_fields=["configuration_snapshot"])
+
+    def test_zero_limit_permits_original_intake_specification_and_build(self):
+        self.configure_repairs(0)
+        specification = self.complete_specification()
+        plan = self.save_plan(self.plan_document(specification))
+        candidate = self.complete_candidate(plan)
+        self.assertEqual(candidate.payload["attempt"], 0)
+
+    def test_zero_limit_rejects_repair_dispatch(self):
+        self.configure_repairs(0)
+        self.save_context()
+        document = self.role_intent()
+        document["attempt"] = 1
+        document["data"]["factory"]["round"] = 2
+        with self.assertRaisesMessage(RunConflict, "policy/repair limit"):
+            self.write("native_intent", document)
+
+    def test_one_limit_rejects_second_repair_dispatch(self):
+        self.configure_repairs(1)
+        self.save_context()
+        document = self.role_intent()
+        document["attempt"] = 2
+        document["data"]["factory"]["round"] = 3
+        with self.assertRaisesMessage(RunConflict, "policy/repair limit"):
+            self.write("native_intent", document)
+
+    def test_status_rejects_count_above_frozen_factory_limit(self):
+        self.configure_repairs(0)
+        with self.assertRaisesMessage(RunConflict, "accounting"):
+            update_status(
+                runner=self.runner,
+                run_id=self.run.pk,
+                claim_token=self.claim,
+                data={"sequence": 1, "stage": "implementation", "repair_count": 1},
+            )
+
+    def test_status_accepts_count_at_frozen_factory_limit(self):
+        self.configure_repairs(1)
+        update_status(
+            runner=self.runner,
+            run_id=self.run.pk,
+            claim_token=self.claim,
+            data={"sequence": 1, "stage": "implementation", "repair_count": 1},
+        )
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.native_status["repair_count"], 1)
+
+    def generation(self, limit):
+        self.configure_repairs(limit)
+        specification = self.complete_specification()
+        self.previous_plan = self.save_plan(self.plan_document(specification))
+        self.previous_workspace = self.complete_candidate(self.previous_plan)
+        self.previous_context = self.context
+        self.new_source = pack({"file.py": (0o644, b"new base\n")})
+        self.terminate()
+        return FactoryGenerationTests.generation_document(self)
+
+    def test_zero_limit_rejects_base_generation(self):
+        document = self.generation(0)
+        response = FactoryGenerationTests.post_generation(self, document)
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertIn("shared repair allowance", response.json()["error"])
+
+    def test_one_limit_permits_base_generation_and_new_intake(self):
+        document = self.generation(1)
+        response = FactoryGenerationTests.post_generation(self, document)
+        self.assertEqual(response.status_code, 200, response.content)
+        intake = self.complete_role("intake", self.intake)
+        self.assertEqual(intake.round, 2)

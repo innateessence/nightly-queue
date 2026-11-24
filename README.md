@@ -22,15 +22,36 @@ it alone when everything is working.
    must pass before a change can be delivered.
 2. **Add work.** Write a GitHub issue or submit a task from the queue. Give it a
    clear outcome and any acceptance criteria the agent will need.
-3. **Let the queue run.** The worker picks up eligible work during its processing
-   window, prepares an isolated checkout, and gives the agent the issue context.
-4. **Check the result.** The agent implements the change and runs validation.
-   Failed checks get a bounded repair attempt; unresolved failures stay visible.
-5. **Deliver the change.** Passing work becomes a pull request linked to the
-   original issue. A human reviews and merges the current PR after the required
-   GitHub checks pass. Automatic merge remains disabled during this rollout.
+3. **Scope the work.** The target runner performs intake, records risk and affected
+   surfaces, and saves a specification with acceptance criteria.
+4. **Build and review.** A builder implements the spec in an isolated workspace.
+   Trusted checks run before separate code review and any required security, UX
+   or UI reviews. Failures return to the builder within a shared repair budget.
+5. **Deliver the change.** The supervisor verifies the checks and reviews, then
+   publishes one pull request linked to the issue, with check and review evidence.
+   A human reviews and merges it after the required GitHub checks pass.
 
-Routine work should finish without approval prompts. Connecting a project sets
+This is the [Codex-first software factory](docs/software-factory-plan.md),
+inspired by the ZazenCodes v2 workflow. Codex implements the full role pipeline
+first; Claude Code and OpenCode follow the same contract. The role pipeline and
+immutable round artifacts are implemented in this source.
+Live execution stays disabled until the current worker boot and selected
+provider/account/model pass qualification and live release acceptance.
+
+The Compose stack has **four always-on containers**: app, PostgreSQL, runner and
+one execution worker. The app handles issue-import scheduling; runner owns account
+and network mediation; worker runs setup, coding, reviews, checks and disposable
+test/browser processes sequentially. Celery/Beat, Valkey and the separate gateway,
+proxy, account and test-database containers are absent from this runtime. The
+[S1–S4 targets](docs/docker-only-runtime-plan.md#required-simplification-branches)
+remain the footprint and acceptance contract for these implemented boundaries.
+
+Human merging is required through the MVP and factory rollout. Automatic merging
+is deferred until sustained operation demonstrates maturity and a human explicitly
+approves a separate rollout; agent review never grants merge permission.
+
+Routine execution through PR delivery should finish without command or plan
+approval prompts. Connecting a project sets
 the boundaries for its agents: which issues they can work on, what they can
 access, how long they can run, and how changes are delivered. Setup, investigation,
 editing, and tests happen inside those boundaries. Work that cannot proceed
@@ -65,7 +86,7 @@ vibearr's own GitHub issue tracker is its development backlog. The intended
 loop is the same one used for any other project:
 
 ```text
-Issue → Queue → Agent → Tests → Pull request → Human review and merge
+Issue → Intake → Spec → Build → Checks → Reviews → Decision → PR → Human merge
 ```
 
 Each feature gets its own issue, branch, and PR. Dependencies keep later features
@@ -75,8 +96,10 @@ Automatic updates extend it from merged code to the running installation.
 
 The [development plan](docs/autonomous-ai-queue-plan.md) lays out the implementation
 milestones: the application rename, autonomous execution, an isolated runtime,
-native agent integrations, issue selection, automatic merging, the operations UI,
-and self-updates.
+native agent integrations, issue selection, human-reviewed delivery, the factory role
+pipeline, the operations UI, and self-updates. The
+[factory branch sequence](docs/software-factory-plan.md#branch-sequence-and-acceptance)
+defines F1–F8 and their acceptance gates.
 
 The [MVP release contract](docs/vibearr-mvp.md) defines the first complete loop:
 two dependent issues implemented and tested, with a human merging each PR and the
@@ -190,7 +213,7 @@ reset between phases. Validation uses fresh snapshots and trusted image tools.
 Neither runner nor worker receives production database credentials. There is no
 Docker daemon access. GitHub issue text and repository content cannot grant new
 permissions. Phases share one worker namespace, so current-boot isolation and
-cleanup probes remain mandatory. See the [factory plan](https://github.com/innateessence/nightly-queue/pull/146).
+cleanup probes remain mandatory. See the [factory plan](docs/software-factory-plan.md).
 
 | Directory | Responsibility |
 | --- | --- |
@@ -228,6 +251,8 @@ Native agents use pinned executables in one worker image and explicitly selected
 connections. The [runtime contract](docs/docker-only-runtime-plan.md) and
 [operations guide](docs/docker-operations.md) supersede historical host/fleet
 instructions. Fixture responses and old proofs do not establish live readiness.
+[Automatic merge](docs/automatic-merge.md) is deferred and must remain disabled
+during this rollout; agent review does not grant merge permission.
 
 ## Keeping your data
 
