@@ -53,6 +53,16 @@ class FactoryContractError(ValueError):
     pass
 
 
+def repair_limit(snapshot, policy_limit):
+    factory = snapshot.get("effective", {}).get("factory", {})
+    if factory.get("enabled") is not True:
+        return min(2, policy_limit)
+    configured = factory.get("max_repairs", policy_limit)
+    if type(configured) is not int or not 0 <= configured <= 10:
+        raise FactoryContractError("Frozen factory repair limit is invalid.")
+    return min(2, policy_limit, configured)
+
+
 def identifier(value):
     if not isinstance(value, str):
         raise FactoryContractError("Factory identifiers must be UUID strings.")

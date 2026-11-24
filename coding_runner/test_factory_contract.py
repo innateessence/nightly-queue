@@ -5,6 +5,7 @@ from uuid import uuid4
 from vibearr_runner.factory_contract import (
     FactoryContractError,
     artifact_document,
+    repair_limit,
     validate_artifact,
     validate_role_intent,
 )
@@ -209,3 +210,37 @@ class FactoryContractTests(unittest.TestCase):
         ):
             with self.subTest(change=change), self.assertRaises(FactoryContractError):
                 validate_artifact({**copy.deepcopy(original), **change})
+
+
+class FactoryRepairLimitTests(unittest.TestCase):
+    def test_frozen_factory_limit_caps_the_policy(self):
+        for configured in (0, 1, 2):
+            with self.subTest(configured=configured):
+                snapshot = {
+                    "effective": {
+                        "factory": {"enabled": True, "max_repairs": configured}
+                    }
+                }
+                self.assertEqual(repair_limit(snapshot, 2), configured)
+
+    def test_policy_and_absolute_ceiling_still_apply(self):
+        snapshot = {"effective": {"factory": {"enabled": True, "max_repairs": 10}}}
+        self.assertEqual(repair_limit(snapshot, 1), 1)
+        self.assertEqual(repair_limit(snapshot, 10), 2)
+
+    def test_historical_snapshots_without_factory_limits_keep_policy(self):
+        self.assertEqual(repair_limit({}, 1), 1)
+        self.assertEqual(
+            repair_limit({"effective": {"factory": {"enabled": True}}}, 2), 2
+        )
+
+    def test_invalid_frozen_limit_fails_closed(self):
+        for configured in (True, -1, 11, "0", None):
+            with self.subTest(configured=configured):
+                snapshot = {
+                    "effective": {
+                        "factory": {"enabled": True, "max_repairs": configured}
+                    }
+                }
+                with self.assertRaises(FactoryContractError):
+                    repair_limit(snapshot, 2)
