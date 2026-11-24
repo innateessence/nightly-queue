@@ -152,7 +152,7 @@ provider support; F7/F8 qualify their full factory roles after the Codex pipelin
 | 04 | P0 | `feat/unattended-issue-to-pr` | 03, 15 | Complete background task execution, validation, and repeatable PR delivery |
 | 05 | P0 | `feat/github-work-selection` | 01 | Author filtering, dependencies, holds, and deterministic priority |
 | 06 | P0 | `feat/self-development-bootstrap` | 04, 05 | This repository consumes its own feature issues automatically |
-| 07 | P2 deferred | `feat/automatic-pr-merge` | 06, F6, sustained maturity evidence and explicit human rollout approval | Optional automatic merge after the human-merge workflow is mature; outside the MVP and F1–F8 |
+| 07 | P2 | `feat/automatic-pr-merge` | 06, F6, sustained maturity evidence and explicit human rollout approval | Deferred: optional automatic merge after the human-merge workflow is mature; outside the MVP and F1–F8 |
 | 08 | P1 | `feat/native-claude-runner` | 06 | Native Claude Code using the same task lifecycle |
 | 09 | P1 | `feat/native-opencode-runner` | 06 | Native OpenCode using the same task lifecycle |
 | 10 | P1 | `feat/arr-queue-dashboard` | 06 | Appliance-style queue, Activity, History, and System views |
