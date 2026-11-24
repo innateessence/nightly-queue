@@ -8,11 +8,15 @@ It does not claim standalone-head runtime or provider qualification.
 
 The baseline is `b03776d52a43532e85b2dbca72d3ed7b58beec8e`; the prerequisite source
 is `25a3c786d977facb304868dcfd94d3901a916df1`. Both commit and tree identities are
-pinned. Each branch's `.github/component-prerequisites.json` enumerates every
+pinned. Each PR's `.github/component-prerequisites/pr-NUMBER.json` enumerates every
 unowned prerequisite path, Git mode/type/blob, or deletion. This is the full
 reviewed stack prerequisite set, not a minimal issue dependency graph.
 
-The workflow supplies its actual component SHA separately. A Docker Git job starts
+Each PR uses its own path so unrelated manifest additions do not conflict when
+humans merge dependency PRs. The workflow supplies the actual PR number and
+component SHA externally; the wrapper selects exactly that canonical manifest.
+Missing paths, another PR's path and the old shared filename are not fallbacks.
+A Docker Git job starts
 from that exact head, applies only the complete allowed unowned delta, and checks
 the entire resulting tree. Every candidate edit, new file, deletion and executable
 mode remains exactly as committed. A changed shared file is never replaced by
@@ -37,7 +41,7 @@ Generate a branch manifest with the reviewed helper inside its Docker Git job:
 
 ```sh
 python deploy/docker/component_ci.py manifest --repository /work/repo \
-  --candidate ACTUAL_HEAD_SHA --write-manifest /work/repo/.github/component-prerequisites.json
+  --candidate ACTUAL_HEAD_SHA --write-manifest /work/repo/.github/component-prerequisites/pr-PR_NUMBER.json
 ```
 
 Commit the generated manifest; it intentionally does not pin its own future head.
