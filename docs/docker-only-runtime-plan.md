@@ -6,6 +6,11 @@ agent/setup/validation, database, proxy, gateway, and account services. It imple
 the existing work in [#142](https://github.com/innateessence/nightly-queue/issues/142)
 to the [factory plan](https://github.com/innateessence/nightly-queue/pull/146).
 
+Delivery policy: humans review and merge every PR throughout the MVP and factory
+rollout. Use `delivery_mode: "pull_request"`; automatic merge is deferred behind
+the [factory maturity gate](software-factory-plan.md#later-automatic-merge-maturity-gate).
+Agent readiness and historical automatic-merge evidence do not authorize its use.
+
 ## Deployment
 
 The canonical Compose stack has exactly four long-running services:
@@ -100,6 +105,26 @@ reset, cancellation, deadlines and interrupted-operation reconciliation. Every
 restart requires a fresh interrupted witness and a new boot-bound proof. Live account/model and delivery
 acceptance are separate and must report genuine observations, never fixtures.
 
+## Required simplification branches
+
+The S1–S4 targets from the merged factory plan define the required boundaries.
+The current source implements these targets through the compact runtime and
+factory branches; their named checks remain release requirements. D1–D4 describe
+packaging, execution-boundary, validation and operations acceptance categories.
+Earlier fleet reports remain historical and cannot qualify this runtime.
+
+| Order | Branch | Depends on | Deliverable |
+| --- | --- | --- | --- |
+| S1 | `feat/compact-app-scheduler` | Existing app/queue | Extract import services from Celery wrappers; one supervised DB-leased scheduling loop in app, no Celery/Beat/Valkey runtime dependency, ordered idempotent initialization/migrations. Verify duplicate starts, backoff, pause-independent import, child failure/signals, and upgrade without data loss. |
+| S2 | `feat/compact-runner-control` | Existing supervisor | Direct authenticated worker client, account lifecycle and operation-scoped egress mediation as shared runner modules with one journal/lifecycle; remove gateway/account/proxy sidecars and obsolete daemon entrypoints. Test endpoint/phase isolation, selected auth/renewal and restart/lost-operation reconciliation without host credentials. |
+| S3 | `feat/compact-phase-worker` | S2, existing validation contracts | One immutable phase-switching worker with pinned CLI/browser/PostgreSQL tools, local disposable services, fresh independent checks, UID/control separation, reset/stop/export and real resource limits. Test sequential phases, stale grants, cross-phase leaks, DB/admin isolation, OOM/cancel/restart and browser receipts. |
+| S4 | `test/compact-stack-acceptance` | S1–S3 | Replace the old Compose topology with exactly four runtime services and in-service startup steps; preserve production/account/runner state. Qualify D1–D4 engineering gates, CI, CLI, packaging, drain/backup/restore, service count, aggregate limits and failure recovery on that stack. No paid model calls required. |
+
+The implementation is not live release acceptance. Requalify retained features on
+the exact source, images and current worker boot. F6 supplies genuine two-issue
+Codex evidence with human merges after engineering qualification and role
+integration; paid provider calls are not required for engineering checks.
+
 ## Operations and migration
 
 Migrations run inside `app` before the web server and scheduler. Backups, restore,
@@ -107,6 +132,14 @@ developer/maintenance checks and qualification may use explicit short-lived
 container operations, stopped after use. Normal task checks and browser reviews
 run inside the worker without adding containers. Preserve database names, volume identities, original
 keys, selected credentials, queue/history, journals and unresolved publications.
+
+Drain old controllers and importers and reconcile pending imports before
+transition. Preserve the old Valkey volume for an explicit rollback/retention
+decision; removal from Compose must not delete it. Preserve registered account
+identities and renewal state when moving account storage into runner ownership.
+Never copy old proofs or relabel historical qualification as current readiness.
+Reconcile unfinished GitHub publications before new claims and observe human
+merges through read-only reconciliation.
 
 Drain and back up the old deployment before switching. Test restore into an empty
 separate project. Keep processing disabled during migration and qualification.
@@ -118,3 +151,41 @@ runner is outside this contract.
 See [Docker operations](docker-operations.md) for executable procedures and the
 current verification evidence. Historical slot/host documents describe old
 protocols, not the current deployment contract.
+
+## Release evidence
+
+Qualification and acceptance code runs in containers on the actual target stack.
+Explicit operator Docker/Compose inspection can supply selected configuration
+facts; no qualification container receives a host engine socket.
+
+- A clean machine with existing Docker/Compose starts the complete stack without
+  package, service, shell/profile, home/auth, or security-setting changes.
+- Rendered production Compose has no host-path/socket/device mounts, privileged
+  services, host namespaces or daemon credentials. Only declared volumes/tmpfs
+  are writable; images contain released source.
+- The canonical default runtime declares exactly four long-running
+  containers, including the selected account connection. No init/migration,
+  broker, proxy, gateway, account or test-DB sidecar is required. Temporary operator
+  jobs stop after use; normal build/check/browser phases add no containers.
+- App web/import and runner control/mediation children fail and restart visibly;
+  scheduling leases prevent duplicate imports. Startup is retry-safe after partial
+  initialization/migrations. Restarts cannot duplicate paid sessions or PRs.
+- Local test PostgreSQL/browser/app subprocesses share the worker's enforced CPU,
+  memory, PID, disk and time limits. Cross-phase checks prove no surviving process,
+  source, credential or DB state; failed cleanup fences the slot. Record measured
+  idle and peak use rather than assume a smaller count guarantees lower memory.
+- Real tasks cannot read host sentinels, control the engine, reach LAN/metadata or
+  production services, forge receipts, or survive confirmed cancellation. Verify
+  resource exhaustion, worker restart and cross-job source/secret/DB isolation.
+- All tests, packaging, migrations, backups/restores and actual browser PNGs run
+  in containers. CI uses the same images/profiles. Old host-based reports cannot
+  qualify this release.
+- Two owner issues, B depending on A, are discovered, coded, independently checked
+  and published automatically. A human reviews and merges each PR; B uses A's
+  verified human merge. Delivery releases claim/worker capacity while review waits,
+  and independent work can proceed. Record final trees, CI identities, human merge
+  actors/timestamps, restart/termination/ACK evidence, ancestry, zero runner merge
+  calls and zero command/plan approvals, including failed/recovered generations.
+
+Failure keeps execution disabled. There is no host-runner, socket, privileged-mode
+or per-command/plan approval fallback. Human PR review and merge remain required.
