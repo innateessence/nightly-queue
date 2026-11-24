@@ -1,4 +1,5 @@
 import ipaddress
+import base64
 import json
 import select
 import socket
@@ -34,6 +35,7 @@ class Proxy(socketserver.ThreadingTCPServer):
     daemon_threads = True
     hosts: set[str]
     denied: set[str]
+    authorize = None
 
 
 class Handler(socketserver.StreamRequestHandler):
@@ -52,6 +54,7 @@ class Handler(socketserver.StreamRequestHandler):
             if not public_host(host) or host not in self.server.hosts:
                 raise ValueError("Destination is not allowed.")
             size = 0
+            credentials = []
             while True:
                 header = self.rfile.readline(4097)
                 size += len(header)
@@ -59,6 +62,19 @@ class Handler(socketserver.StreamRequestHandler):
                     raise ValueError("Invalid headers.")
                 if header == b"\r\n":
                     break
+                if header.lower().startswith(b"proxy-authorization:"):
+                    credentials.append(header.split(b":", 1)[1].strip().decode("ascii"))
+            token = ""
+            if self.server.authorize is not None:
+                if len(credentials) != 1 or not credentials[0].startswith("Basic "):
+                    raise ValueError("Operation grant is required.")
+                credential = base64.b64decode(credentials[0][6:], validate=True).decode(
+                    "ascii"
+                )
+                user, separator, token = credential.partition(":")
+                if user != "grant" or not separator:
+                    raise ValueError("Invalid operation grant.")
+                self.server.authorize(token, host)
             addresses = resolve_public(host, self.server.denied)
             # Connect to the validated numeric address; never resolve again during connect.
             with socket.create_connection((addresses[0], 443), timeout=15) as upstream:
@@ -66,13 +82,17 @@ class Handler(socketserver.StreamRequestHandler):
                 self.wfile.flush()
                 deadline = time.monotonic() + 3600
                 while time.monotonic() < deadline:
+                    if self.server.authorize is not None:
+                        self.server.authorize(token, host)
                     readable, _, _ = select.select(
-                        [self.connection, upstream], [], [], 10
+                        [self.connection, upstream], [], [], 1
                     )
                     for stream in readable:
                         content = stream.recv(65536)
                         if not content:
                             return
+                        if self.server.authorize is not None:
+                            self.server.authorize(token, host)
                         (
                             upstream if stream is self.connection else self.connection
                         ).sendall(content)
