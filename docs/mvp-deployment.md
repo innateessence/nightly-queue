@@ -1,5 +1,10 @@
 # Deploy the MVP with Docker Compose
 
+> Historical implementation reference. Deployment and authentication instructions
+> here are superseded by the [three-container runtime](docker-only-runtime-plan.md)
+> and [current operations](docker-operations.md). Do not start the old worker fleet,
+> use model API keys, or reuse its qualification evidence for the integrated runner.
+
 Every vibearr process runs in Docker: web, database, importer, supervisor, coding
 workers, validation, tools, qualification, browser capture, backup and recovery.
 Existing Docker Engine and Compose are the only runtime prerequisites. Installation

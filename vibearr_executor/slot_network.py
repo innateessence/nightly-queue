@@ -18,7 +18,11 @@ def address(host):
     return str(value)
 
 
-def configure(destinations):
+def configure(destinations, *, blocked_ports="8791,9001", task_uids=(1000,)):
+    if not task_uids or any(
+        type(uid) is not int or uid not in {1000, 10003} for uid in task_uids
+    ):
+        raise ValueError("Register task and candidate-service UIDs explicitly.")
     for executable in ("iptables", "ip6tables"):
 
         def run(*arguments):
@@ -35,7 +39,16 @@ def configure(destinations):
         if not exists:
             run("-N", CHAIN)
             run("-A", CHAIN, "-j", "REJECT")
-            run("-I", "OUTPUT", "1", "-m", "owner", "--uid-owner", "1000", "-j", CHAIN)
+        for uid in sorted(set(task_uids)):
+            owner = ["-m", "owner", "--uid-owner", str(uid), "-j", CHAIN]
+            installed = (
+                subprocess.run(
+                    [executable, "-w", "5", "-C", "OUTPUT", *owner], capture_output=True
+                ).returncode
+                == 0
+            )
+            if not installed:
+                run("-I", "OUTPUT", "1", *owner)
         # Keep the terminal rejection in place while replacing a job's allowlist.
         for line in subprocess.check_output(
             [executable, "-w", "5", "-S", CHAIN], text=True
@@ -55,7 +68,7 @@ def configure(destinations):
             "multiport",
             "!",
             "--dports",
-            "8791,9001",
+            blocked_ports,
             "-j",
             "ACCEPT",
         )

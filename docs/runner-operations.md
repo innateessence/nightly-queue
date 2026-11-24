@@ -1,5 +1,10 @@
 # Runner operations and release verification
 
+> Historical implementation reference. Deployment and authentication instructions
+> here are superseded by the [three-container runtime](docker-only-runtime-plan.md)
+> and [current operations](docker-operations.md). Do not start the old worker fleet,
+> use model API keys, or reuse its qualification evidence for the integrated runner.
+
 Use [Docker operations](docker-operations.md) for current container commands,
 identity bootstrap, qualification, backup and empty-target restoration.
 

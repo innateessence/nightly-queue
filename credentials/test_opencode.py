@@ -18,7 +18,7 @@ class OpenCodeConnectionTests(TestCase):
             "provider": "opencode",
             "kind": "connection",
             "connection_provider": "ollama",
-            "connection_endpoint": "http://runner-ollama:11434",
+            "connection_endpoint": "http://ollama.example:11434",
             **values,
         }
 
@@ -28,7 +28,7 @@ class OpenCodeConnectionTests(TestCase):
         credential = form.save()
         self.assertEqual(
             json.loads(credential.get_secret()["secret"]),
-            {"provider": "ollama", "base_url": "http://runner-ollama:11434"},
+            {"provider": "ollama", "base_url": "http://ollama.example:11434"},
         )
 
     def test_create_hosted_connection_with_fixed_endpoint(self):
@@ -39,11 +39,8 @@ class OpenCodeConnectionTests(TestCase):
                 connection_api_key="private-api-key",
             )
         )
-        self.assertTrue(form.is_valid(), form.errors)
-        credential = form.save()
-        self.assertEqual(
-            json.loads(credential.get_secret()["secret"])["api_key"], "private-api-key"
-        )
+        self.assertFalse(form.is_valid())
+        self.assertFalse(Credential.objects.exists())
 
     def test_hosted_connection_rejects_arbitrary_endpoint(self):
         form = CredentialForm(
@@ -92,7 +89,7 @@ class OpenCodeConnectionTests(TestCase):
         self.assertTrue(edit.is_valid(), edit.errors)
         updated = edit.save()
         self.assertEqual(updated.secret_version, 1)
-        self.assertIn("runner-ollama", updated.get_secret()["secret"])
+        self.assertIn("ollama.example", updated.get_secret()["secret"])
 
     def test_rotation_increments_secret_version(self):
         form = CredentialForm(data=self.data())
@@ -100,7 +97,7 @@ class OpenCodeConnectionTests(TestCase):
         original = form.save()
         replacement = CredentialForm(
             instance=original,
-            data=self.data(connection_endpoint="http://127.0.0.1:11435"),
+            data=self.data(connection_endpoint="http://192.168.1.20:11435"),
         )
         self.assertTrue(replacement.is_valid(), replacement.errors)
         self.assertEqual(replacement.save().secret_version, 2)
@@ -128,7 +125,7 @@ class OpenCodeConnectionTests(TestCase):
     def test_connection_help_is_visible(self):
         response = self.client.get(reverse("credential_list"))
         self.assertContains(response, "Ollama endpoint")
-        self.assertContains(response, "Native OpenCode CLI execution is unsupported")
+        self.assertContains(response, "OpenCode runs inside the runner")
 
 
 @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)

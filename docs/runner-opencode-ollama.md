@@ -1,5 +1,10 @@
 # OpenCode provider API candidate and optional Ollama
 
+> Historical implementation reference. Deployment and authentication instructions
+> here are superseded by the [three-container runtime](docker-only-runtime-plan.md)
+> and [current operations](docker-operations.md). Do not start the old worker fleet,
+> use model API keys, or reuse its qualification evidence for the integrated runner.
+
 The `opencode` backend selects a tool-free provider API transport. Native OpenCode
 CLI execution is unsupported. Neither installing the CLI nor saving a connection
 establishes integration readiness. Execution stays disabled until the controlled

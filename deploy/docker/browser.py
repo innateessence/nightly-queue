@@ -11,7 +11,7 @@ from vibearr_runner.browser_receipts import capture_receipt, png_bytes, validate
 
 
 ROOT = Path("/artifacts")
-BASE = "http://vibearr:8000"
+BASE = os.environ.get("VIBEARR_BROWSER_BASE_URL", "http://vibearr:8000")
 
 
 def image_record(path, *, binding, url, viewport, theme):
@@ -83,6 +83,42 @@ async def main():
             images.append(
                 image_record(
                     dark, binding=binding, url=page.url, viewport=viewport, theme="dark"
+                )
+            )
+            await page.goto(
+                BASE + "/credentials/?theme=light", wait_until="networkidle"
+            )
+            await page.get_by_role("link", name="Add credential", exact=True).click()
+            await page.locator("#id_provider").select_option("codex")
+            await page.locator("#id_kind").select_option("login")
+            await page.locator("#id_name").fill("ChatGPT subscription")
+            login = capture / ("subscription-" + name + ".png")
+            await page.screenshot(path=str(login), full_page=True)
+            images.append(
+                image_record(
+                    login,
+                    binding=binding,
+                    url=page.url,
+                    viewport=viewport,
+                    theme="light",
+                )
+            )
+            await page.locator("#id_provider").select_option("opencode")
+            await page.locator("#id_kind").select_option("connection")
+            await page.locator("#id_name").fill("External Ollama")
+            await page.locator("#id_connection_provider").select_option("ollama")
+            await page.locator("#id_connection_endpoint").fill(
+                "http://192.168.1.20:11434"
+            )
+            ollama = capture / ("external-ollama-" + name + ".png")
+            await page.screenshot(path=str(ollama), full_page=True)
+            images.append(
+                image_record(
+                    ollama,
+                    binding=binding,
+                    url=page.url,
+                    viewport=viewport,
+                    theme="light",
                 )
             )
             await context.close()

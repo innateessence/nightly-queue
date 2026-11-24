@@ -6,7 +6,6 @@ from django.db.models import Q
 from django.db import transaction
 from django.utils import timezone
 
-from celery import shared_task
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.views.decorators.debug import sensitive_variables
 
@@ -26,9 +25,8 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 
-@shared_task
 @sensitive_variables()
-def import_auto_issues(scheduled=False):
+def import_auto_issues(scheduled=False, checkpoint=None):
     saved = APISettings.objects.select_related("github_credential").filter(pk=1).first()
     credential = saved.github_credential if saved else None
     if credential is None:
@@ -55,6 +53,8 @@ def import_auto_issues(scheduled=False):
         return {"projects": 0, "created": 0, "failed": 0, "skipped": True}
     result = {"projects": 0, "created": 0, "failed": 0, "skipped": False}
     for project in Project.objects.filter(autonomous=True).iterator():
+        if checkpoint is not None:
+            checkpoint()
         now = timezone.now()
         available = Q(sync_lock_until__isnull=True) | Q(sync_lock_until__lte=now)
         ready = Q(sync_not_before__isnull=True) | Q(sync_not_before__lte=now)
@@ -72,6 +72,8 @@ def import_auto_issues(scheduled=False):
             repository = repository_metadata(
                 project.repository_url, token, project.github_repository_id
             )
+            if checkpoint is not None:
+                checkpoint()
             if (
                 project.github_repository_id
                 and project.github_repository_id != repository["repository_id"]
@@ -101,6 +103,8 @@ def import_auto_issues(scheduled=False):
             expected_authority = repository_authority_state(project)
             etags = project.sync_etags.copy()
             for issue in repository_issues(project.repository_url, token, etags=etags):
+                if checkpoint is not None:
+                    checkpoint()
                 if not owned.filter(sync_lock_until__gt=timezone.now()).update(
                     sync_lock_until=timezone.now() + timedelta(minutes=10)
                 ):
@@ -153,17 +157,3 @@ def import_auto_issues(scheduled=False):
         result["failed"],
     )
     return result
-
-
-@shared_task
-def add(x, y):
-    return x + y
-
-
-@shared_task
-def nightly_greeting():
-    from datetime import datetime, timezone
-
-    stamp = datetime.now(timezone.utc).isoformat()
-    logger.info("nightly_greeting fired at %s", stamp)
-    return {"greeting": "good night", "at": stamp}

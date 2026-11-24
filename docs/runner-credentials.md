@@ -6,26 +6,21 @@ key or database credentials. Ordinary configuration and credential pages contain
 names, IDs, provider/type, rotation version, revocation status and timestamps.
 Execution remains release-gated.
 
-Credentials supports GitHub/GitLab token, SSH and generic encrypted material; Codex
-API token or structured session; Claude Code token; OpenCode structured connection.
+The integrated runner uses **Runner subscription login** credential references
+for Codex/Claude Code. Sign in, reconnect and log out inside the runner using the
+[current operations procedure](docker-operations.md#subscription-login). Login
+files stay in the private runner volume; the app holds only the selected reference.
+OpenCode connections select external Ollama and an installed model, without a
+model API key. GitHub/GitLab repository tokens and SSH material remain separate.
 A provider/type cannot be changed after creation. Replace credentials to change it.
 
-Codex session material accepts the known `auth.json` ChatGPT subset: `tokens` with
-nonempty `access_token`, `refresh_token`, `id_token`, `account_id`; optional
-`auth_mode: "chatgpt"`, `OPENAI_API_KEY: null`, and string `last_refresh`. Other
-formats fail closed. This validates storage, not login freshness or tool support.
-The shape is grounded in the [upstream Codex authentication implementation](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/manager.rs).
-
-OpenCode connections can be created using provider, endpoint and API-key form fields,
-or strict JSON containing `provider` (`openai`, `anthropic`, `opencode`, or
-`ollama`), optional `api_key` for local Ollama, and optional `base_url`. Ollama
-requires an explicit trusted local origin or `/api` base; hosted providers use fixed
-official endpoints. URLs cannot contain userinfo, query strings or fragments.
-The [OpenCode provider API candidate](runner-opencode-ollama.md) uses no native
-backend tools. Native OpenCode CLI execution remains unsupported.
-Claude stored tokens do not establish allowance support or grant permission to
-copy tokens into agent environments. Interactive refresh, undocumented session
-formats and live adapter compatibility remain outside this storage boundary.
+Historical token/session/cloud connection records are retained for migration and
+redaction. They do not enable model API authentication in the integrated native
+path. Only managed subscription login and explicit external Ollama pass readiness.
+Subscription auth files are copied into the selected agent's temporary home;
+supported refresh is collected after descendant termination. That agent's tools
+can read their own login. Trusted control/Git credentials remain inaccessible.
+Saving any connection is not live login, model, allowance or coding acceptance.
 
 ## Selected secret API
 

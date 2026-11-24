@@ -1,16 +1,12 @@
-"""One owned merge, followed by idempotent provider completion reporting."""
+"""Read-only reconciliation of historical automatic merge dispatches."""
 
-from datetime import datetime, timedelta, timezone
 import time
 from uuid import uuid4
 
 from .delivery import DeliveryError, DeliveryUnknown, DeliveryRejected
-from .merge_contract import completion_marker, merge_profile
+from .merge_contract import completion_marker
 from .merge_github import (
     MergeGitHub,
-    MergeRepair,
-    MergeWait,
-    exact_pull,
     merged_observation,
 )
 from .native_contract import intent_document
@@ -80,139 +76,9 @@ class NativeMerge:
     def step(self):
         if self.data.get("dispatched") or self.data.get("merge"):
             return self.reconcile()
-        if self.data.get("deadline") and datetime.now(
-            timezone.utc
-        ) >= datetime.fromisoformat(self.data["deadline"]):
-            raise DeliveryError("Required remote checks exceeded the bounded CI wait.")
-        if time.time() < self.data.get("next_poll_at", 0):
-            return "wait"
-        if not self.host.checkpoint(force_source=True):
-            return "wait"
-        profile = merge_profile(
-            self.host.snapshot["effective"].get("merge_profile", {})
+        raise DeliveryError(
+            "Automatic merge is disabled; a human must merge the pull request."
         )
-        if self.data.get("profile") not in (None, profile):
-            raise ReconciliationRequired(
-                "Trusted merge profile changed during this owned run."
-            )
-        self.data["profile"] = profile
-        if "deadline" not in self.data:
-            deadline = datetime.now(timezone.utc) + timedelta(
-                seconds=profile["ci_timeout_seconds"]
-            )
-            if "ci_deadline" not in self.native:
-                self.native["ci_deadline"] = min(
-                    deadline, datetime.fromisoformat(self.native["deadline"])
-                ).isoformat()
-            self.data["deadline"] = self.native["ci_deadline"]
-            self.host.save()
-        if datetime.now(timezone.utc) >= datetime.fromisoformat(self.data["deadline"]):
-            raise DeliveryError("Required remote checks exceeded the bounded CI wait.")
-        github = self.client()
-        raw = github.pull(self.workspace["repository"], self.pull["number"])
-        exact_pull(raw, self.workspace, self.pull["number"])
-        if raw.get("merged"):
-            raise ReconciliationRequired(
-                "An unrequested merge requires provider reconciliation."
-            )
-        if raw.get("state") != "open" or raw.get("draft") is not False:
-            raise DeliveryError("Automatic merge requires the original open ready PR.")
-        try:
-            if github.base_sha(self.workspace) != self.workspace["base_revision"]:
-                return self.repair(
-                    "base_update", "Base branch changed after candidate validation."
-                )
-            policy = github.policy(self.workspace, profile)
-            checks = github.checks(self.workspace, self.pull["number"], profile)
-            reviews = github.reviews(
-                self.workspace,
-                self.pull["number"],
-                profile,
-                run_id=self.host.run_id,
-                context_digest=self.native["context"]["digest"],
-            )
-        except MergeWait as exc:
-            return self.wait(str(exc))
-        except MergeRepair as exc:
-            return self.repair("ci_repair", str(exc))
-        if raw.get("mergeable") is None:
-            return self.wait("Provider mergeability is still being calculated.")
-        if raw.get("mergeable") is not True or raw.get("mergeable_state") != "clean":
-            return self.repair(
-                "ci_repair", "Provider reports a conflict or blocked merge."
-            )
-        if not self.host.checkpoint(force_source=True):
-            return "wait"
-        # Reobserve immediately before intent: no candidate or provider result may
-        # replace this exact base/head/producer binding after a wait.
-        raw = github.pull(self.workspace["repository"], self.pull["number"])
-        exact_pull(raw, self.workspace, self.pull["number"])
-        if github.base_sha(self.workspace) != self.workspace["base_revision"]:
-            return self.repair("base_update", "Base moved before merge dispatch.")
-        if (
-            raw.get("state") != "open"
-            or raw.get("draft")
-            or raw.get("merged")
-            or raw.get("mergeable") is not True
-            or raw.get("mergeable_state") != "clean"
-        ):
-            raise MergeWait("Provider merge state changed before dispatch.")
-        policy = github.policy(self.workspace, profile)
-        checks = github.checks(self.workspace, self.pull["number"], profile)
-        reviews = github.reviews(
-            self.workspace,
-            self.pull["number"],
-            profile,
-            run_id=self.host.run_id,
-            context_digest=self.native["context"]["digest"],
-        )
-        receipt = {"policy": policy, "checks": checks, "reviews": reviews}
-        if self.data.get("intents") and self.data.get("receipt") != receipt:
-            self.terminal()
-            self.data.pop("intents", None)
-            self.data.pop("authorization_id", None)
-        self.data["receipt"] = receipt
-        self.host.save()
-        from .native_lifecycle import NativeMetadataRejected
-
-        try:
-            self.register("merge")
-        except NativeMetadataRejected:
-            self.data["authorization_rejections"] = (
-                self.data.get("authorization_rejections", 0) + 1
-            )
-            self.data.pop("authorization_id", None)
-            self.host.save()
-            if self.data["authorization_rejections"] >= 3:
-                raise DeliveryError(
-                    "Current server merge authorization was rejected after three bounded attempts."
-                ) from None
-            if not self.host.checkpoint(force_source=True):
-                return "wait"
-            if github.base_sha(self.workspace) != self.workspace["base_revision"]:
-                return self.repair(
-                    "base_update", "Base moved during independent server authorization."
-                )
-            return self.wait(
-                "Provider authorization changed; reread current checks and configured gates."
-            )
-        if not self.host.checkpoint(force_source=True):
-            return "wait"
-        self.host.status(
-            "delivery",
-            detail="Squash merging the exact validated head after required checks.",
-            validation_status="passed",
-            force=True,
-        )
-        self.data["dispatched"] = True
-        self.host.save()
-        try:
-            github.merge_once(self.workspace, self.pull["number"])
-        except (DeliveryUnknown, DeliveryRejected):
-            # A405 may be an in-progress provider merge left by a timed-out call.
-            # Only observation resolves ownership; this mutation is never replayed.
-            pass
-        return "continue"
 
     def wait(self, reason):
         interval = self.host.snapshot.get("global", {}).get(
@@ -250,11 +116,14 @@ class NativeMerge:
         self.host.artifact(
             "native_merge", payload, "merged:" + self.workspace["commit_sha"]
         )
-        if self.data.get("checkpoint") != "merged":
-            self.data["checkpoint"] = "merged"
-            self.host.save()
-            return "continue"
-        return self.complete()
+        self.data["checkpoint"] = "historical_merge_observed"
+        self.host.save()
+        self.host.status(
+            "waiting",
+            reason="Historical automatic merge verified; operator reconciliation is required.",
+            validation_status="passed",
+        )
+        return "wait"
 
     def issue(self, github):
         source = self.native["context"]["document"]["source"]

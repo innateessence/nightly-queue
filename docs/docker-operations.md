@@ -1,250 +1,257 @@
 # Docker operations
 
-Use Docker Engine and Compose already installed on the machine. Every Python,
-Git, test, browser, backup and recovery process runs in an image. Do not mount a
-checkout, home directory or engine socket into a service. D4 CI and final release
-acceptance remain in progress; keep autonomous processing disabled.
+Vibearr ships four long-running containers: `app`, `postgres`, `runner`, and `worker`.
+Codex and Claude Code use subscriptions; OpenCode uses external Ollama that the
+operator provides. The stack never starts Ollama or downloads models.
 
-## Initialize and bootstrap
+All Python, Git, agent, test, browser and recovery processes run in Docker. Host
+activity is explicit Docker/Compose orchestration and source/configuration edits.
+No host checkout/home/credential mounts, Docker socket, privileged containers,
+host namespaces, or automatic production deployment are supported.
 
-Build images from the reviewed checkout and start the application with Compose.
-`initialize` creates private credentials in named volumes, and `migrate` applies
-migrations before the web service starts. Source and static files are in images.
-Use the `tools` profile for management commands:
-
-```sh
-docker compose build
-docker compose up -d --wait
-docker compose --profile tools run --rm tools python manage.py createsuperuser
-docker compose --profile tools run --rm tools python manage.py docker_bootstrap_runner docker-runner
-```
-
-Bootstrap generates a dedicated runner API token atomically inside the runner
-secret volume. Repeating the command preserves both identity and token. Existing
-identities with missing, different or disabled authority require explicit
-reconciliation. Add `--credential-id <id>` for each credential whose preflight
-access you explicitly grant. Bootstrap does not select connections, acquire a
-controller, enable processing or run a model. Configure connections through the
-UI or the existing explicit application bootstrap command; never import host
-agent logins or scan the operator's home.
-
-Existing PostgreSQL data requires the original database password, queue API
-token, credential encryption key and Django key. Supply their original values
-through the deployment configuration before the first initialization. A saved
-volume takes precedence only when values agree; conflicts fail. Missing original
-credentials stop initialization before replacement credentials can be generated.
-Preserve original database/user names and `VIBEARR_DATA_PROJECT` on upgrade.
-
-## Worker readiness
-
-The runner profile uses the actual immutable worker and PostgreSQL image IDs in
-`VIBEARR_AGENT_IMAGE_ID`, `VIBEARR_WORKER_IMAGE_ID` and
-`VIBEARR_DATABASE_IMAGE_ID`. Obtain these using explicit operator
-`docker image inspect` commands after building the selected images. The runtime
-cannot access the engine and cannot discover or create containers itself.
-
-Before qualification, ensure no real task owns a slot and stop the supervisor.
-Qualification interrupts a fixed synthetic witness and requires a fresh worker
-boot. It makes no paid model calls:
+## Fresh installation
 
 ```sh
-docker compose --profile runner up -d --wait agent-worker setup-worker validation-worker worker-gateway
-docker compose --profile checks run --rm --no-deps qualification prepare
-docker compose --profile runner kill -s SIGKILL agent-worker setup-worker validation-worker
-docker compose --profile runner up -d --wait agent-worker setup-worker validation-worker worker-gateway
-docker compose --profile checks run --rm --no-deps qualification finish
-docker compose --profile checks run --rm --no-deps resource-check
+cp .env.example .env
+bash run.sh --build
+docker compose run --rm app python manage.py createsuperuser
 ```
 
-Every worker restart invalidates its previous boot proof. Successful fleet
-qualification creates the private validation profile. Model readiness and
-delivery authority require separate checks. The supervisor is started explicitly
-only after those checks and release acceptance; qualification does not start it.
-New native receipts use schema 2 with the protected slot instance, boot and
-binding digest. They identify reusable workers without inventing per-task
-container IDs. Historical container receipts remain readable; they cannot supply
-the new worker restart acceptance evidence.
+`run.sh` builds the application, trusted runner, worker toolchain and pinned browser
+layer, inspects both actual runtime image IDs, and starts the complete stack.
+Override image names through deployment configuration. Direct Compose startup
+requires `VIBEARR_RUNNER_IMAGE_ID` and `VIBEARR_WORKER_IMAGE_ID` to match their
+installed images; no runtime component can inspect or control Docker.
 
-The disposable validation job exercises all nine checks from the installed
-trusted recipe. `--dependency` adds a synthetic dependency change and verifies
-the setup-to-validation artifact flow:
+App startup initializes private named credential volumes without replacing saved
+values, waits for PostgreSQL, migrates, and provisions the configured dedicated
+runner identity. It then supervises the web server and PostgreSQL import
+scheduler. The runner starts idle. Processing is disabled by default; migrations
+from the old fleet disable existing runner configurations for review.
+
+The UI is available at `http://127.0.0.1:7777`. Add projects, select a separate
+GitHub issue-import credential, and configure runner repository/issue credentials
+and schedules. Manual issue sync queues a durable job; its latest result appears
+on the queue page. The scheduler uses configured intervals, leases, idempotent
+imports and retry delays, independently of coding execution.
+
+## Subscription login
+
+Create a credential with provider **Codex** or **Claude Code** and type **Runner
+subscription login**, leaving the secret blank. Save it, open its edit page, and
+use the displayed command with that credential's actual ID:
 
 ```sh
-docker compose --profile checks run --rm --no-deps --entrypoint python qualification -m deploy.docker.validate
-docker compose --profile checks run --rm --no-deps --entrypoint python qualification -m deploy.docker.validate --dependency
-docker compose --profile checks run --rm --no-deps browser
+docker compose exec runner python -I -m vibearr_executor.managed_login login codex --credential-id 12
+docker compose exec runner python -I -m vibearr_executor.managed_login login claude --credential-id 13
 ```
 
-Browser PNGs and its JSON report stay in `browser-artifacts`. Export only selected
-artifacts using an explicit operator Docker copy; no browser runs on the host.
+Complete the displayed vendor authorization link on your own device. Codex uses
+its device-code flow; enable that login method in the ChatGPT account/workspace
+when required. Claude Code uses its subscription browser/code flow. No host
+login files are scanned, mounted or copied. No model API key is required.
 
-### Source-bound browser acceptance
+The same command accepts `status` or `logout` instead of `login`. Stop or drain
+active coding work before changing accounts; an execution lock prevents overlap.
+Only known authentication files are persisted in `runner-logins`, with separate
+provider/credential directories. Tasks receive a selected copy in an ephemeral
+home. After confirmed termination, refreshed login material is retained for the
+next task. Credential files never become source or Git delivery artifacts.
 
-The exact-candidate `operations` check builds the selected Git tree with the
-protected Dockerfiles, inspects the running application image, and supplies that
-binding to the browser job. The job records four PNGs in a fresh `capture-*`
-directory. Schema-2 receipts include the commit, tree, source digest, application
-and browser image IDs, viewport, theme and PNG hash. Unbound smoke output and old
-host Chrome receipts cannot qualify native merge acceptance.
-
-Preserve the complete capture directory from the trusted CI artifact. To import
-it into an initialized deployment's browser volume, select its actual volume
-name, capture directory and reviewed browser image. The temporary import
-container has no network or credential volumes:
+Select the saved login and model in the coding-runner configuration. Add explicit
+preflight grants for each selected credential through Django admin, or provision
+those exact IDs with the existing command:
 
 ```sh
-browser_volume='your-project_browser-artifacts'
-capture='capture-<32-hex-identifier-from-report>'
-browser_image='sha256:<reviewed-installed-browser-image-id>'
-artifact_helper=$(docker create --network none --read-only --cap-drop ALL \
-  --cap-add CHOWN --cap-add FOWNER --cap-add DAC_OVERRIDE \
-  --security-opt no-new-privileges:true --user 0:0 \
-  --memory 256m --memory-swap 256m --cpus 1 --pids-limit 32 \
-  --volume "$browser_volume:/artifacts" --entrypoint python "$browser_image" \
-  -I -m vibearr_runner.browser_receipts --adopt-capture "$capture")
-docker cp "./$capture" "$artifact_helper:/artifacts/"
-docker start --attach "$artifact_helper"
-docker rm "$artifact_helper"
+docker compose run --rm app python manage.py docker_bootstrap_runner docker-runner --credential-id 12 --credential-id 13
 ```
 
-Import rejects links, extra files and incomplete captures, and normalizes only
-that capture's ownership and permissions. Bind each imported report to its actual
-queue run UUID using the runner container:
+GitHub issue/read and repository/delivery grants remain separate. Saving login
+metadata is not live authentication proof. Login expiry and subscription limits
+must block work rather than fall back to model APIs. Unsupported remaining quota
+telemetry stays unsupported; enabling reserve requires fresh supported readings.
+
+## External Ollama for OpenCode
+
+Create an **OpenCode connection** credential using **External Ollama** and the
+origin of your server, for example `http://192.168.1.20:11434` or
+`https://ollama.example`. Select the installed model in runner settings, such as
+`qwen3-coder:30b`. The endpoint must be reachable from the runner's Docker network;
+container loopback is not an external server. No host-discovery alias is supplied.
+
+The endpoint is explicit operator configuration, never issue/repository input.
+URL credentials, query strings, metadata addresses, internal service names and
+arbitrary paths are rejected. A local relay permits inference/model inspection
+for the selected model, blocks redirects and model-management requests, and
+prevents OpenCode from selecting a cloud fallback. A missing server/model must be
+reported without starting an Ollama service or downloading anything.
+
+## Qualification and readiness
+
+Drain active work before qualification. Start a fixed non-model witness, interrupt
+the worker container, then qualify its new boot without making model calls:
 
 ```sh
-docker compose --profile runner run --rm --no-deps --entrypoint python vibearr-runner \
-  -m vibearr_runner.browser_receipts --report "/screenshots/$capture/browser.json" \
-  --run-id <actual-queue-run-uuid> --state /var/lib/vibearr
+export VIBEARR_RUNNER_IMAGE_ID=$(docker inspect "$(docker compose ps -q runner)" --format '{{.Image}}')
+export VIBEARR_WORKER_IMAGE_ID=$(docker inspect "$(docker compose ps -q worker)" --format '{{.Image}}')
+qualification_project=$(docker inspect "$(docker compose ps -q runner)" --format '{{index .Config.Labels "com.docker.compose.project"}}')
+runner_probe_ip=$(docker inspect "$(docker compose ps -q runner)" --format "{{(index .NetworkSettings.Networks \"${qualification_project}_worker-control\").IPAddress}}")
+app_probe_ip=$(docker inspect "$(docker compose ps -q app)" --format "{{(index .NetworkSettings.Networks \"${qualification_project}_runner-api\").IPAddress}}")
+postgres_probe_ip=$(docker inspect "$(docker compose ps -q postgres)" --format "{{(index .NetworkSettings.Networks \"${qualification_project}_database\").IPAddress}}")
+qualification_targets="{\"runner\":\"$runner_probe_ip\",\"app\":\"$app_probe_ip\",\"postgres\":\"$postgres_probe_ip\"}"
+docker compose exec -T worker python -I -m vibearr_executor.compact_worker restart-witness
+docker compose kill -s SIGKILL worker
+docker compose up -d --wait worker runner
+docker compose exec -T -e "VIBEARR_QUALIFICATION_TARGETS=$qualification_targets" worker python -I -m vibearr_executor.compact_worker qualify
 ```
 
-The collector verifies every PNG, both viewports and themes, and the source/image
-binding before appending private `browser-acceptance.json`. It refuses to replace
-an existing run's receipts. Supply that file to the native merge acceptance
-command's `--screenshots` option; provider and run verification still happen in
-that command. Browser artifacts have their own volume: retain or export the PNGs
-along with release evidence separately from the private-state backup.
+The actual container must match its registered read-only image and CPU, memory,
+PID and workspace ceilings. Probes check task UID/capabilities, denial of trusted
+state and control access, direct egress denial, detached-descendant termination,
+cleanup between jobs, pause/resume, deadlines, cancellation and replay. The
+interrupted witness must reconcile without a new execution or fabricated result.
+Every worker restart invalidates its proof and needs a fresh interrupted witness.
+Targets come from the current container networks; task DNS denial alone cannot
+prove that application, database or runner administration traffic is blocked.
+
+Native account/model probes run separately, only for eligible work with selected
+credentials/grants. Fixture responses, `--version`, stored auth files, and old
+fleet proofs are not live coding/delivery acceptance. Keep processing disabled
+until the selected real account/model and designated repository are accepted.
+Never interpret unverified quota as unlimited capacity.
+
+The trusted runner owns controller state, persistent logins and scoped network
+mediation. The worker owns execution control, coding CLIs, temporary PostgreSQL,
+candidate apps and browsers. Worker limits cover all of those processes together.
+Task UID 1000 and candidate app UID 10003 can reach only scoped mediation ports
+3128/3130; administration on runner port 8792 requires distinct control tokens.
+The agent can access its own selected subscription credentials. See the
+[runtime contract](docker-only-runtime-plan.md).
 
 ## Development and CI
 
-`bash test.sh` builds a disposable `vibearr-check-*` Compose project and runs the
-application suite, formatting/type checks, offline distributions, worker boot and
-resource qualification, all nine candidate checks, dependency-change validation,
-browser captures and a fenced backup/restore. It never reuses deployment volumes
-or starts a paid agent. It removes its own containers and volumes on exit and
-prints the directory containing exported logs and public evidence.
-
-For a focused application suite, use `bash test.sh work_queue.test_api`. Run
-`bash deploy/docker/checks.sh boundary` or `operations` for those standalone
-checks. `VIBEARR_CHECK_OUTPUT` selects a new evidence directory; the command
-refuses an existing directory or disposable project with existing state.
-
-CI takes the check recipe from the immutable PR base and imports candidate Git
-objects as data without configuration, hooks or credentials. The validation job
-checks the exact candidate commit through qualified workers; packaging runs with
-no network or credentials under the separate task UID. A pinned introduction
-commit supplies the recipe when the PR base predates Docker checks. Local runs
-without `--candidate` validate a disposable snapshot and do not claim an exact
-committed revision. Use `--candidate <checkout> --commit <sha>` for exact input.
-Run `candidate`, `boundary` and `operations` separately for that input. Boundary
-and operations build the candidate implementation with the protected Dockerfiles
-and Compose recipe in their own disposable projects. Candidate validation keeps
-its worker and checking tools from the protected recipe, so candidate runtime
-changes cannot replace their own validation controls. These CI observations do
-not replace qualification on the actual deployment after review.
-
-## Drain and upgrade
-
-Request a drain while the current supervisor is running, wait for that request's
-acknowledgement, then stop it. Owned work and recovery continue while new claims
-are fenced. A timeout leaves the drain request in place and requires inspection;
-it does not establish that work has stopped.
-
 ```sh
-docker compose --profile tools run --rm --no-deps tools python -m vibearr_runner.drain on
-docker compose --profile tools run --rm --no-deps tools python -m vibearr_runner.drain wait --timeout 3600
-docker compose --profile runner stop vibearr-runner
+bash test.sh
+bash test.sh work_queue.test_api
+bash deploy/docker/checks.sh boundary
+bash deploy/docker/checks.sh operations
 ```
 
-Retain the current immutable image IDs and take the quiescent backup below before
-changing images. Build or select reviewed replacement images, preserve the same
-data project, and run migrations through Compose. Check application health and
-qualify every updated worker boot before restarting a previously active
-supervisor. The persistent drain still prevents claims during those checks.
-Only after recovery, connection readiness and release acceptance are satisfied,
-clear the drain explicitly and start that supervisor:
+Checks create uniquely named disposable Compose projects, refuse existing state,
+clear deployment credential environment, use random loopback web ports, and
+remove only their own containers/volumes on exit. They do not start paid agents
+or modify the live stack. Logs and public evidence are exported to a fresh
+`/tmp/vibearr-check-*-reports` directory; `VIBEARR_CHECK_OUTPUT` overrides it.
+
+The full run covers application/portable tests, formatting/types, migration drift,
+actual boundary/restart qualification, all nine trusted candidate checks, browser
+PNGs, and quiescent backup/restore with fresh authority. Candidate validation
+uses fresh snapshots, trusted image tools, and local disposable PostgreSQL inside
+the worker. Dependency changes use run-bound artifacts without replacing trusted
+tools or building runtime images.
+
+Use `--candidate <checkout> --commit <sha>` for exact Git object input. The
+operator copies only objects/ref metadata into an input image, never host Git
+configuration, hooks or credentials. Git reads and source freezing happen in a
+container. Local runs without exact input are labeled disposable snapshots and
+must not be presented as proof of a committed revision.
+
+The consolidated GitHub required check is **Application, runtime and recovery**
+in **Four-container checks**. Before switching branch protection or a configured
+merge profile, require this check and remove superseded worker-fleet check names.
+Existing required-check settings are not changed automatically. The separate
+manual deployment workflow inspects an already qualified installation and does
+not start agents or enable processing.
+
+## Drain, upgrade and migration from the old fleet
+
+Retain the old image IDs, Compose recipe, database/user names, data-volume project,
+credential encryption key, application/API keys, runner identity and journals.
+Drain using the currently running old controller and its documented controls;
+wait for acknowledgement and reconcile unfinished publications before stopping
+it. Do not drop journals to make an upgrade appear idle.
+
+Take and verify a quiescent backup using that version's backup job. Version-1
+fleet backups must be restored with the corresponding old image/recipe before
+migration. Version-2 integrated backups retain their original six-volume recipe.
+The four-service runtime writes version-3 `compact-worker-v1` backups with an exact
+mapping of application-secrets, database-secrets, runner-secrets, runner-data,
+runner-logins, worker-secrets and worker-control. Old backups and volumes remain
+available for rollback and are never relabeled as compact snapshots.
+
+For an already integrated deployment, drain while the controller is running:
 
 ```sh
-docker compose --profile tools run --rm --no-deps tools python -m vibearr_runner.drain off
-docker compose --profile runner up -d --no-deps vibearr-runner
+docker compose exec --user 10001:10001 runner python -I -m vibearr_runner.drain on
+docker compose exec --user 10001:10001 runner python -I -m vibearr_runner.drain wait --timeout 3600
+docker compose stop runner worker app
+bash deploy/docker/operations.sh backup --quiesced
 ```
 
-Rollback requires compatible images and schema or an isolated restore of the
-matching snapshot. Do not promise automatic rollback across irreversible
-migrations. Keep processing disabled until the full Docker release acceptance
-has succeeded.
+The backup job requires the explicit `--quiesced` flag, no running app/runner/worker
+services and no active database runs. PostgreSQL remains running for its logical
+dump. It preserves encrypted connections, original keys, journals, execution
+receipts and subscription login state with hashes, ownership and permissions.
+Treat backups as credentials. Taking a backup never restarts processing.
 
-## Backup
+Keep original `.env` names/values on migration. Missing original credentials
+stop initialization before replacement secrets can be generated. Existing
+`postgres-data` and `runner-data` names remain stable through
+`VIBEARR_DATA_PROJECT`. The runner mounts its state volume at both canonical and
+legacy paths so retained absolute workspace paths remain resolvable.
 
-Drain and stop the supervisor using the commands above before backup. The backup
-job refuses a database with active runs.
-Stop all writers before declaring the snapshot quiescent; leave PostgreSQL
-running for its transaction-consistent logical dump:
+Build/start the new stack, inspect migration results, reconnect selected native
+logins, qualify the new boot and validate delivery. Runtime changes invalidate
+old execution proofs. Preserve uncertain old operations for explicit recovery;
+never replay them as new tasks. Only after acceptance should the operator remove
+specifically identified old worker/proxy/broker and development containers.
+Retain their volumes and old images until rollback has been verified. Never use
+blanket Docker pruning or affect unrelated/external Ollama services.
 
-```sh
-docker compose --profile runner stop vibearr celery-worker celery-beat agent-worker setup-worker validation-worker worker-gateway valkey
-docker compose --profile operations build backup
-docker compose --profile operations run --rm --no-deps backup backup --quiesced
-```
-
-The job prints a backup UUID after publishing a complete snapshot. It preserves
-PostgreSQL data, encrypted connections and original keys, broker files, worker
-journals and runner/Git/recovery state. It hashes every stored file, records
-ownership and modes, checks database table fingerprints before and after the
-dump, and requires space for the snapshot plus a 1 GiB reserve. Links and setuid
-files are rejected. Broker sticky directory permissions are preserved.
-
-Backups contain credentials: protect the named backup volume and any explicit
-export. A failed attempt remains under `.incomplete-<uuid>` and is never treated
-as a complete backup. Cleanup is a separate operator action. Startup never
-deletes backups, credential volumes, PostgreSQL data or rollback state.
-
-Resume only the services that were running before backup. Restarted workers need
-new qualification before real work. Do not start a previously stopped supervisor
-as a side effect of taking a backup.
+For routine upgrades, rebuild reviewed images with `bash run.sh --build`, qualify
+the new boot, check recovery and account readiness, then explicitly clear the
+drain and enable the intended schedules. Rollback across migrations may require
+restoring the matching snapshot; automatic schema rollback is not promised.
 
 ## Restore into a separate project
 
-Select a new Compose project and set `VIBEARR_DATA_PROJECT` to that same new
-name. Set `VIBEARR_RESTORE_BACKUP_VOLUME` to the original backup volume name.
-The source backup is mounted read-only and declared external, so target-project
-cleanup cannot delete it. All target state and PostgreSQL volumes must be empty;
-restoration never overwrites an existing deployment.
+Use a new `COMPOSE_PROJECT_NAME` and the same new `VIBEARR_DATA_PROJECT`, retaining
+the database/user names from the snapshot. Set `VIBEARR_RESTORE_BACKUP_VOLUME` to
+the original source backup volume and `VIBEARR_RUNNER_NAME` to a new identity name.
+All target volumes must be empty; source backups are mounted read-only.
 
-Use the original database/user names from the snapshot. With those variables set
-for the new project, run:
+With those values exported in the operator shell or deployment configuration:
 
 ```sh
-docker compose --profile operations run --rm --no-deps restore-files restore-files <backup-uuid>
-docker compose up --no-deps -d --wait postgres
-docker compose --profile operations run --rm --no-deps restore-database restore-database <backup-uuid>
-docker compose run --rm --no-deps initialize
-docker compose --profile tools run --rm --no-deps tools python manage.py docker_bootstrap_runner restored-runner --restored-backup <backup-uuid>
-docker compose up -d --wait
+bash deploy/docker/operations.sh restore-files BACKUP_UUID
+bash deploy/docker/operations.sh restore-database BACKUP_UUID
+bash deploy/docker/operations.sh restore-bootstrap BACKUP_UUID
+bash run.sh --build
 ```
 
-File restoration verifies the entire archive before extraction. Database restore
-uses one transaction and verifies table fingerprints. It then disables restored
-runner identities, clears their controller authority and disables processing;
-business data fingerprints are checked again after that deliberate fence.
-The restored runner volume remains marked as requiring a new identity.
+File restoration validates the complete archive before extracting. Database
+restore uses one transaction and verifies table fingerprints, then disables old
+identities and processing. Explicit restored bootstrap archives old controller
+state, preserves history, and creates fresh runner authority. It also archives the
+restored worker's control state and rotates both control and mediation tokens
+before the worker can start. Retired tokens and old qualification reports stay in
+private restore history. The new worker needs a forced-restart witness, boundary
+and role/browser qualification; the runner needs account/delivery acceptance
+before it can process work. Keep
+source backups and rollback state until this separate restoration is verified.
 
-The explicit restored bootstrap requires a new runner name. It archives the old
-controller journal under `runner-data/restore-history/<backup-uuid>` and retires
-the old runner token/profile/proof files before generating a new token. It never
-copies the old controller proof into the new active journal. Grant selected
-credential IDs explicitly again and requalify fresh worker boots.
+## Browser and artifacts
 
-Inspect and reconcile archived GitHub publications before claims. Keep the old
-deployment fenced: a restore test must never start a second publishing
-supervisor. The disposable round-trip fixture checks encryption, queue state and
-run history; it is not real delivery or dependent-issue release acceptance.
+```sh
+bash deploy/docker/operations.sh browser
+```
+
+This is a one-shot operator browser container with no credentials or host checkout. Its
+PNGs/report stay in `<project>_browser-artifacts`. Exact-candidate CI supplies
+source/image binding; unbound local smoke captures are not native merge evidence.
+Export selected captures with explicit operator Docker copy and retain them with
+release evidence. The worker's model-free `qualify-roles` step separately runs the
+registered browser profile after boundary qualification and binds its captured
+archive to the current worker boot and immutable source/image identities. Missing
+or stale worker browser proof blocks visual reviewer roles. Browser artifacts
+are separate from private-state backups.

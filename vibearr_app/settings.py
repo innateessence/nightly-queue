@@ -141,33 +141,6 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.1/ref/settings/#default-auto-field
 
-CELERY_TASK_ALWAYS_EAGER = DEBUG
-
-# Celery
-# ---------------------------------------------------------------------------
-# Broker/backend point at the `valkey` service from docker-compose.
-# The scheme is "redis" because kombu registers its transport under that
-# name; Valkey is a drop-in Redis fork so the URLs are fully compatible.
-CELERY_BROKER_URL = getenv("CELERY_BROKER_URL", "redis://valkey:6379/0")
-CELERY_RESULT_BACKEND = getenv("CELERY_RESULT_BACKEND", "redis://valkey:6379/1")
-
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TIMEZONE = TIME_ZONE
-
-CELERY_BEAT_SCHEDULE = {
-    "scheduled-auto-issues": {
-        "task": "work_queue.tasks.import_auto_issues",
-        "schedule": 60.0,
-        "kwargs": {"scheduled": True},
-    },
-    "nightly-greeting": {
-        "task": "work_queue.tasks.nightly_greeting",
-        "schedule": 5.0,
-    },
-}
-
 # Context uploads are bounded again by the runner document API.
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 

@@ -59,7 +59,6 @@ class CredentialViewTests(TestCase):
                 "passphrase",
                 "connection_provider",
                 "connection_endpoint",
-                "connection_api_key",
             ],
         )
         self.assertEqual(

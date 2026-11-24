@@ -1,8 +1,9 @@
 # vibearr
 
 For Docker setup, qualification, backup and recovery, see
-[Docker operations](docs/docker-operations.md). D4 CI and final release acceptance
-are still in progress; keep autonomous execution disabled.
+[Docker operations](docs/docker-operations.md). The stack has four containers:
+app, PostgreSQL, trusted runner and one execution worker. Keep processing disabled
+until the current worker boot and selected agent/account/model pass acceptance.
 
 A self-hosted *arr app for vibe coding with Codex, Claude Code, and OpenCode.
 
@@ -30,20 +31,20 @@ it alone when everything is working.
    publishes one pull request linked to the issue, with check and review evidence.
    A human reviews and merges it after the required GitHub checks pass.
 
-This is the planned [Codex-first software factory](docs/software-factory-plan.md),
+This is the [Codex-first software factory](docs/software-factory-plan.md),
 inspired by the ZazenCodes v2 workflow. Codex implements the full role pipeline
-first; Claude Code and OpenCode follow the same contract. Intake, routed reviews
-and round artifacts remain implementation work, and live execution stays disabled
-until Docker qualification passes.
+first; Claude Code and OpenCode follow the same contract. The role pipeline and
+immutable round artifacts are implemented in this source.
+Live execution stays disabled until the current worker boot and selected
+provider/account/model pass qualification and live release acceptance.
 
-The release target is **four always-on containers**: app, PostgreSQL, runner and
+The Compose stack has **four always-on containers**: app, PostgreSQL, runner and
 one execution worker. The app handles issue-import scheduling; runner owns account
 and network mediation; worker runs setup, coding, reviews, checks and disposable
 test/browser processes sequentially. Celery/Beat, Valkey and the separate gateway,
-proxy, account and test-database containers are being removed from the target.
-This simplification is planned implementation work in
-[S1–S4](docs/docker-only-runtime-plan.md#required-simplification-branches), not a
-claim that the current Compose stack already has four containers.
+proxy, account and test-database containers are absent from this runtime. The
+[S1–S4 targets](docs/docker-only-runtime-plan.md#required-simplification-branches)
+remain the footprint and acceptance contract for these implemented boundaries.
 
 Human merging is required through the MVP and factory rollout. Automatic merging
 is deferred until sustained operation demonstrates maturity and a human explicitly
@@ -101,9 +102,8 @@ pipeline, the operations UI, and self-updates. The
 defines F1–F8 and their acceptance gates.
 
 The [MVP release contract](docs/vibearr-mvp.md) defines the first complete loop:
-two dependent issues implemented and tested automatically, with a human merging
-each PR and the second starting from the first verified merge. That is the
-starting point for building vibearr
+two dependent issues implemented and tested, with a human merging each PR and the
+second starting from the first verified merge. That is the starting point for building vibearr
 through its own queue.
 
 For existing installations, follow the [vibearr upgrade guide](docs/vibearr-upgrade.md)
@@ -114,18 +114,15 @@ to preserve database, volume, and runner identities while adopting the new names
 Docker Engine and Compose are the only runtime prerequisites. The web app uses
 port **7777** by default. Every service, worker, test, browser and operational tool
 runs in a container. The [Docker-only runtime plan](docs/docker-only-runtime-plan.md)
-defines the complete worker stack and its qualification gates. Autonomous execution
-stays disabled until that container boundary is implemented and verified.
-
-The commands below describe the current Compose implementation. The compact
-four-container deployment requires S1–S4; this documentation PR does not replace
-Compose services or change an installation.
+defines the compact runner/worker boundary and its qualification gates. Codex and Claude Code
+use subscription login; OpenCode uses an external Ollama server/model that you
+provide. No model API keys or bundled Ollama service are required.
 
 Copy the environment file and build the images:
 
 ```sh
 cp .env.example .env
-docker compose build
+bash run.sh --build
 ```
 
 Fresh installations leave secret values empty: initialization generates them
@@ -140,9 +137,13 @@ stop startup. Preserve the original database/user and volume settings on upgrade
 | `VIBEARR_CREDENTIAL_KEY` | Original encryption key on upgrade; generated for a fresh install |
 | `DJANGO_SECRET_KEY` | Original Django key on upgrade; generated for a fresh install |
 
-Start the app:
+`run.sh` builds the worker toolchain and pinned browser layer, binds the runner and
+worker's actual image IDs, and starts all four services. To start previously built
+images directly, supply both actual IDs:
 
 ```sh
+export VIBEARR_RUNNER_IMAGE_ID=$(docker image inspect vibearr-runner:local --format '{{.Id}}')
+export VIBEARR_WORKER_IMAGE_ID=$(docker image inspect vibearr-worker:local --format '{{.Id}}')
 docker compose up -d --wait
 ```
 
@@ -162,15 +163,18 @@ Use the Delete links on queue rows and configuration lists to remove work items,
 projects, credentials, coding runners, and schedules. Confirmation pages explain
 affected settings and retained history. See [UI deletion](docs/ui-deletion.md).
 
-The web app and issue importer start with the default Compose services. Execution
-runs in a separate `vibearr-runner` service. Follow the [runner setup and operations
-guide](docs/runner-operations.md) for its identity, credentials, and deployment
-requirements. Starting the web app alone does not start a coding agent.
+All four services start together. The runner owns delivery, persistent accounts
+and scoped network mediation. One worker contains the native CLIs and executes
+setup, agent/reviewer and independent validation phases sequentially. Save a **Runner
+subscription login** credential for Codex or Claude Code, then follow its Connect
+subscription instructions. For OpenCode, save your external Ollama endpoint and
+select an already installed model. See [Docker operations](docs/docker-operations.md).
+Starting the stack does not enable processing or invoke a model.
 
 For Django admin access, create an account:
 
 ```sh
-docker compose --profile tools run --rm tools python manage.py createsuperuser
+docker compose run --rm app python manage.py createsuperuser
 ```
 
 This is a single-user app for a private network. The browser UI has no login
@@ -180,12 +184,12 @@ credentials over a network.
 
 ## Submit work from the terminal
 
-Run the HTTP CLI in the tools container, whose entrypoint loads the private queue
+Run the HTTP CLI in a short-lived app container, whose entrypoint loads the private queue
 token. No host Python or CLI installation is required.
 
 ```sh
-docker compose --profile tools run --rm -e VIBEARR_URL=http://vibearr:8000 tools python -m vibearr projects
-docker compose --profile tools run --rm -e VIBEARR_URL=http://vibearr:8000 tools python -m vibearr add \
+docker compose run --rm -e VIBEARR_URL=http://app:8000 app python -m vibearr projects
+docker compose run --rm -e VIBEARR_URL=http://app:8000 app python -m vibearr add \
   --project 12 "Add CSV export" \
   --instructions "Include the active filters and column headings." --priority normal
 ```
@@ -195,21 +199,21 @@ errors exit nonzero. The compatibility `nq` module is also available in the imag
 
 ## How it fits together
 
-In the compact target, Django owns the queue, settings, credentials and run history.
-One supervised import loop in the app discovers GitHub issues using existing
-services and database leases. Production PostgreSQL stores application data. The
-independent runner claims work over HTTP and owns private state, selected backend
-accounts, scoped egress and Git/PR delivery. It calls one authenticated worker
-directly; no gateway or Docker daemon access is needed.
+Django owns the queue, settings, credentials, and run history. A supervised
+scheduler in the app executes durable PostgreSQL import jobs. The runner claims
+work over HTTP and owns private journals, selected accounts and Git/PR delivery.
+Celery, Beat and Valkey are not used.
 
-The worker switches between setup, agent/reviewer and trusted validation phases,
-with fresh source, credentials and local test databases for each phase. Browser
-and test-service subprocesses run inside that worker only while needed. Images
-contain pinned tools and released source; state stays in named volumes/bounded
-tmpfs. Candidate code cannot access host paths, controller journals, publication
-credentials or production data. GitHub issue text and repository content describe
-the task; they cannot grant new permissions. The existing larger Compose topology
-must be replaced and these boundaries requalified before release.
+The worker is separate from the trusted runner and production networks. Its
+authenticated private API accepts registered phases; candidate code cannot read
+runner journals, publication credentials or persistent logins. Test PostgreSQL,
+candidate apps and browsers run only while needed inside that worker, under its
+actual resource limits. Source, environment, selected credentials and test state
+reset between phases. Validation uses fresh snapshots and trusted image tools.
+Neither runner nor worker receives production database credentials. There is no
+Docker daemon access. GitHub issue text and repository content cannot grant new
+permissions. Phases share one worker namespace, so current-boot isolation and
+cleanup probes remain mandatory. See the [factory plan](docs/software-factory-plan.md).
 
 | Directory | Responsibility |
 | --- | --- |
@@ -219,40 +223,36 @@ must be replaced and these boundaries requalified before release.
 | `runner_control/` | Runner APIs, configuration, run records, and operator views |
 | `vibearr_runner/` | Independent supervisor, backends, workspaces, recovery, and delivery |
 | `vibearr/` | Standalone command-line client |
-| `vibearr_app/` | Django and current Celery configuration; S1 replaces background scheduling |
+| `vibearr_app/` | Django configuration |
 
 ## Development
 
 Use Python **3.12** in container images. Implement each feature on its own branch,
 with tests and migrations where needed. The [development plan](docs/autonomous-ai-queue-plan.md)
-and [Docker-only correction branches](docs/docker-only-runtime-plan.md) define
-merge order, the runtime boundary and acceptance gates.
+and [Docker runtime contract](docs/docker-only-runtime-plan.md) describe
+the runtime boundary and acceptance gates.
 
 Run application checks in Docker:
 
 ```sh
 bash test.sh
 bash test.sh work_queue.test_api
-docker compose --profile tools run --rm tools python manage.py makemigrations --check --dry-run
-docker compose --profile tools run --rm tools python manage.py check
-docker compose --profile tools run --rm tools black --check .
-docker compose --profile tools run --rm tools ruff check .
-docker compose --profile tools run --rm tools mypy . --config-file mypy.ini
+docker compose run --rm app python manage.py makemigrations --check --dry-run
+docker compose run --rm app python manage.py check
 ```
 
 The [Docker checks](docs/docker-operations.md#development-and-ci) use disposable
 projects for Git acceptance, distribution builds, qualification, browser captures
-and backup/restore. CI uses the same container images and profiles. Missing
+and backup/restore. CI uses the same four-service stack. Missing
 container tooling does not permit host
 Python, pip, Git task execution, browsers, services or package installation.
 
-Native agent integrations use pinned CLI images and explicitly selected connections.
-[Native Codex](docs/native-codex.md), [unattended execution](docs/native-queue.md),
-[validation](docs/isolated-validation.md) describe the retained contracts.
-[Automatic merge](docs/automatic-merge.md) is a deferred capability and must stay
-disabled during this rollout. Their host-launcher implementation references
-cannot qualify Docker-only execution. D1–D4 must pass the actual worker boundary
-and dependent two-issue scenario before enabling claims.
+Native agents use pinned executables in one worker image and explicitly selected
+connections. The [runtime contract](docs/docker-only-runtime-plan.md) and
+[operations guide](docs/docker-operations.md) supersede historical host/fleet
+instructions. Fixture responses and old proofs do not establish live readiness.
+[Automatic merge](docs/automatic-merge.md) is deferred and must remain disabled
+during this rollout; agent review does not grant merge permission.
 
 ## Keeping your data
 

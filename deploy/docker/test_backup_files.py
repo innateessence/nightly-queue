@@ -41,10 +41,12 @@ class BackupVolumeTests(unittest.TestCase):
         )
 
     def test_broker_sticky_directory_permissions_survive_restoration(self):
-        (self.source / "valkey-data").chmod(0o1777)
+        (self.source / "runner-control").chmod(0o1777)
         expected = capture(self.source, self.archive)
         restore(self.archive, expected, self.target)
-        self.assertEqual((self.target / "valkey-data").stat().st_mode & 0o7777, 0o1777)
+        self.assertEqual(
+            (self.target / "runner-control").stat().st_mode & 0o7777, 0o1777
+        )
 
     def test_setuid_files_cannot_be_included_in_a_backup(self):
         self.secret.chmod(0o4600)

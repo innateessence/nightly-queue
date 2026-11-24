@@ -59,7 +59,7 @@ class NativeSession:
             for text in (value["adapter"], value["agent_version"], account["model"]):
                 if not isinstance(text, str) or not text or len(text) > 200:
                     raise ValueError
-            if value["auth_kind"] not in {"token", "session", "connection"}:
+            if value["auth_kind"] not in {"token", "session", "connection", "login"}:
                 raise ValueError
             if value["execution_identity"] is not None:
                 from .native_contract import validate_execution_identity
@@ -94,6 +94,8 @@ class NativeAdapter(Protocol):
 
     def events(self, session: NativeSession) -> list[dict]: ...
 
+    def read_events(self, session: NativeSession) -> tuple[object, bytes]: ...
+
     def outcome(self, session: NativeSession, source: bytes) -> dict: ...
 
     def diagnostics(
@@ -116,6 +118,13 @@ class NativeAdapter(Protocol):
 
 class NativeBackendRegistry:
     def create(self, provider: str, client) -> NativeAdapter:
+        if (
+            getattr(client, "integrated", False) is True
+            or getattr(client, "compact", False) is True
+        ):
+            from .native_cli import NativeCLIAdapter
+
+            return NativeCLIAdapter(client, provider)
         if provider == "codex":
             from .native_codex import NativeCodexAdapter
 

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 
 from django.core.exceptions import ValidationError
 from django.forms.models import model_to_dict
@@ -18,6 +19,7 @@ from vibearr_executor import (
 
 from .settings_models import ProjectRunnerSettings, RunnerSettings, RunnerSchedule
 from .validators import OVERRIDE_FIELDS, validate_backend_model
+from .factory_configuration import effective_factory_configuration, factory_defaults
 
 
 SCHEMA_VERSION = 1
@@ -25,6 +27,7 @@ SCHEMA_VERSION = 1
 
 def settings_values(saved):
     values = model_to_dict(saved)
+    values["factory"] = factory_defaults()
     values.pop("id", None)
     values.pop("name", None)
     values.pop("identity", None)
@@ -52,6 +55,18 @@ def project_configuration(project, defaults, overrides, credentials):
         effective[field] = entry["value"] if mode == "replace" else value
         sources[field] = mode
     errors = []
+    try:
+        effective["factory"] = effective_factory_configuration(
+            effective["factory"], effective
+        )
+    except ValidationError as exc:
+        errors.append(
+            {
+                "field": "factory",
+                "code": "invalid_factory",
+                "message": "; ".join(exc.messages),
+            }
+        )
     capabilities = [
         "isolated_runtime",
         "native_session",
@@ -60,6 +75,11 @@ def project_configuration(project, defaults, overrides, credentials):
         "issue_context",
         "git_delivery",
     ]
+    if (
+        isinstance(effective["factory"], dict)
+        and effective["factory"].get("enabled") is True
+    ):
+        capabilities.append("factory_roles")
     for stage in ("implementation",):
         for field in ("backend", "model", "credential_id"):
             key = f"{stage}_{field}"
@@ -147,8 +167,8 @@ def project_configuration(project, defaults, overrides, credentials):
         if not credential or not field.startswith(("research", "implementation")):
             continue
         allowed = {
-            "codex": ("token", "session"),
-            "claude": ("token",),
+            "codex": ("token", "session", "login"),
+            "claude": ("token", "login"),
             "opencode": ("connection",),
         }
         if credential["kind"] not in allowed.get(credential["provider"], ()):
@@ -161,6 +181,13 @@ def project_configuration(project, defaults, overrides, credentials):
             )
     policy = ExecutionPolicy.from_data(effective["execution_policy"])
     if policy.delivery_mode == "merge":
+        errors.append(
+            {
+                "field": "execution_policy",
+                "code": "human_merge_required",
+                "message": "Automatic merge is disabled; select pull-request delivery for human review.",
+            }
+        )
         try:
             profile = merge_profile(effective["merge_profile"])
             if profile["repository_id"] != project.github_repository_id:
@@ -314,7 +341,7 @@ def _configuration_document(saved):
     }
     document["runtime_contract"] = {
         "schema_version": 1,
-        "runtime": "compose-slot-v2",
+        "runtime": os.environ.get("VIBEARR_RUNTIME_PROTOCOL", "compose-slot-v2"),
         "protocol_version": PROTOCOL_VERSION,
         "qualification_version": QUALIFICATION_VERSION,
         "qualification_source": "authenticated_executor_capabilities",

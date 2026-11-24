@@ -6,8 +6,9 @@ from uuid import uuid4
 from django.test import TestCase, override_settings
 
 from credentials.test_models import TEST_KEY
-from .delivery_recovery import recover_delivery
-from .models import NativeDeliveryRecovery, RunRetention
+from .auth import token_digest
+from .delivery_recovery import recover_delivery, resume_document
+from .models import NativeDeliveryRecovery, Run, RunRetention
 from .native_services import update_status
 from .retention import acknowledge
 from .services import RunConflict, finish_run
@@ -71,10 +72,38 @@ class DeliveryRecoveryTests(MergeProtocolMixin, TestCase):
             expected={**self.expected, **changes},
         )
 
+    def historical_recovery(self):
+        publication = self.run.evidence.filter(kind="native_delivery").last()
+        retention = RunRetention.objects.get(run=self.run)
+        archive = {
+            "item_result_url": self.run.item.result_url,
+            "finish_digest": self.run.finish_digest,
+            "native_outcome": self.run.native_outcome,
+            "reporting_acknowledged_at": retention.reporting_acknowledged_at.isoformat(),
+        }
+        token = uuid4()
+        recovery = NativeDeliveryRecovery.objects.create(
+            run=self.run,
+            operation_id=self.operation_id,
+            request=self.expected,
+            archive=archive,
+            resume=resume_document(self.run, publication),
+            claim_token=token,
+        )
+        Run.objects.filter(pk=self.run.pk).update(
+            state="active", active_slot=1, claim_digest=token_digest(str(token))
+        )
+        type(self.run.item).objects.filter(pk=self.run.item_id).update(
+            status="running", claim_token=token
+        )
+        RunRetention.objects.filter(run=self.run).update(reporting_acknowledged_at=None)
+        self.run.refresh_from_db()
+        return self.run, recovery
+
     def test_recovery_archives_failed_result_and_preserves_original_session(self):
         before = self.run.evidence.count()
         self.assertEqual(self.run.item.result_url, self.pull["url"])
-        run, recovery = self.recover()
+        run, recovery = self.historical_recovery()
         self.assertEqual(recovery.archive["item_result_url"], self.pull["url"])
         self.assertEqual(
             recovery.archive["finish_digest"], self.expected["expected_finish_digest"]
@@ -100,15 +129,15 @@ class DeliveryRecoveryTests(MergeProtocolMixin, TestCase):
         )
 
     def test_lost_recovery_response_reuses_one_generation_and_claim(self):
-        _, first = self.recover()
+        _, first = self.historical_recovery()
         _, second = self.recover()
         self.assertEqual(first.pk, second.pk)
         self.assertEqual(first.claim_token, second.claim_token)
         self.assertEqual(NativeDeliveryRecovery.objects.count(), 1)
-        self.provider.pull.assert_called_once()
+        self.provider.pull.assert_not_called()
 
     def test_different_recovery_operation_cannot_repeat_generation(self):
-        self.recover()
+        self.historical_recovery()
         with self.assertRaises(RunConflict):
             self.recover(operation_id=uuid4())
 
@@ -148,7 +177,7 @@ class DeliveryRecoveryTests(MergeProtocolMixin, TestCase):
         )
 
     def test_old_claim_and_old_ack_are_fenced_after_recovery(self):
-        self.recover()
+        self.historical_recovery()
         with self.assertRaises(RunConflict):
             update_status(
                 runner=self.runner,
@@ -165,25 +194,26 @@ class DeliveryRecoveryTests(MergeProtocolMixin, TestCase):
             )
 
     def test_recovery_blocks_new_agent_dispatch_on_server(self):
-        run, recovery = self.recover()
+        run, recovery = self.historical_recovery()
         self.run, self.claim = run, recovery.claim_token
         from .native_services import validate_intent_binding
 
         value = copy.deepcopy(self.agent_intent.payload)
         value["attempt"] = 1
-        with self.assertRaisesMessage(RunConflict, "cannot dispatch another agent"):
+        with self.assertRaisesMessage(RunConflict, "Automatic merge is disabled"):
             validate_intent_binding(run, value, uuid4())
 
-    def test_recovery_api_requires_controller_proof_and_returns_generation(self):
+    def test_recovery_api_rejects_new_generation_without_reopening_claim(self):
         response = self.post(
             "runner_delivery_recovery",
             {"operation_id": str(self.operation_id), **self.expected},
         )
-        self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(response.json()["run"]["delivery_recovery"]["generation"], 1)
-        self.assertEqual(
-            response.json()["delivery_recovery"]["native"]["phase"], "recovery_delivery"
-        )
+        self.assertEqual(response.status_code, 409, response.content)
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.state, "completed")
+        self.assertIsNone(self.run.active_slot)
+        self.assertFalse(NativeDeliveryRecovery.objects.exists())
+        self.provider.pull.assert_not_called()
 
     def test_changed_instructions_fence_recovery(self):
         from work_queue.models import QueueItem
@@ -205,7 +235,7 @@ class DeliveryRecoveryTests(MergeProtocolMixin, TestCase):
     def test_recovery_history_cannot_be_modified_or_deleted(self):
         from django.core.exceptions import ValidationError
 
-        _, recovery = self.recover()
+        _, recovery = self.historical_recovery()
         with self.assertRaises(ValidationError):
             recovery.save()
         with self.assertRaises(ValidationError):
@@ -222,7 +252,7 @@ class DeliveryRecoveryTests(MergeProtocolMixin, TestCase):
     def test_recovery_preserves_monotonic_native_status_sequence(self):
         self.run.native_status.update(sequence=7)
         self.run.save(update_fields=["native_status"])
-        run, recovery = self.recover()
+        run, recovery = self.historical_recovery()
         self.assertEqual(recovery.resume["status_sequence"], 7)
         with self.assertRaises(RunConflict):
             update_status(
@@ -236,7 +266,7 @@ class DeliveryRecoveryTests(MergeProtocolMixin, TestCase):
         from django.core.exceptions import ValidationError
         from .secrets import secret_document
 
-        run, recovery = self.recover()
+        run, recovery = self.historical_recovery()
         with self.assertRaises(ValidationError):
             secret_document(
                 {
