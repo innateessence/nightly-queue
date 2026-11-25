@@ -13,9 +13,8 @@ from credentials.signals import selected_run_references
 from projects.models import Project
 from work_queue.models import QueueItem
 
-from .configuration import runner_settings, settings_values
+from .configuration import runner_settings
 from .models import Run, RunnerIdentity
-from .release import observe_settings
 from .services import lock_controller
 from .settings_models import ProjectRunnerSettings, RunnerSchedule, RunnerSettings
 
@@ -65,10 +64,8 @@ def delete_schedule(schedule_id, replacement_id=None):
                 "Choose another schedule for the assigned coding runners before deleting this schedule."
             )
         for runner in runners:
-            before = settings_values(runner)
             RunnerSettings.objects.filter(pk=runner.pk).update(schedule=replacement)
             runner.schedule = replacement
-            observe_settings(before, settings_values(runner), settings_id=runner.pk)
     saved.delete()
 
 
@@ -114,25 +111,22 @@ def delete_credential(credential_id):
         Project.objects.select_for_update().filter(credential__isnull=True).update(
             autonomous=False, sync_lock_token=None, sync_lock_until=None
         )
-    for field in ("github_credential", "gitlab_credential"):
+    for field in ("github_credential",):
         APISettings.objects.filter(**{field: saved}).update(**{field: None})
     Project.objects.select_for_update().filter(credential=saved).update(
         credential=None, autonomous=False, sync_lock_token=None, sync_lock_until=None
     )
     for field in (
-        "research_credential",
         "implementation_credential",
         "issue_credential",
         "repository_credential",
     ):
         for runner in RunnerSettings.objects.filter(**{field: saved}):
-            before = settings_values(runner)
             RunnerSettings.objects.filter(pk=runner.pk).update(
                 **{field: None, "enabled": False, "paused": True}
             )
             setattr(runner, field, None)
             runner.enabled, runner.paused = False, True
-            observe_settings(before, settings_values(runner), settings_id=runner.pk)
     for settings in ProjectRunnerSettings.objects.select_for_update():
         overrides = dict(settings.overrides)
         for field, entry in overrides.items():

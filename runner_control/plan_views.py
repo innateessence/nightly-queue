@@ -1,6 +1,5 @@
 import json
 
-from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_GET
@@ -13,14 +12,11 @@ from .plan_presentation import (
     present_run,
     report_run,
     present_payload,
-    present_approval,
     present_evidence,
     present_global_record,
     present_gates,
     present_configuration,
 )
-from .plan_services import valid_handoff
-from .services import RunConflict
 from .factory_presentation import (
     ARTIFACT_PAGE_SIZE,
     artifact_data,
@@ -120,14 +116,6 @@ def detail(request, run_id):
         else []
     )
     native_run = run.configuration_snapshot.get("execution_kind") == "native"
-    reason = ""
-    try:
-        if not native_run:
-            valid_handoff(run)
-    except RunConflict as exc:
-        reason = str(exc)
-    except ValidationError:
-        reason = "Saved plan handoff is blocked by credential redaction."
     contexts = Paginator(run.contexts.order_by("-sequence"), 1).get_page(
         request.GET.get("context_page")
     )
@@ -148,7 +136,6 @@ def detail(request, run_id):
         .order_by("-pk")
         .first()
     )
-    reason, reason_error = present_payload(run, reason)
     response = render(
         request,
         "runner_control/plan_detail.html",
@@ -159,12 +146,8 @@ def detail(request, run_id):
             "native_run": native_run,
             "contexts": contexts,
             "plans": plans,
-            "handoff_reason": reason if reason is not None else reason_error,
             "retention": RunRetention.objects.filter(run=run).first(),
             "evidence_page": evidence,
-            "approvals": [
-                present_approval(approval) for approval in run.approvals.all()
-            ],
             "configuration_json": (
                 json.dumps(configuration, indent=2)
                 if configuration is not None

@@ -20,7 +20,7 @@ from .services import claim_run
 from .settings_models import ProjectRunnerSettings, RunnerSettings
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY, NQ_API_TOKEN="generic-token")
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY, VIBEARR_API_TOKEN="generic-token")
 class SelectedSecretTests(TestCase):
     def setUp(self):
         self.runner = RunnerIdentity.objects.create(
@@ -47,11 +47,11 @@ class SelectedSecretTests(TestCase):
         APISettings.objects.create(github_credential=self.import_token)
         self.settings = RunnerSettings.objects.get(pk=1)
         self.settings.enabled = True
-        self.settings.research_backend = "codex"
         self.settings.implementation_backend = "codex"
-        self.settings.research_model = "test-model"
+        self.settings.implementation_backend = "codex"
         self.settings.implementation_model = "test-model"
-        self.settings.research_credential = self.backend
+        self.settings.implementation_model = "test-model"
+        self.settings.implementation_credential = self.backend
         self.settings.implementation_credential = self.backend
         self.settings.issue_credential = self.issue
         self.settings.repository_credential = self.repository
@@ -154,7 +154,7 @@ class SelectedSecretTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(
             response.json()["material"],
-            {"secret": "backend-private-secret", "passphrase": ""},
+            {"secret": "backend-private-secret"},
         )
         self.assertNotIn("issue-private-secret", response.content.decode())
 
@@ -194,7 +194,7 @@ class SelectedSecretTests(TestCase):
                 self.assertEqual(response.status_code, 200, response.content)
                 self.assertEqual(response.json()["material"]["secret"], secret)
 
-    def test_native_run_cannot_retrieve_inactive_research_credentials(self):
+    def test_native_run_cannot_retrieve_inactive_implementation_credentials(self):
         self.claim()
         self.assertEqual(self.run_secret("research").status_code, 400)
 
@@ -263,7 +263,7 @@ class SelectedSecretTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("provider", response.content.decode())
 
-    @override_settings(NQ_CREDENTIAL_KEY="")
+    @override_settings(VIBEARR_CREDENTIAL_KEY="")
     def test_missing_encryption_key_returns_redacted_error(self):
         response = self.preflight()
         self.assertEqual(response.status_code, 400)
@@ -271,7 +271,7 @@ class SelectedSecretTests(TestCase):
         self.assertNotIn("backend-private-secret", response.content.decode())
 
     def test_wrong_encryption_key_returns_redacted_error(self):
-        with override_settings(NQ_CREDENTIAL_KEY=Fernet.generate_key().decode()):
+        with override_settings(VIBEARR_CREDENTIAL_KEY=Fernet.generate_key().decode()):
             response = self.preflight()
         self.assertEqual(response.status_code, 400)
         self.assertIn("decrypt", response.content.decode())
@@ -383,7 +383,7 @@ class SelectedSecretTests(TestCase):
         }
         url = reverse("runner_finish", args=[self.run.pk])
         first = self.client.post(url, json.dumps(data), content_type="application/json")
-        with override_settings(NQ_CREDENTIAL_KEY=""):
+        with override_settings(VIBEARR_CREDENTIAL_KEY=""):
             second = self.client.post(
                 url, json.dumps(data), content_type="application/json"
             )
@@ -445,7 +445,7 @@ class SelectedSecretTests(TestCase):
             }
         }
         session = self.credential("Session", "codex", json.dumps(material), "session")
-        self.settings.research_credential = session
+        self.settings.implementation_credential = session
         self.settings.save()
         self.claim()
         self.run.configuration_snapshot["execution_kind"] = "legacy"
@@ -481,7 +481,7 @@ class SelectedSecretTests(TestCase):
                 {
                     "operation_id": str(uuid.uuid4()),
                     "claim_token": str(self.run.item.claim_token),
-                    "stage": "research",
+                    "stage": "context",
                     "wait_reason": "backend-private-secret failed",
                 }
             ),
@@ -494,7 +494,7 @@ class SelectedSecretTests(TestCase):
 
     def test_report_with_unavailable_encryption_fails_closed(self):
         self.claim()
-        with override_settings(NQ_CREDENTIAL_KEY=""):
+        with override_settings(VIBEARR_CREDENTIAL_KEY=""):
             response = self.client.post(
                 reverse("runner_artifact", args=[self.run.pk]),
                 json.dumps(
@@ -514,11 +514,11 @@ class SelectedSecretTests(TestCase):
 
     def deselect_backend(self):
         RunnerPreflightGrant.objects.filter(credential=self.backend).delete()
-        self.settings.research_credential = self.unselected
+        self.settings.implementation_credential = self.unselected
         self.settings.implementation_credential = self.unselected
         self.settings.save()
 
-    @override_settings(NQ_CREDENTIAL_KEY="")
+    @override_settings(VIBEARR_CREDENTIAL_KEY="")
     def test_snapshot_selection_protects_deselected_credential(self):
         self.claim()
         self.deselect_backend()
@@ -571,7 +571,7 @@ class SelectedSecretTests(TestCase):
         self.run.refresh_from_db()
         self.assertEqual(self.run.state, Run.State.COMPLETED)
 
-    @override_settings(NQ_CREDENTIAL_KEY="")
+    @override_settings(VIBEARR_CREDENTIAL_KEY="")
     def test_admin_reports_snapshot_protection_before_deletion(self):
         from django.contrib.auth import get_user_model
 
@@ -615,10 +615,6 @@ class SelectedSecretTests(TestCase):
         ProjectRunnerSettings.objects.create(
             project=self.project,
             overrides={
-                "research_credential_id": {
-                    "mode": "replace",
-                    "value": self.unselected.pk,
-                },
                 "implementation_credential_id": {
                     "mode": "replace",
                     "value": self.unselected.pk,

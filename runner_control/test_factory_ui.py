@@ -512,7 +512,7 @@ class FactoryUITests(TestCase):
         self.assertNotContains(response, "<img src=x")
         self.assertNotContains(response, 'href="javascript:')
 
-    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    @override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
     def test_artifact_findings_redact_selected_credentials_and_claim_tokens(self):
         credential = Credential(name="UI redaction", provider="github", kind="token")
         credential.set_secret("selected-factory-secret")

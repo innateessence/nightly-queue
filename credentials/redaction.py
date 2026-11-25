@@ -1,5 +1,3 @@
-import json
-
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.views.decorators.debug import sensitive_variables
 
@@ -11,18 +9,11 @@ from .validation import validate_structured_secret
 @sensitive_variables()
 def credential_values(credential):
     material = credential.get_secret()
-    values = [material["secret"], material["passphrase"]]
-    if credential.kind in (Credential.Kind.SESSION, Credential.Kind.CONNECTION):
+    values = [material["secret"]]
+    if credential.kind == Credential.Kind.CONNECTION:
         validate_structured_secret(
             credential.provider, credential.kind, material["secret"]
         )
-    if credential.kind == Credential.Kind.SESSION:
-        tokens = json.loads(material["secret"])["tokens"]
-        values.extend(
-            tokens[field] for field in ("access_token", "refresh_token", "id_token")
-        )
-    elif credential.kind == Credential.Kind.CONNECTION:
-        values.append(json.loads(material["secret"]).get("api_key", ""))
     return values
 
 

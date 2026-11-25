@@ -7,7 +7,6 @@ from django.views.decorators.http import require_GET, require_http_methods
 from .configuration import configuration_document, settings_values
 from .configuration_views import window_labels
 from .plan_presentation import form_presentation_error, present_configuration_payload
-from .release import observe_settings
 from .services import lock_controller
 from .settings_forms import RunnerScheduleForm
 from .settings_models import RunnerSchedule, RunnerSettings, ensure_default_schedule
@@ -60,15 +59,10 @@ def edit(request, schedule_id=None):
         else RunnerSchedule()
     )
     runners = list(RunnerSettings.objects.filter(schedule=saved)) if saved.pk else []
-    previous = {runner.pk: settings_values(runner) for runner in runners}
     data = request.POST if request.method == "POST" else None
     form = RunnerScheduleForm(data, instance=saved)
     if request.method == "POST" and form.is_valid():
         form.save()
-        for runner in runners:
-            observe_settings(
-                previous[runner.pk], settings_values(runner), settings_id=runner.pk
-            )
         messages.success(
             request,
             "Schedule saved. Changes apply to every assigned coding runner at its next schedule check.",

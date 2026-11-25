@@ -43,7 +43,7 @@ class ManualSyncTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(ImportJob.objects.exists())
 
-    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    @override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
     @patch("work_queue.tasks.repository_metadata")
     @patch("work_queue.tasks.repository_issues")
     def test_button_sync_removes_closed_issue_from_queued_work(self, fetch, metadata):

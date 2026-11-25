@@ -19,7 +19,8 @@ from vibearr_executor.artifacts import pack, result_manifest
 from vibearr_executor.contracts import canonical, digest
 from vibearr_executor.validation_profile import CHECK_IDS, ValidationProfile
 from vibearr_runner import native_contract as contract
-from vibearr_runner.native_codex import CODEX_VERSION, codex_profile
+from vibearr_executor.compact_profiles import profiles as installed_profiles
+from vibearr_executor.integrated_profiles import VERSIONS
 from vibearr_runner.native_sessions import NativeSession
 from work_queue.models import QueueItem
 from work_queue.services import enqueue_item, requeue_items, refresh_issue_for_launch
@@ -43,7 +44,7 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
         super().setUp()
         for selected, value in (
             (self.github, "github-native-secret"),
-            (self.backend, "backend-native-secret"),
+            (self.backend, "managed-subscription-login"),
         ):
             selected.set_secret(value)
             type(selected).objects.filter(pk=selected.pk).update(
@@ -53,7 +54,7 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
         saved.enabled = True
         saved.validation_commands = []
         saved.execution_policy.update(
-            runtime_profile="codex-token-v1", validation_profile="vibearr-python312-v1"
+            runtime_profile="native-default", validation_profile="vibearr-python312-v1"
         )
         saved.save()
         Project.objects.filter(pk=self.project.pk).update(
@@ -94,6 +95,13 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
             "sha256:" + "a" * 64, "sha256:" + "b" * 64, digest(b"example==1.0\n")
         )
         self.deadline = (timezone.now() + timedelta(seconds=120)).isoformat()
+        self.worker_identity = {
+            "runtime": "compose-slot-v2",
+            "protocol_version": 2,
+            "instance_id": str(uuid4()),
+            "worker_boot": str(uuid4()),
+            "binding_digest": "e" * 64,
+        }
         self.operations = []
         self.intent_ids = []
         self.publications = []
@@ -193,7 +201,12 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
 
     def prepare_agent(self):
         self.prepare_context()
-        fixed = codex_profile("sha256:" + "f" * 64, "token")
+        profiles, _ = installed_profiles(
+            "sha256:" + "f" * 64, digest(b"example==1.0\n")
+        )
+        fixed = next(
+            profile for profile in profiles if profile.profile_id == "native-default"
+        )
         manifest = {
             "schema_version": 1,
             "run_id": str(self.run.pk),
@@ -209,13 +222,13 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
         }
         self.session = NativeSession(
             "codex",
-            CODEX_VERSION,
+            VERSIONS["codex"],
             selected_account(self.run),
-            "token",
+            "login",
             fixed.image,
             "e" * 64,
             manifest,
-            getattr(self, "worker_identity", None),
+            self.worker_identity,
         )
         self.agent_intent = self.write(
             "native_intent",
@@ -229,7 +242,8 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
             "state": "exited",
             "operation_id": operation_id,
             "descendants_terminated": True,
-            "container_id": "2" * 64,
+            "execution_identity": self.worker_identity,
+            "worker_boot": self.worker_identity["worker_boot"],
             "result": {
                 "schema_version": 1,
                 "run_id": str(self.run.pk),
@@ -243,15 +257,9 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
                 "ended_at": end,
                 "log_digest": "3" * 64,
                 "artifact": result_manifest(original, changed),
+                "execution_identity": self.worker_identity,
             },
         }
-        if hasattr(self, "worker_identity"):
-            observed.pop("container_id")
-            observed.update(
-                execution_identity=self.worker_identity,
-                worker_boot=self.worker_identity["worker_boot"],
-            )
-            observed["result"]["execution_identity"] = self.worker_identity
         return observed
 
     def complete_agent(self):
@@ -266,7 +274,7 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
             "source": self.changed,
             "successful": True,
             "session_id": "ses_provider-identity",
-            "agent_version": CODEX_VERSION,
+            "agent_version": VERSIONS["codex"],
         }
         self.write(
             "native_agent",
@@ -462,7 +470,7 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
             "runtime": {
                 "image_digest": self.session.image_digest,
                 "profile_id": self.session.manifest["profile_id"],
-                "agent_version": CODEX_VERSION,
+                "agent_version": VERSIONS["codex"],
                 "session_id": "ses_provider-identity",
             },
             "workspace": self.workspace,
@@ -489,11 +497,11 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
         )
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class NativeProtocolTests(NativeProtocolMixin, TestCase):
     def test_native_context_and_plan_need_no_approval_or_research(self):
         self.prepare_agent()
-        self.assertFalse(self.run.approvals.exists())
+        self.assertEqual(self.run.configuration_snapshot["execution_kind"], "native")
         self.assertEqual(
             self.run.contexts.get().document["source"], self.run.source_snapshot
         )
@@ -1046,8 +1054,7 @@ class NativeProtocolTests(NativeProtocolMixin, TestCase):
         self.run.refresh_from_db()
         self.assertEqual(self.run.source_snapshot["body"], fresh["body"])
 
-    def test_derived_validation_requires_owned_build_source_and_runtime(self):
-        from vibearr_executor.qualification import REQUIRED_CHECKS
+    def test_dependency_validation_requires_owned_source_and_runtime(self):
         from vibearr_executor.validation_profile import PACKAGE_HOSTS
         from .native_services import validation_profile_binding
 
@@ -1078,39 +1085,44 @@ class NativeProtocolTests(NativeProtocolMixin, TestCase):
             ),
         )
         derived = ValidationProfile(
-            "sha256:" + "9" * 64,
+            self.profile.image,
             self.profile.database_image,
-            self.profile.dependency_digest,
+            digest(b"example==2.0\n"),
+        )
+        workspace = dict(
+            self.workspace_entry.payload, requirements_digest=derived.dependency_digest
         )
         proof = {
-            "schema_version": 1,
+            "schema_version": 2,
             "build_id": build_id,
             "run_id": str(self.run.pk),
             "source_digest": digest(self.changed),
-            "requirements_digest": self.profile.dependency_digest,
+            "requirements_digest": derived.dependency_digest,
             "dependency_digest": "8" * 64,
             "parent_image": self.profile.image,
             "parent_profile_digest": self.profile.digest,
             "parent_runtime_binding": "e" * 64,
             "setup_operation_id": build_id,
             "setup_log_digest": "7" * 64,
-            "derived_image": derived.image,
-            "qualification_binding_digest": "6" * 64,
-            "qualification_report_digest": "5" * 64,
-            "boundary_checks": list(REQUIRED_CHECKS),
+            "artifact": {
+                "schema_version": 1,
+                "sha256": "8" * 64,
+                "bytes": 10240,
+                "files": 4,
+                "requirements_digest": derived.dependency_digest,
+            },
+            "validation_profile_digest": derived.digest,
+            "setup_instance_id": self.worker_identity["instance_id"],
+            "setup_worker_boot": self.worker_identity["worker_boot"],
         }
         value = {"profile": contract.profile_reference(derived), "provenance": proof}
         self.assertEqual(
-            validation_profile_binding(
-                self.run, value, self.workspace_entry.payload, self.context
-            ),
+            validation_profile_binding(self.run, value, workspace, self.context),
             build_id,
         )
         proof["source_digest"] = "a" * 64
         with self.assertRaisesMessage(RunConflict, "owned source/runtime"):
-            validation_profile_binding(
-                self.run, value, self.workspace_entry.payload, self.context
-            )
+            validation_profile_binding(self.run, value, workspace, self.context)
 
     def test_retention_preserves_newer_attempt_source(self):
         self.complete_agent()
@@ -1141,7 +1153,7 @@ class NativeProtocolTests(NativeProtocolMixin, TestCase):
         self.assertEqual(frozen["body"], "New explicit attempt")
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class NativeProtocolConcurrencyTests(NativeProtocolMixin, TransactionTestCase):
     def test_import_can_supersede_inflight_source_read_without_mutating_run(self):
         from work_queue.services import (
@@ -1212,7 +1224,7 @@ class NativeProtocolConcurrencyTests(NativeProtocolMixin, TransactionTestCase):
     def upload(self, payload, operation_id):
         client = Client(
             HTTP_AUTHORIZATION="Bearer " + self.runner_token,
-            HTTP_X_NQ_CONTROLLER_SECRET=CONTROLLER_SECRET,
+            HTTP_X_VIBEARR_CONTROLLER_SECRET=CONTROLLER_SECRET,
         )
         response = client.post(
             reverse("runner_artifact", args=[self.run.pk]),
@@ -1311,7 +1323,7 @@ class NativeProtocolConcurrencyTests(NativeProtocolMixin, TransactionTestCase):
         )
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class NativeHTTPTests(NativeProtocolMixin, TestCase):
     def test_changed_owner_is_not_a_retryable_source_observation(self):
         from work_queue.services import (

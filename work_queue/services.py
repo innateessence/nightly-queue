@@ -218,7 +218,7 @@ def import_issue(
     queued.update(title=title[:200], instructions=body, priority=priority)
     if state == QueueItem.IssueState.CLOSED:
         queued.update(status=QueueItem.Status.CLOSED, finished_at=timezone.now())
-    if state == "closed" or {"vibearr:hold", "nq:hold"}.intersection(labels):
+    if state == "closed" or "vibearr:hold" in labels:
         from runner_control.models import Run
 
         Run.objects.filter(
@@ -308,7 +308,7 @@ def source_wait_reason(item):
         return "Project autonomous execution is disabled."
     if item.issue_state != QueueItem.IssueState.OPEN:
         return "Issue is closed."
-    if {"vibearr:hold", "nq:hold"}.intersection(item.issue_labels):
+    if "vibearr:hold" in item.issue_labels:
         return "Issue is held on GitHub."
     complete = (
         item.github_repository_id

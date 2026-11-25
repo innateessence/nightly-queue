@@ -2,10 +2,10 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from .models import Credential
-from .test_models import TEST_KEY, private_key
+from .test_models import TEST_KEY
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class CredentialViewTests(TestCase):
     def setUp(self):
         self.url = reverse("credential_list")
@@ -14,7 +14,6 @@ class CredentialViewTests(TestCase):
             "provider": Credential.Provider.GITHUB,
             "kind": Credential.Kind.TOKEN,
             "secret": "private-token",
-            "passphrase": "",
         }
 
     def make_credential(self):
@@ -56,7 +55,6 @@ class CredentialViewTests(TestCase):
                 "provider",
                 "kind",
                 "secret",
-                "passphrase",
                 "connection_provider",
                 "connection_endpoint",
             ],
@@ -68,25 +66,6 @@ class CredentialViewTests(TestCase):
         self.assertEqual(
             form.fields["kind"].choices[1:],
             list(Credential.Kind.choices),
-        )
-
-    def test_gitlab_token_creation_shows_provider_and_type(self):
-        self.data["provider"] = "gitlab"
-        response = self.client.post(self.url, self.data, follow=True)
-        self.assertRedirects(response, self.url)
-        self.assertEqual(Credential.objects.get().provider, "gitlab")
-        self.assertContains(response, "Provider: GitLab")
-        self.assertContains(response, '<span class="priority">Token</span>', html=True)
-
-    def test_other_secret_creation_encrypts_value(self):
-        value = " custom secret\nwith spaces "
-        self.data.update(provider="gitlab", kind="secret", secret=value)
-        response = self.client.post(self.url, self.data, follow=True)
-        self.assertRedirects(response, self.url)
-        self.assertEqual(Credential.objects.get().get_secret()["secret"], value)
-        self.assertNotContains(response, value)
-        self.assertContains(
-            response, '<span class="priority">Secret (other)</span>', html=True
         )
 
     def test_missing_provider_is_rejected(self):
@@ -111,27 +90,12 @@ class CredentialViewTests(TestCase):
         self.assertNotContains(response, "private-token")
         self.assertNotContains(response, credential.encrypted_payload)
 
-    def test_ssh_key_creation_encrypts_private_key_and_passphrase(self):
-        key = private_key("ssh-password")
-        self.data.update(
-            kind=Credential.Kind.SSH, secret=key, passphrase="ssh-password"
-        )
-        response = self.client.post(self.url, self.data, follow=True)
-        self.assertRedirects(response, self.url)
-        self.assertEqual(
-            Credential.objects.get().get_secret(),
-            {"secret": key, "passphrase": "ssh-password"},
-        )
-        self.assertNotContains(response, "ssh-password")
-        self.assertNotContains(response, key)
-
     def test_invalid_form_keeps_name_but_never_echoes_secrets(self):
-        self.data.update(kind=Credential.Kind.SSH, passphrase="private-passphrase")
+        self.data.update(kind="unsupported")
         response = self.client.post(self.url, self.data)
         self.assertContains(response, 'value="GitHub work account"')
         self.assertContains(response, "Re-enter the secret before saving.")
         self.assertNotContains(response, "private-token")
-        self.assertNotContains(response, "private-passphrase")
         self.assertFalse(Credential.objects.exists())
 
     def test_duplicate_name_shows_error_without_creating_credential(self):
@@ -147,7 +111,7 @@ class CredentialViewTests(TestCase):
         self.assertContains(response, "Enter a secret value.")
         self.assertFalse(Credential.objects.exists())
 
-    @override_settings(NQ_CREDENTIAL_KEY="")
+    @override_settings(VIBEARR_CREDENTIAL_KEY="")
     def test_missing_encryption_key_shows_error_without_saving(self):
         response = self.client.post(self.url, self.data)
         self.assertContains(response, "Configure VIBEARR_CREDENTIAL_KEY")

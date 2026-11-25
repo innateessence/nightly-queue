@@ -248,19 +248,9 @@ def record_evidence(
     run = owned_run(runner, run_id)
     from vibearr_runner.native_contract import ARTIFACT_KINDS, FACT_KINDS
 
-    intent_data = payload.get("data") if isinstance(payload, dict) else None
-    completion = (
-        kind == "native_intent"
-        and isinstance(payload, dict)
-        and payload.get("kind") == "merge"
-        and isinstance(intent_data, dict)
-        and intent_data.get("stage") in {"comment", "close", "delete"}
-    )
-    reporting = (
-        completion
-        or run.configuration_snapshot.get("execution_kind") == "native"
-        and kind in FACT_KINDS | {"verified_delivery"}
-    )
+    reporting = run.configuration_snapshot.get(
+        "execution_kind"
+    ) == "native" and kind in FACT_KINDS | {"verified_delivery"}
     verify_active(run, claim_token, allow_cancellation=reporting)
     progress_fields = [field for field in (progress or {}) if field != "stage"]
     values = [progress[field] for field in progress_fields]
@@ -286,16 +276,6 @@ def record_evidence(
     if created and progress is not None:
         for field, value in progress.items():
             setattr(run, field, value)
-        if run.configuration_snapshot.get(
-            "execution_kind"
-        ) != "native" and progress.get("stage") in {
-            Run.Stage.IMPLEMENTATION,
-            Run.Stage.VALIDATION,
-            Run.Stage.DELIVERY,
-        }:
-            from .plan_services import require_saved_plan
-
-            require_saved_plan(run)
         run.save(update_fields=[*progress, "updated_at"])
     return evidence
 
@@ -332,7 +312,6 @@ def finish_run(
     if outcome:
         if outcome not in {
             "delivered",
-            "merged",
             "failed",
             "canceled",
             "no_change",
@@ -360,16 +339,8 @@ def finish_run(
         from .factory_native import terminal_outcome
 
         terminal_outcome(run, outcome)
-    merge_race = (
-        native
-        and outcome == "merged"
-        and status == QueueItem.Status.SUCCEEDED
-        and run.evidence.filter(kind="native_merge").exists()
-    )
-    if (
-        run.cancellation_requested_at
-        and not merge_race
-        and (status != QueueItem.Status.FAILED or not run.cancellation_confirmed_at)
+    if run.cancellation_requested_at and (
+        status != QueueItem.Status.FAILED or not run.cancellation_confirmed_at
     ):
         raise RunConflict(
             "Cancellation requires confirmed termination and a failed result."
@@ -381,28 +352,20 @@ def finish_run(
 
         run, _ = lock_scope(run, claim_token, reporting=True)
         require_termination(run)
-        if run.evidence.filter(kind="native_merge").exists() and (
-            status != QueueItem.Status.SUCCEEDED or outcome != "merged"
-        ):
-            raise RunConflict(
-                "Actual merged work must retain its merged successful outcome."
-            )
-        if (
-            run.cancellation_requested_at
-            and not merge_race
-            and (status != QueueItem.Status.FAILED or not run.cancellation_confirmed_at)
+        if run.cancellation_requested_at and (
+            status != QueueItem.Status.FAILED or not run.cancellation_confirmed_at
         ):
             raise RunConflict(
                 "Cancellation requires confirmed termination and a failed result."
             )
         if (
-            outcome in {"delivered", "merged"}
+            outcome == "delivered"
             and status != QueueItem.Status.SUCCEEDED
-            or outcome not in {"delivered", "merged"}
+            or outcome != "delivered"
             and status != QueueItem.Status.FAILED
         ):
             raise RunConflict("Native outcome differs from its queue result.")
-        if run.cancellation_requested_at and outcome != "canceled" and not merge_race:
+        if run.cancellation_requested_at and outcome != "canceled":
             raise RunConflict(
                 "Canceled native work must retain its cancellation outcome."
             )
@@ -411,13 +374,6 @@ def finish_run(
             and run.evidence.filter(kind="native_delivery").exists()
         ):
             raise RunConflict("Published native work cannot be reported as no change.")
-        mode = run.configuration_snapshot["execution_policy"]["delivery_mode"]
-        if status == QueueItem.Status.SUCCEEDED and outcome != (
-            "merged" if mode == "merge" else "delivered"
-        ):
-            raise RunConflict(
-                "Successful native outcome must match its configured delivery mode."
-            )
     if status == QueueItem.Status.SUCCEEDED:
         validate_success(run, result_url)
     updated = finish_item(

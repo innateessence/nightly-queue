@@ -13,7 +13,7 @@ from .models import Credential, CredentialSecretVersion
 from .test_models import TEST_KEY
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class BackendCredentialTests(TestCase):
     def make_credential(
         self, provider="codex", kind="token", secret="backend-private-token"
@@ -201,7 +201,7 @@ class BackendCredentialTests(TestCase):
     def test_selected_global_reference_is_protected(self):
         credential = self.make_credential()
         RunnerSettings.objects.update_or_create(
-            pk=1, defaults={"research_credential": credential}
+            pk=1, defaults={"implementation_credential": credential}
         )
         with self.assertRaises(ProtectedError):
             credential.delete()
@@ -214,7 +214,10 @@ class BackendCredentialTests(TestCase):
         ProjectRunnerSettings.objects.create(
             project=project,
             overrides={
-                "research_credential_id": {"mode": "replace", "value": credential.pk}
+                "implementation_credential_id": {
+                    "mode": "replace",
+                    "value": credential.pk,
+                }
             },
         )
         with self.assertRaises(ProtectedError):
@@ -234,7 +237,10 @@ class BackendCredentialTests(TestCase):
         ProjectRunnerSettings.objects.create(
             project=project,
             overrides={
-                "research_credential_id": {"mode": "replace", "value": credential.pk}
+                "implementation_credential_id": {
+                    "mode": "replace",
+                    "value": credential.pk,
+                }
             },
         )
         response = self.client.post(

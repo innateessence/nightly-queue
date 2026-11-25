@@ -43,9 +43,6 @@ class OperationsUITests(TestCase):
         response = self.client.get(reverse("index"))
         for name in ["runner_activity", "runner_plan_history", "runner_system"]:
             self.assertContains(response, f'href="{reverse(name)}"')
-        self.assertNotContains(
-            response, 'href="' + reverse("runner_approval_inbox") + '"'
-        )
 
     def test_queue_links_to_latest_attempt(self):
         response = self.client.get(reverse("index"))
@@ -88,7 +85,7 @@ class OperationsUITests(TestCase):
         self.assertContains(response, "&lt;img")
         self.assertNotContains(response, "<img")
 
-    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    @override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
     def test_activity_redacts_selected_credentials_and_claim_tokens(self):
         credential = Credential(name="UI backend", provider="codex", kind="token")
         credential.set_secret("ui-selected-secret")

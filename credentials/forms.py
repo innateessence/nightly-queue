@@ -19,17 +19,14 @@ class APISettingsForm(forms.ModelForm):
         model = APISettings
         fields = [
             "github_credential",
-            "gitlab_credential",
             "auto_sync_interval_seconds",
         ]
         labels = {
             "github_credential": "GitHub API credential",
-            "gitlab_credential": "GitLab API credential",
             "auto_sync_interval_seconds": "Auto sync interval",
         }
         help_texts = {
             "github_credential": "Used for scheduled issue imports from autonomous GitHub projects.",
-            "gitlab_credential": "Saved for GitLab API access. GitLab issue imports are not available yet.",
             "auto_sync_interval_seconds": "How often to sync issues for all autonomous projects. Sync issues now runs immediately.",
         }
 
@@ -48,13 +45,6 @@ class CredentialForm(forms.ModelForm):
         ),
         help_text="Paste the secret value. Leave blank when editing to keep the saved secret.",
     )
-    passphrase = forms.CharField(
-        required=False,
-        strip=False,
-        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
-        help_text="For an encrypted SSH key. Supply it again when replacing the key.",
-    )
-
     connection_provider = forms.ChoiceField(
         required=False,
         label="OpenCode inference provider",
@@ -72,7 +62,7 @@ class CredentialForm(forms.ModelForm):
 
     class Meta:
         model = Credential
-        fields = ["name", "provider", "kind", "secret", "passphrase"]
+        fields = ["name", "provider", "kind", "secret"]
         labels = {"kind": "Type"}
         widgets = {
             "name": forms.TextInput(
@@ -92,10 +82,7 @@ class CredentialForm(forms.ModelForm):
         secret = self.fields["secret"]
         secret.required = False
         secret.error_messages["required"] = "Enter a secret value."
-        secret.help_text = "For repository access, paste a token or SSH key. For runner subscription login, leave blank and sign in inside the runner after saving. OpenCode uses the external Ollama fields."
-        self.fields["passphrase"].help_text = (
-            "Only needed for a passphrase-protected SSH key."
-        )
+        secret.help_text = "For repository access, paste a GitHub token. For runner subscription login, leave blank and sign in inside the runner after saving. OpenCode uses the external Ollama fields."
 
     @sensitive_variables()
     def clean(self):
@@ -150,15 +137,9 @@ class CredentialForm(forms.ModelForm):
                 return data
             data["secret"] = json.dumps(value)
         secret = data.get("secret", "")
-        passphrase = data.get("passphrase", "")
         if not secret:
             if not self.instance.pk:
                 self.add_error("secret", "Enter a secret value.")
-            elif passphrase:
-                self.add_error(
-                    "passphrase",
-                    "Supply the private key again to change its passphrase.",
-                )
             return data
         kind = data.get("kind", self.instance.kind)
         if not kind:
@@ -166,7 +147,7 @@ class CredentialForm(forms.ModelForm):
         self.instance.kind = kind
         self.instance.provider = data.get("provider", self.instance.provider)
         try:
-            self.instance.set_secret(secret, passphrase)
+            self.instance.set_secret(secret)
         except ValidationError as exc:
             self.add_error(None, exc)
         except ImproperlyConfigured as exc:

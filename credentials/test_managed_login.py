@@ -6,7 +6,7 @@ from .models import Credential
 from .test_models import TEST_KEY
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class ManagedLoginFormTests(TestCase):
     def test_codex_subscription_reference_requires_no_secret(self):
         form = CredentialForm(

@@ -7,7 +7,7 @@ from uuid import uuid4
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
-from coding_runner.test_factory_spec_sessions import BASE_ROLES, RoleExecutor
+from vibearr_runner.test_factory_spec_sessions import BASE_ROLES, RoleExecutor
 from credentials.test_models import TEST_KEY
 from vibearr_executor.artifacts import digest, pack
 from vibearr_runner import native_contract as contract
@@ -372,7 +372,7 @@ class FactoryNativeFixture(native_fixture.NativeProtocolMixin):
         )
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class FactoryNativeTests(FactoryNativeFixture, TestCase):
     def test_intake_can_be_saved_before_any_plan(self):
         self.save_context()
@@ -603,7 +603,7 @@ class FactoryNativeTests(FactoryNativeFixture, TestCase):
             self.write("native_workspace", document)
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class FactoryGenerationTests(FactoryNativeFixture, TestCase):
     def setUp(self):
         super().setUp()
@@ -688,7 +688,7 @@ class FactoryGenerationTests(FactoryNativeFixture, TestCase):
 
     def post_generation(self, document=None, *, remote="6" * 40, operation_id=None):
         document = document or self.generation_document()
-        with patch("runner_control.merge_services.provider") as provider:
+        with patch("runner_control.publication_services.provider") as provider:
             provider.return_value.base_sha.return_value = remote
             response = self.post(
                 "runner_contexts",
@@ -814,7 +814,7 @@ class FactoryGenerationTests(FactoryNativeFixture, TestCase):
         self.assertIn("Published factory work", response.json()["error"])
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class FactoryCandidateAuthorityTests(artifact_fixture.FactoryFixture, TestCase):
     factory_checks = True
 
@@ -855,7 +855,7 @@ class FactoryCandidateAuthorityTests(artifact_fixture.FactoryFixture, TestCase):
                     require_artifact_binding(artifacts, changed)
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class FactoryRepairLimitTests(FactoryNativeFixture, TestCase):
     def configure_repairs(self, limit):
         self.configuration["max_repairs"] = limit

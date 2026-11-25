@@ -130,7 +130,7 @@ class WorkSelectionTests(TestCase):
         self.assertIsNone(claim_item(item))
 
     def test_legacy_hold_label_blocks_work(self):
-        self.issue(labels=["nq:hold"])
+        self.issue(labels=["vibearr:hold"])
         self.assertIsNone(claim_next())
 
     def test_closed_dependency_does_not_satisfy_merge_requirement(self):
@@ -261,7 +261,7 @@ class WorkSelectionTests(TestCase):
         with self.assertRaises(ValidationError):
             record_verified_merge(**{**values, "merge_sha": "b" * 40})
 
-    @override_settings(NQ_API_TOKEN="test")
+    @override_settings(VIBEARR_API_TOKEN="test")
     def test_generic_api_cannot_bypass_hold(self):
         self.issue(labels=["vibearr:hold"])
         response = self.client.post(

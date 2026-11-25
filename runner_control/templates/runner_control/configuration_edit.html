@@ -29,7 +29,7 @@
       {% for project in runner_configuration.projects %}<p><a href="{% url 'edit_project' project.project_id %}">{{ project.project_name }}</a>: {{ project.structurally_valid|yesno:"Structurally valid,Missing configuration" }}</p>{% for error in project.errors %}<p class="field-error">{{ error.field }}: {{ error.message }}</p>{% endfor %}{% empty %}<p class="field-hint">Add a project to inspect effective configuration.</p>{% endfor %}
     </section>
     <section class="panel composer" id="diagnostics" aria-label="Runner diagnostics">
-      {% include "runner_control/_gates.html" %}<hr>{% include "runner_control/_release.html" %}
+      {% include "runner_control/_gates.html" %}
     </section>
     {% if settings_id and settings_id != 1 %}<section class="panel plan-section"><h2>Delete configuration</h2><p>Review the affected machine identity before confirming.</p><a class="button-danger" href="{% url 'coding_runner_delete' settings_id %}">Delete coding runner</a></section>{% endif %}
   </div>

@@ -34,7 +34,7 @@ from .plan_presentation import present_payload
 from .settings_models import ProjectRunnerSettings, RunnerSchedule, RunnerSettings
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class DeletionTests(TestCase):
     def setUp(self):
         runner_settings()

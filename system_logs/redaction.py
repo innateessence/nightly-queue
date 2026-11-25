@@ -13,8 +13,6 @@ from credentials.redaction import credential_values
 def secret_values():
     names = (
         "SECRET_KEY",
-        "NQ_API_TOKEN",
-        "NQ_CREDENTIAL_KEY",
         "VIBEARR_API_TOKEN",
         "VIBEARR_CREDENTIAL_KEY",
     )

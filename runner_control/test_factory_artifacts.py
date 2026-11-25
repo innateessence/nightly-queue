@@ -7,8 +7,7 @@ from threading import Barrier
 from uuid import uuid4
 
 from django.core.exceptions import ValidationError
-from django.db import close_old_connections, connection
-from django.db.migrations.executor import MigrationExecutor
+from django.db import close_old_connections
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -245,7 +244,7 @@ class FactoryFixture(NativeProtocolMixin):
         )
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class FactoryArtifactTests(FactoryFixture, TestCase):
     def test_save_binds_actual_native_result_and_preserves_immutable_document(self):
         document = self.document()
@@ -433,7 +432,7 @@ class FactoryArtifactTests(FactoryFixture, TestCase):
         self.assertFalse(FactoryArtifact.objects.exists())
 
     def test_current_controller_header_secret_is_rejected(self):
-        self.client.defaults.pop("HTTP_X_NQ_CONTROLLER_SECRET")
+        self.client.defaults.pop("HTTP_X_VIBEARR_CONTROLLER_SECRET")
         self.client.defaults["HTTP_X_VIBEARR_CONTROLLER_SECRET"] = CONTROLLER_SECRET
         document = self.document()
         document["payload"]["summary"] = "Leaked " + CONTROLLER_SECRET
@@ -529,7 +528,7 @@ class FactoryArtifactTests(FactoryFixture, TestCase):
             self.save(document)
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class FactoryChecksTests(FactoryFixture, TestCase):
     factory_checks = True
 
@@ -580,7 +579,7 @@ class FactoryChecksTests(FactoryFixture, TestCase):
             self.save(self.checks_document())
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class FactoryRepairRoundTests(FactoryFixture, TestCase):
     factory_repair = True
 
@@ -607,7 +606,7 @@ class FactoryRepairRoundTests(FactoryFixture, TestCase):
         self.assertEqual(checks.specification_id, build.specification_id)
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class FactoryBootstrapTests(FactoryFixture, TestCase):
     bootstrap_role = "intake"
 
@@ -625,7 +624,7 @@ class FactoryBootstrapTests(FactoryFixture, TestCase):
             self.save(self.document(role="intake"))
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class FactorySpecificationBootstrapTests(FactoryFixture, TestCase):
     bootstrap_role = "specification"
 
@@ -635,7 +634,7 @@ class FactorySpecificationBootstrapTests(FactoryFixture, TestCase):
         self.assertEqual(entry.document["specification_digest"], "")
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class FactoryRetentionTests(FactoryFixture, TestCase):
     def finish(self, *, state="completed", acknowledged=True):
         now = timezone.now()
@@ -691,18 +690,8 @@ class FactoryRetentionTests(FactoryFixture, TestCase):
             purge_run(self.run.pk, now)
         self.assertTrue(FactoryArtifact.objects.filter(pk=artifact.pk).exists())
 
-    def test_pending_approval_preserves_factory_documents(self):
-        artifact = self.save()
-        now = self.finish()
-        self.run.approvals.create(
-            operation_id=uuid4(), action={}, binding_digest="a" * 64
-        )
-        with self.assertRaises(RunConflict):
-            purge_run(self.run.pk, now)
-        self.assertTrue(FactoryArtifact.objects.filter(pk=artifact.pk).exists())
 
-
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class FactoryArtifactConcurrencyTests(FactoryFixture, TransactionTestCase):
     def test_concurrent_exact_retry_creates_one_sequence(self):
         document = self.document()
@@ -722,23 +711,3 @@ class FactoryArtifactConcurrencyTests(FactoryFixture, TransactionTestCase):
             values = list(pool.map(lambda _: store(), range(2)))
         self.assertEqual(values[0], values[1])
         self.assertEqual(FactoryArtifact.objects.count(), 1)
-
-
-class FactoryArtifactMigrationTests(TransactionTestCase):
-    def test_legacy_run_upgrades_without_fabricated_factory_history(self):
-        previous = ("runner_control", "0016_integrated_runner_policy")
-        current = ("runner_control", "0017_factory_artifacts")
-        executor = MigrationExecutor(connection)
-        executor.migrate([previous])
-        apps = executor.loader.project_state([previous]).apps
-        runner = apps.get_model("runner_control", "RunnerIdentity").objects.create(
-            name="Legacy", token_digest="f" * 64
-        )
-        identity = uuid4()
-        apps.get_model("runner_control", "Run").objects.create(
-            id=identity, runner=runner, state="empty", stage="finished"
-        )
-        executor = MigrationExecutor(connection)
-        executor.migrate([current])
-        self.assertTrue(Run.objects.filter(pk=identity, stage="finished").exists())
-        self.assertFalse(FactoryArtifact.objects.filter(run_id=identity).exists())

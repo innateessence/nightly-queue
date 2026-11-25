@@ -120,7 +120,9 @@ class ImportConcurrencyTests(TransactionTestCase):
         self.assertEqual(QueueItem.objects.count(), 1)
 
 
-@override_settings(NQ_CREDENTIAL_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+@override_settings(
+    VIBEARR_CREDENTIAL_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+)
 class SourceClaimConcurrencyTests(TransactionTestCase):
     def setUp(self):
         from credentials.models import Credential

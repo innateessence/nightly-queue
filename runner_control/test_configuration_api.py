@@ -15,7 +15,7 @@ from .settings_models import RunnerSettings
 from .test_settings import ConfiguredProjectTestCase
 
 
-@override_settings(NQ_API_TOKEN="generic-token")
+@override_settings(VIBEARR_API_TOKEN="generic-token")
 class RunnerConfigurationAPITests(ConfiguredProjectTestCase):
     def setUp(self):
         super().setUp()
@@ -65,15 +65,17 @@ class RunnerConfigurationAPITests(ConfiguredProjectTestCase):
         run = Run.objects.get(item=item)
         self.assertEqual(run.configuration_revision, revision)
         self.assertEqual(
-            run.configuration_snapshot["effective"]["research_model"], "research-model"
+            run.configuration_snapshot["effective"]["implementation_model"],
+            "implementation-model",
         )
         self.assertFalse(run.configuration_snapshot["execution_ready"])
         saved = RunnerSettings.objects.get(pk=1)
-        saved.research_model = "future-model"
+        saved.implementation_model = "future-model"
         saved.save()
         run.refresh_from_db()
         self.assertEqual(
-            run.configuration_snapshot["effective"]["research_model"], "research-model"
+            run.configuration_snapshot["effective"]["implementation_model"],
+            "implementation-model",
         )
 
     def test_stale_preflight_never_claims_item_or_creates_run(self):

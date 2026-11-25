@@ -6,7 +6,7 @@ from .api import run_response
 from .auth import runner_api_view
 from .retention import acknowledge, plan, purge_candidates, purge_run, workspace_removed
 from .services import uuid_field
-from .plan_presentation import present_configuration_payload, qualification_runs
+from .plan_presentation import present_configuration_payload
 
 
 @runner_api_view("GET", "POST")
@@ -49,143 +49,6 @@ def _removed(runner, run_id, status, resource):
     return JsonResponse({"removed": True})
 
 
-@runner_api_view("GET", "POST")
-def release_suite(request, qualification_id):
-    from django.shortcuts import get_object_or_404
-    from .configuration import configuration_document
-    from .models import ReleaseQualification
-    from .release import authorized, complete
-
-    entry = get_object_or_404(
-        ReleaseQualification, pk=qualification_id, runner=request.runner_identity
-    )
-    if request.method == "POST":
-        if len(request.body) > 65536:
-            from django.core.exceptions import ValidationError
-
-            raise ValidationError("Release evidence is limited to 64 KiB.")
-        data = read_body(request, ["report"])
-        return run_response(
-            lambda: _qualified(
-                complete(entry.pk, request.runner_identity, data.get("report", {}))
-            )
-        )
-
-    def response():
-        configuration = configuration_document(request.runner_identity)
-        authorized(entry, request.runner_identity, configuration)
-        secrets = [
-            request.headers.get("Authorization", "").split()[-1],
-            request.headers.get("X-NQ-Controller-Secret", ""),
-        ]
-        evidence, error = present_configuration_payload(
-            configuration,
-            entry.evidence,
-            runs=qualification_runs(entry),
-            secrets=secrets,
-            preserve_secret_versions=True,
-        )
-        if error:
-            from django.core.exceptions import ValidationError
-
-            raise ValidationError(error)
-        return JsonResponse(
-            {
-                "schema_version": 1,
-                "qualification": {
-                    "id": str(entry.pk),
-                    "repository_url": entry.repository_url,
-                    "environment_digest": entry.environment_digest,
-                    "code_revision": entry.code_revision,
-                    "scope_digest": entry.scope_digest,
-                    "expires_at": entry.expires_at.isoformat(),
-                    "qualified_at": (
-                        entry.qualified_at.isoformat() if entry.qualified_at else None
-                    ),
-                    "evidence": evidence,
-                    "evidence_presentation_only": evidence != entry.evidence,
-                },
-            }
-        )
-
-    return run_response(response)
-
-
-def _qualified(entry):
-    return JsonResponse(
-        {
-            "qualified_at": entry.qualified_at.isoformat(),
-            "expires_at": entry.expires_at.isoformat(),
-        }
-    )
-
-
-@runner_api_view("POST")
-def release_claim(request, qualification_id):
-    from django.core.exceptions import ValidationError
-    from django.db import transaction
-    from django.shortcuts import get_object_or_404
-    from work_queue.services import claimable_items
-    from .api import response_data
-    from .configuration import configuration_document
-    from .models import ReleaseQualification
-    from .release import authorized
-    from .services import RunConflict, claim_run, lock_controller
-
-    data = read_body(request, ["run_id", "item_id"])
-    run_id = uuid_field(data, "run_id")
-    item_id = data.get("item_id")
-    if type(item_id) is not int:
-        raise ValidationError({"item_id": "Use the designated queued item ID."})
-
-    def response():
-        with transaction.atomic():
-            lock_controller(request.runner_identity)
-            entry = get_object_or_404(
-                ReleaseQualification,
-                pk=qualification_id,
-                runner=request.runner_identity,
-            )
-            configuration = configuration_document(request.runner_identity)
-            authorized(entry, request.runner_identity, configuration)
-            from .models import Run
-
-            previous = Run.objects.filter(
-                pk=run_id, runner=request.runner_identity, item_id=item_id
-            ).first()
-            if previous is not None:
-                if (
-                    previous.created_at < entry.created_at
-                    or previous.configuration_snapshot.get("repository_url")
-                    != entry.repository_url
-                ):
-                    raise RunConflict(
-                        "Controlled claim replay is outside authorized scope."
-                    )
-                return JsonResponse(
-                    response_data(
-                        previous, include_claim=previous.state == Run.State.ACTIVE
-                    )
-                )
-            candidate = claimable_items().select_related("project").first()
-            if (
-                candidate is None
-                or candidate.pk != item_id
-                or candidate.repository_url != entry.repository_url
-            ):
-                raise RunConflict(
-                    "The next claim must be the explicitly designated test item in the authorized repository."
-                )
-            run = claim_run(
-                runner=request.runner_identity,
-                run_id=run_id,
-                configuration_revision=configuration["revision"],
-            )
-            return JsonResponse(response_data(run, include_claim=True))
-
-    return run_response(response)
-
-
 @runner_api_view("POST")
 def health(request):
     from django.core.exceptions import ValidationError
@@ -210,7 +73,7 @@ def health(request):
 
     secrets = [
         request.headers.get("Authorization", "").split()[-1],
-        request.headers.get("X-NQ-Controller-Secret", ""),
+        request.headers.get("X-Vibearr-Controller-Secret", ""),
     ]
     from .models import Run
 

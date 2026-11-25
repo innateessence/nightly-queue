@@ -4,8 +4,6 @@ from uuid import uuid4
 
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
-from django.db import connection
-from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 
@@ -198,56 +196,9 @@ class SharedScheduleClaimTests(ConfiguredProjectTestCase):
         self.assertEqual(item.status, "queued")
 
 
-class SharedScheduleMigrationTests(TransactionTestCase):
+class SharedScheduleResetTests(TransactionTestCase):
     def test_default_schedule_can_be_recreated_after_a_database_reset(self):
         call_command("flush", interactive=False, verbosity=0)
         additional = RunnerSchedule.objects.create(name="After reset")
         self.assertGreater(additional.pk, 1)
         self.assertEqual(RunnerSchedule.objects.get(pk=1).name, "Always on")
-
-    def migrate(self, targets):
-        executor = MigrationExecutor(connection)
-        executor.migrate(targets)
-        return executor.loader.project_state(targets).apps
-
-    def restore_schema(self):
-        executor = MigrationExecutor(connection)
-        executor.migrate(executor.loader.graph.leaf_nodes())
-
-    def test_existing_windows_and_timezones_survive_migration_and_rollback(self):
-        self.addCleanup(self.restore_schema)
-        target = [
-            (
-                "runner_control",
-                "0014_runnersettings_identity_runnersettings_name_and_more",
-            )
-        ]
-        apps = self.migrate(target)
-        LegacySettings = apps.get_model("runner_control", "RunnerSettings")
-        windows = [{"days": [0, 1, 2, 3, 4], "start": "22:00", "end": "06:00"}]
-        LegacySettings.objects.update_or_create(
-            pk=1,
-            defaults={
-                "name": "Legacy",
-                "schedule_mode": "windows",
-                "timezone": "America/Los_Angeles",
-                "windows": windows,
-            },
-        )
-        second = LegacySettings.objects.create(
-            pk=2, name="Second", timezone="Europe/London"
-        )
-        self.restore_schema()
-        saved = RunnerSettings.objects.get(pk=1)
-        self.assertEqual(saved.schedule.windows, windows)
-        self.assertEqual(saved.schedule.timezone, "America/Los_Angeles")
-        self.assertEqual(
-            RunnerSettings.objects.get(pk=second.pk).schedule.timezone, "Europe/London"
-        )
-        largest = max(RunnerSchedule.objects.values_list("pk", flat=True))
-        self.assertGreater(RunnerSchedule.objects.create(name="Additional").pk, largest)
-        apps = self.migrate(target)
-        LegacySettings = apps.get_model("runner_control", "RunnerSettings")
-        restored = LegacySettings.objects.get(pk=1)
-        self.assertEqual(restored.windows, windows)
-        self.assertEqual(restored.timezone, "America/Los_Angeles")

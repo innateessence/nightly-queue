@@ -19,7 +19,7 @@ from .auth import token_digest
 from .models import Run, RunEvidence, RunnerIdentity
 
 
-@override_settings(NQ_API_TOKEN="generic-api-token")
+@override_settings(VIBEARR_API_TOKEN="generic-api-token")
 class RunnerAPITests(TestCase):
     def setUp(self):
         snapshot = patch(
@@ -316,7 +316,7 @@ class RunnerAPITests(TestCase):
         data = {
             "claim_token": token,
             "operation_id": str(uuid.uuid4()),
-            "stage": "research",
+            "stage": "context",
         }
         self.assertEqual(self.post("runner_progress", data).status_code, 200)
         newer = {
@@ -432,7 +432,7 @@ class RunnerAPITests(TestCase):
             {
                 "claim_token": token,
                 "operation_id": str(uuid.uuid4()),
-                "stage": "research",
+                "stage": "context",
                 "context_reference": "context\x00reference",
             },
         )
@@ -603,7 +603,7 @@ class RunnerAPITests(TestCase):
     def test_bootstrap_rejects_shared_api_token(self):
         token = "generic-" + "g" * 32
         with (
-            override_settings(NQ_API_TOKEN=token),
+            override_settings(VIBEARR_API_TOKEN=token),
             patch.dict(os.environ, {"RUNNER_BOOTSTRAP_TEST": token}),
         ):
             with self.assertRaises(CommandError):

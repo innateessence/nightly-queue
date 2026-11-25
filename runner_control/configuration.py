@@ -10,8 +10,6 @@ from credentials.models import Credential
 from projects.models import Project
 from vibearr_runner.policy import ExecutionPolicy
 from vibearr_runner.native_evidence import native_evidence_contract
-from vibearr_runner.merge_contract import merge_profile
-from vibearr_runner.native_contract import NativeContractError
 from vibearr_executor import (
     SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION,
     SLOT_PROTOCOL_VERSION as PROTOCOL_VERSION,
@@ -37,7 +35,7 @@ def settings_values(saved):
     )
     for field in ("schedule_mode", "timezone", "windows"):
         values[field] = getattr(schedule, field)
-    for field in ("research", "implementation", "issue", "repository"):
+    for field in ("implementation", "issue", "repository"):
         values[f"{field}_credential_id"] = values.pop(f"{field}_credential")
     return values
 
@@ -141,7 +139,6 @@ def project_configuration(project, defaults, overrides, credentials):
     for field in OVERRIDE_FIELDS:
         if (
             field.endswith("credential_id")
-            and not field.startswith("research_")
             and effective[field]
             and effective[field] not in credentials
         ):
@@ -153,7 +150,7 @@ def project_configuration(project, defaults, overrides, credentials):
                 }
             )
     for field in OVERRIDE_FIELDS:
-        if not field.endswith("credential_id") or field.startswith("research_"):
+        if not field.endswith("credential_id"):
             continue
         credential = credentials.get(effective[field])
         if credential and credential.get("revoked_at"):
@@ -164,11 +161,11 @@ def project_configuration(project, defaults, overrides, credentials):
                     "message": "The selected credential is revoked.",
                 }
             )
-        if not credential or not field.startswith(("research", "implementation")):
+        if not credential or not field.startswith(("implementation",)):
             continue
         allowed = {
-            "codex": ("token", "session", "login"),
-            "claude": ("token", "login"),
+            "codex": ("login",),
+            "claude": ("login",),
             "opencode": ("connection",),
         }
         if credential["kind"] not in allowed.get(credential["provider"], ()):
@@ -188,20 +185,6 @@ def project_configuration(project, defaults, overrides, credentials):
                 "message": "Automatic merge is disabled; select pull-request delivery for human review.",
             }
         )
-        try:
-            profile = merge_profile(effective["merge_profile"])
-            if profile["repository_id"] != project.github_repository_id:
-                raise NativeContractError(
-                    "Merge profile must identify this project's verified repository."
-                )
-        except NativeContractError as exc:
-            errors.append(
-                {
-                    "field": "merge_profile",
-                    "code": "invalid_merge_profile",
-                    "message": str(exc),
-                }
-            )
     return {
         "execution_kind": "native",
         "execution_policy": policy.to_data(),
@@ -287,9 +270,7 @@ def _configuration_document(saved):
         selected.update(
             effective[field]
             for field in OVERRIDE_FIELDS
-            if field.endswith("credential_id")
-            and not field.startswith("research_")
-            and effective[field]
+            if field.endswith("credential_id") and effective[field]
         )
         for stage in ("implementation",):
             backend = effective[f"{stage}_backend"]

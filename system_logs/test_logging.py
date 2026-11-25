@@ -18,7 +18,7 @@ from .handlers import SystemLogHandler
 from .models import SystemLog
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class SystemLogHandlerTests(TestCase):
     def emit(
         self,
@@ -73,7 +73,7 @@ class SystemLogHandlerTests(TestCase):
         self.assertEqual(entry.message, "[redacted]")
 
     @override_settings(
-        NQ_API_TOKEN="queue-private-key", SECRET_KEY="django-private-key"
+        VIBEARR_API_TOKEN="queue-private-key", SECRET_KEY="django-private-key"
     )
     def test_application_configuration_secrets_are_redacted(self):
         entry = self.emit("queue-private-key django-private-key")
@@ -97,7 +97,7 @@ class SystemLogHandlerTests(TestCase):
         self.assertEqual(entry.message, "[redacted] [redacted] [redacted]")
 
     def test_encoded_secret_variants_are_redacted(self):
-        credential = Credential(name="Secret", provider="github", kind="secret")
+        credential = Credential(name="Secret", provider="github", kind="token")
         credential.set_secret('private/secret"value')
         credential.save()
         entry = self.emit(

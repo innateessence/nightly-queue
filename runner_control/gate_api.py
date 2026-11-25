@@ -244,7 +244,4 @@ def report(request):
                 runner=request.runner_identity,
                 defaults={"report": data["report"], "checked_at": checked},
             )
-    from .release import observe_gate
-
-    observe_gate(request.runner_identity, data["report"])
     return JsonResponse({"schema_version": 1, "evidence": evidence_data(evidence)})

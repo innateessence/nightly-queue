@@ -16,7 +16,7 @@ from runner_control.auth import token_digest
 from runner_control.models import RunnerIdentity
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class DockerBootstrapTests(TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()

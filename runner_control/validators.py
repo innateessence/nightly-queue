@@ -8,9 +8,7 @@ from django.core.exceptions import ValidationError
 BACKENDS = ["codex", "claude", "opencode"]
 STAGE_FIELDS = ("backend", "model", "instructions", "credential_id")
 OVERRIDE_FIELDS = tuple(
-    f"{stage}_{field}"
-    for stage in ("research", "implementation")
-    for field in STAGE_FIELDS
+    f"{stage}_{field}" for stage in ("implementation",) for field in STAGE_FIELDS
 )
 OVERRIDE_FIELDS += (
     "setup_commands",
@@ -18,7 +16,6 @@ OVERRIDE_FIELDS += (
     "issue_credential_id",
     "repository_credential_id",
     "execution_policy",
-    "merge_profile",
     "factory",
 )
 
@@ -93,16 +90,6 @@ def validate_execution_policy(value):
         raise ValidationError(str(exc)) from None
 
 
-def validate_merge_profile(value):
-    from vibearr_runner.merge_contract import configured_profile
-    from vibearr_runner.native_contract import NativeContractError
-
-    try:
-        configured_profile(value)
-    except NativeContractError as exc:
-        raise ValidationError(str(exc)) from None
-
-
 def validate_overrides(value):
     if not isinstance(value, dict) or set(value) - set(OVERRIDE_FIELDS):
         raise ValidationError("Enter supported project override fields.")
@@ -117,10 +104,7 @@ def validate_overrides(value):
             )
         if set(entry) - {"mode", "value"}:
             raise ValidationError("Unknown override property.")
-        if (
-            key in {"execution_policy", "merge_profile", "factory"}
-            and entry["mode"] == "clear"
-        ):
+        if key in {"execution_policy", "factory"} and entry["mode"] == "clear":
             raise ValidationError(
                 "Execution policy cannot be cleared; inherit or replace it."
             )
@@ -129,8 +113,6 @@ def validate_overrides(value):
         replacement = entry.get("value")
         if key == "execution_policy":
             validate_execution_policy(replacement)
-        elif key == "merge_profile":
-            validate_merge_profile(replacement)
         elif key == "factory":
             from .factory_configuration import validate_factory_configuration
 

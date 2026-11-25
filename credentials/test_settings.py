@@ -10,12 +10,12 @@ from .models import APISettings, Credential
 from .test_models import TEST_KEY
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class APISettingsTests(TestCase):
     def setUp(self):
         self.url = reverse("api_settings")
         self.github = self.make_credential("GitHub token", "github", "token")
-        self.gitlab = self.make_credential("GitLab token", "gitlab", "token")
+        self.codex = self.make_credential("Codex token", "codex", "token")
 
     def make_credential(self, name, provider, kind):
         credential = Credential(name=name, provider=provider, kind=kind)
@@ -24,11 +24,10 @@ class APISettingsTests(TestCase):
         return credential
 
     def test_page_shows_only_existing_provider_tokens(self):
-        other = self.make_credential("Other secret", "github", "secret")
+        other = self.make_credential("Other account", "claude", "token")
         response = self.client.get(self.url)
         form = response.context["form"]
         self.assertEqual(list(form.fields["github_credential"].queryset), [self.github])
-        self.assertEqual(list(form.fields["gitlab_credential"].queryset), [self.gitlab])
         self.assertNotContains(response, other.name)
         self.assertNotContains(response, "settings-private-secret")
         self.assertNotContains(response, self.github.encrypted_payload)
@@ -36,14 +35,12 @@ class APISettingsTests(TestCase):
     def test_save_persists_selections_and_get_restores_them(self):
         data = {
             "github_credential": self.github.pk,
-            "gitlab_credential": self.gitlab.pk,
             "auto_sync_interval_seconds": 14400,
         }
         response = self.client.post(self.url, data)
         self.assertRedirects(response, self.url)
         saved = APISettings.objects.get(pk=1)
         self.assertEqual(saved.github_credential, self.github)
-        self.assertEqual(saved.gitlab_credential, self.gitlab)
         self.assertEqual(saved.auto_sync_interval_seconds, 14400)
         response = self.client.get(self.url)
         self.assertEqual(
@@ -101,12 +98,12 @@ class APISettingsTests(TestCase):
         self.assertEqual(APISettings.objects.get().last_auto_sync_at, last_sync)
 
     def test_wrong_provider_is_rejected(self):
-        response = self.client.post(self.url, {"github_credential": self.gitlab.pk})
+        response = self.client.post(self.url, {"github_credential": self.codex.pk})
         self.assertIn("github_credential", response.context["form"].errors)
         self.assertFalse(APISettings.objects.exists())
 
     def test_non_token_is_rejected(self):
-        credential = self.make_credential("Other secret", "github", "secret")
+        credential = self.make_credential("Other account", "claude", "token")
         response = self.client.post(self.url, {"github_credential": credential.pk})
         self.assertIn("github_credential", response.context["form"].errors)
         self.assertFalse(APISettings.objects.exists())

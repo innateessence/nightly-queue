@@ -11,7 +11,7 @@ from .models import QueueItem
 from .services import claim_next, enqueue_item
 
 
-@override_settings(NQ_API_TOKEN="test-token")
+@override_settings(VIBEARR_API_TOKEN="test-token")
 class APITests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -291,7 +291,7 @@ class APITests(TestCase):
         self.assertEqual(response.status_code, 409)
 
 
-@override_settings(NQ_API_TOKEN="test-token")
+@override_settings(VIBEARR_API_TOKEN="test-token")
 class CompletionTransactionTests(TransactionTestCase):
     def test_finish_updates_and_reads_response_in_one_transaction(self):
         url = "https://github.com/example/repo"

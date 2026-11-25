@@ -14,7 +14,7 @@ from .secrets import secret_document
 from .settings_models import RunnerSettings
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class SelectedSecretConcurrencyTests(TransactionTestCase):
     def setUp(self):
         self.runner = RunnerIdentity.objects.create(

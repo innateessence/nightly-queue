@@ -5,12 +5,11 @@ from django.urls import reverse
 
 from projects.models import Project
 
-from .forms import CredentialForm
 from .models import Credential
-from .test_models import TEST_KEY, private_key
+from .test_models import TEST_KEY
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY, NQ_API_TOKEN="api-token")
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY, VIBEARR_API_TOKEN="api-token")
 class CredentialAdminTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_superuser(
@@ -23,7 +22,6 @@ class CredentialAdminTests(TestCase):
             "provider": Credential.Provider.GITHUB,
             "kind": "token",
             "secret": "private-token",
-            "passphrase": "",
         }
 
     def make_credential(self):
@@ -59,16 +57,6 @@ class CredentialAdminTests(TestCase):
         self.assertContains(response, "Enter a secret value.")
         self.assertFalse(Credential.objects.exists())
 
-    def test_admin_can_create_encrypted_ssh_key(self):
-        key = private_key("key-password")
-        self.data.update(kind="ssh", secret=key, passphrase="key-password")
-        response = self.client.post(self.url, self.data)
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(
-            Credential.objects.get().get_secret(),
-            {"secret": key, "passphrase": "key-password"},
-        )
-
     def test_saved_secret_is_not_rendered(self):
         credential = self.make_credential()
         response = self.client.get(self.change_url(credential))
@@ -80,11 +68,6 @@ class CredentialAdminTests(TestCase):
         response = self.client.post(self.url, self.data)
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "private-token")
-
-    def test_invalid_form_does_not_echo_passphrase(self):
-        self.data["passphrase"] = "private-passphrase"
-        response = self.client.post(self.url, self.data)
-        self.assertNotContains(response, "private-passphrase")
 
     def test_blank_edit_keeps_existing_secret(self):
         credential = self.make_credential()
@@ -113,19 +96,12 @@ class CredentialAdminTests(TestCase):
 
     def test_edit_cannot_change_type(self):
         credential = self.make_credential()
-        self.data.update(kind="ssh", secret="")
+        self.data.update(kind="session", secret="")
         self.client.post(self.change_url(credential), self.data)
         credential.refresh_from_db()
         self.assertEqual(credential.kind, "token")
 
-    def test_passphrase_change_requires_private_key(self):
-        credential = self.make_credential()
-        self.data.update(secret="", passphrase="password")
-        form = CredentialForm(self.data, instance=credential)
-        self.assertFalse(form.is_valid())
-        self.assertIn("passphrase", form.errors)
-
-    @override_settings(NQ_CREDENTIAL_KEY="")
+    @override_settings(VIBEARR_CREDENTIAL_KEY="")
     def test_missing_key_shows_configuration_error(self):
         response = self.client.post(self.url, self.data)
         self.assertContains(response, "Configure VIBEARR_CREDENTIAL_KEY")

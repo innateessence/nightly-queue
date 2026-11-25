@@ -28,7 +28,7 @@ def context_binding(run, document):
 
 
 def generation_binding(run, document, previous):
-    from .merge_services import latest_workspace, provider, provider_checked
+    from .publication_services import latest_workspace, provider, provider_checked
     from .native_services import all_intents, native_policy, workspace_fact
 
     generation = document.get("factory_generation")

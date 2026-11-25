@@ -6,8 +6,6 @@ from django.core.validators import validate_slug
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from vibearr_app.environment import getenv
-
 from runner_control.auth import token_digest
 from runner_control.models import RunnerController, RunnerIdentity
 
@@ -36,13 +34,11 @@ class Command(BaseCommand):
                 return
             token_name = options["token_env"]
             token = os.environ.get(token_name, "")
-            if token_name in {"NQ_RUNNER_API_TOKEN", "VIBEARR_RUNNER_API_TOKEN"}:
-                token = getenv("NQ_RUNNER_API_TOKEN")
             if len(token) < 32 or any(character.isspace() for character in token):
                 raise CommandError(
                     "Set the token environment variable to at least 32 characters without whitespace."
                 )
-            if token == settings.NQ_API_TOKEN:
+            if token == settings.VIBEARR_API_TOKEN:
                 raise CommandError("Use a separate token from VIBEARR_API_TOKEN.")
             digest = token_digest(token)
             if (

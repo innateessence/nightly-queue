@@ -52,9 +52,7 @@ def validate_factory_workspace(run, workspace, context):
         for entry in run.factory_artifacts.order_by("sequence")[:1001]
     ]
     evidence = list(
-        run.evidence.filter(
-            kind__in=["native_workspace", "native_revision", "native_validation"]
-        )
+        run.evidence.filter(kind__in=["native_workspace", "native_validation"])
         .order_by("pk")
         .values("operation_id", "kind", "payload")[:2001]
     )
