@@ -21,7 +21,7 @@ boundary/role permission proof, and eight real proof documents:
 - changed-dependency execution;
 - image-owned trusted candidate validation;
 - actual source-bound browser PNGs;
-- offline CLI/runner/executor distribution packaging;
+- offline runner/executor distribution packaging;
 - quiescent backup/restore with fresh restored authority.
 
 The full harness observes the same four container IDs through startup, boundary,

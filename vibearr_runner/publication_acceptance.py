@@ -307,9 +307,9 @@ def collect_run(
             raise ValueError(
                 "Failure scenario requires a real nonzero validation receipt and no publication evidence."
             )
-        if not any(value["id"] in {"django", "cli"} for value in nonzero):
+        if not any(value["id"] in {"django", "runner"} for value in nonzero):
             raise ValueError(
-                "The deliberate CLI regression must fail an independent application/CLI test check, not stop at an unrelated formatting/tool error."
+                "The deliberate test regression must fail an independent application or runner test check, not stop at an unrelated formatting/tool error."
             )
         if policy["repair_limit"] != 0 or max(attempts) != 0:
             raise ValueError(

@@ -7,7 +7,7 @@ FROM ${WORKER_IMAGE}
 COPY --from=tools /usr/local/bin/actionlint /usr/local/bin/actionlint
 COPY vibearr_runner /opt/executor/vibearr_runner
 COPY deploy /opt/executor/deploy
-COPY vibearr/test_distributions.py /opt/validation/distribution_checks.py
+COPY deploy/docker/test_distributions.py /opt/validation/distribution_checks.py
 COPY .github/actionlint.yaml /opt/validation/actionlint.yaml
 COPY --from=source / /input-source
 RUN chmod 0700 /input-source

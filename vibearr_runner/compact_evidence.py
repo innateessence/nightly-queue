@@ -715,7 +715,7 @@ def validate_wheels(payload):
                 if len(metadata) != 1 or metadata[0].file_size > 1024**2:
                     raise ValueError("Wheel metadata is missing or ambiguous.")
                 name = BytesParser().parsebytes(archive.read(metadata[0]))["Name"]
-                if name not in {"vibearr-cli", "vibearr-runner", "vibearr-executor"}:
+                if name not in {"vibearr-runner", "vibearr-executor"}:
                     raise ValueError("Unexpected distribution artifact.")
                 info = metadata[0].filename.rsplit("/", 1)[0]
                 required = {
@@ -734,7 +734,6 @@ def validate_wheels(payload):
                 )
                 commands = dict(configuration["console_scripts"])
                 expected = {
-                    "vibearr-cli": {"vibearr": "vibearr.cli:main"},
                     "vibearr-runner": {
                         "vibearr-runner": "vibearr_runner.__main__:main"
                     },
@@ -769,7 +768,7 @@ def validate_wheels(payload):
             raise ValueError(
                 "Wheel artifact is not a valid ZIP distribution."
             ) from error
-    if names != {"vibearr-cli", "vibearr-runner", "vibearr-executor"}:
+    if names != {"vibearr-runner", "vibearr-executor"}:
         raise ValueError("Packaging evidence omits a required distribution.")
     commands = payload["commands"]
     help_commands = set()
@@ -785,10 +784,7 @@ def validate_wheels(payload):
         if arguments[-1:] == ["--help"]:
             help_commands.add(PurePosixPath(arguments[0]).name)
         installed = installed or "install" in arguments and "--no-index" in arguments
-    if (
-        not installed
-        or not {"vibearr", "vibearr-runner", "vibearr-worker"} <= help_commands
-    ):
+    if not installed or help_commands != {"vibearr-runner", "vibearr-worker"}:
         raise ValueError("Installed CLI command execution evidence is incomplete.")
 
 

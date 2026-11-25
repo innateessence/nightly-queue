@@ -571,7 +571,7 @@ class NativeLifecycleTests(unittest.TestCase):
         self.assertEqual(self.transient_repository_read(), "wait")
         self.assertEqual(self.queue.finishes, [])
         self.assertEqual(self.executor.started, started)
-        self.assertEqual(len(started), 10)
+        self.assertEqual(len(started), len(self.profile.executor_profiles()) + 1)
 
     def test_cancel_during_read_backoff_finishes_without_agent_dispatch(self):
         self.transient_repository_read()
@@ -770,7 +770,9 @@ class NativeLifecycleTests(unittest.TestCase):
         self.state = self.journal.load()
         self.advance("delivery")
         self.assertEqual(self.executor.started[:1], starts)
-        self.assertEqual(len(self.executor.started), 10)
+        self.assertEqual(
+            len(self.executor.started), len(self.profile.executor_profiles()) + 1
+        )
         self.assertEqual(
             git(["rev-parse", "HEAD^{tree}"], self.workspace.checkout),
             self.state["native"]["validation"]["evidence"]["tree_sha"],

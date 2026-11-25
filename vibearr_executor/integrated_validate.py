@@ -1,4 +1,4 @@
-"""Operator-invoked nine-check validation through the installed local service."""
+"""Operator-invoked eight-check validation through the installed local service."""
 
 import argparse
 import json

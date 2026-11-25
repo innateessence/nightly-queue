@@ -143,7 +143,7 @@ or modify the live stack. Logs and public evidence are exported to a fresh
 `/tmp/vibearr-check-*-reports` directory; `VIBEARR_CHECK_OUTPUT` overrides it.
 
 The full run covers application/portable tests, formatting/types, migration drift,
-actual boundary/restart qualification, all nine trusted candidate checks, browser
+actual boundary/restart qualification, all eight trusted candidate checks, browser
 PNGs, and quiescent backup/restore with fresh authority. Candidate validation
 uses fresh snapshots, trusted image tools, and local disposable PostgreSQL inside
 the worker. Dependency changes use run-bound artifacts without replacing trusted
