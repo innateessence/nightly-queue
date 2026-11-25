@@ -18,6 +18,7 @@ from vibearr_runner.workspaces import WorkspaceError, WorkspaceManager, git
 SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
 if SDK_AVAILABLE:
     from vibearr_executor.artifacts import pack, result_manifest, snapshot
+    from vibearr_executor.contracts import Rejected
 
 
 @unittest.skipUnless(
@@ -183,3 +184,73 @@ class NativeWorkspaceTests(unittest.TestCase):
                 self.state,
             )
         self.assertEqual(snapshot(self.workspace.checkout), self.original)
+
+    def test_import_rejects_a_symlink_parent_without_writing_outside_checkout(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (self.workspace.checkout / "linked").symlink_to(
+            outside, target_is_directory=True
+        )
+        result = pack({"linked/file": (0o644, b"new")})
+        with self.assertRaises(Rejected):
+            import_files(
+                self.workspace,
+                self.original,
+                result,
+                result_manifest(self.original, result),
+                str(uuid4()),
+                self.journal,
+                self.state,
+            )
+        self.assertFalse((outside / "file").exists())
+        self.assertTrue((self.workspace.checkout / "linked").is_symlink())
+
+    def test_import_preserves_a_conflicting_untracked_file(self):
+        extra = self.workspace.checkout / "extra"
+        extra.write_bytes(b"unrelated")
+        result = pack({"extra": (0o644, b"new")})
+        with self.assertRaisesRegex(WorkspaceError, "checkout changed"):
+            import_files(
+                self.workspace,
+                self.original,
+                result,
+                result_manifest(self.original, result),
+                str(uuid4()),
+                self.journal,
+                self.state,
+            )
+        self.assertEqual(extra.read_bytes(), b"unrelated")
+        self.assertEqual(
+            (self.workspace.checkout / "old.py").read_bytes(), b"answer = 1\n"
+        )
+
+    def test_import_preserves_a_file_to_directory_transition(self):
+        result = pack({"old.py/nested": (0o644, b"new")})
+        import_files(
+            self.workspace,
+            self.original,
+            result,
+            result_manifest(self.original, result),
+            str(uuid4()),
+            self.journal,
+            self.state,
+        )
+        self.assertEqual(snapshot(self.workspace.checkout), result)
+
+    def test_import_preserves_a_directory_to_file_transition(self):
+        path = self.workspace.checkout / "old.py"
+        path.unlink()
+        path.mkdir()
+        (path / "nested").write_bytes(b"old")
+        source = snapshot(self.workspace.checkout)
+        result = pack({"old.py": (0o644, b"new")})
+        import_files(
+            self.workspace,
+            source,
+            result,
+            result_manifest(source, result),
+            str(uuid4()),
+            self.journal,
+            self.state,
+        )
+        self.assertEqual(snapshot(self.workspace.checkout), result)

@@ -295,16 +295,3 @@ class Controller:
     def check_shutdown(self) -> None:
         if self.stop.is_set():
             raise ControllerStopped
-
-
-def journaled_request(
-    client: Client, journal: Journal, state, run_id: str, kind: str, path: str, payload
-):
-    """An unresolved operation blocks all further writes, including after a crash."""
-    journal.prepare(state, run_id, kind, payload)
-    result = client.request("POST", path, payload)
-    operation = state["operation"]
-    operation["status"] = "received"
-    operation["response"] = result
-    journal.save(state)
-    return result

@@ -21,7 +21,7 @@ from vibearr_runner.client import (
     InvalidResponse,
     UnavailableError,
 )
-from vibearr_runner.controller import Controller, journaled_request
+from vibearr_runner.controller import Controller
 from vibearr_runner.journal import ControllerLocked, Journal, JournalError
 
 IDENTITY = {"schema_version": 1, "runner": {"id": 7, "name": "test"}}
@@ -499,58 +499,6 @@ class ClientTests(ServerCase):
                 ("POST", "/api/v1/runner/gates/report/"),
             ],
         )
-
-    def test_pending_claim_is_written_before_http(self):
-        run_id = str(uuid4())
-        self.server.responses["/api/v1/runner/runs/claim/"] = (500, {})
-        with Journal(self.path) as journal:
-            state = journal.load()
-            with self.assertRaises(AmbiguousRequest):
-                journaled_request(
-                    self.client,
-                    journal,
-                    state,
-                    run_id,
-                    "claim",
-                    "/api/v1/runner/runs/claim/",
-                    {},
-                )
-            self.assertEqual(journal.load()["operation"]["run_id"], run_id)
-            with self.assertRaises(JournalError):
-                journaled_request(
-                    self.client,
-                    journal,
-                    state,
-                    str(uuid4()),
-                    "claim",
-                    "/api/v1/runner/runs/claim/",
-                    {},
-                )
-        self.assertEqual(len(self.server.calls), 1)
-
-    def test_late_mutation_response_does_not_clear_pending_journal(self):
-        self.server.release_mutation = threading.Event()
-        run_id = str(uuid4())
-        try:
-            with Journal(self.path) as journal:
-                state = journal.load()
-                with self.assertRaises(AmbiguousRequest):
-                    journaled_request(
-                        self.client,
-                        journal,
-                        state,
-                        run_id,
-                        "claim",
-                        "/api/v1/runner/runs/claim/",
-                        {"run_id": run_id},
-                    )
-                self.server.release_mutation.set()
-                self.assertTrue(self.client.request_lock.acquire(timeout=1))
-                self.client.request_lock.release()
-                self.assertEqual(journal.load()["operation"]["status"], "pending")
-        finally:
-            self.server.release_mutation.set()
-        self.assertEqual(len(self.server.calls), 1)
 
     def test_missing_journal_discovers_owned_remote_run(self):
         run_id = str(uuid4())

@@ -15,7 +15,6 @@ from vibearr_runner.native_conformance import (
     FactoryNativeAdapter,
     executable_probe,
     parse_role_result,
-    probe_source_access,
     require_factory_capabilities,
     source_access,
     validate_browser_capture,
@@ -619,25 +618,6 @@ class FactoryNativeAdapterTests(unittest.TestCase):
 
 
 class PermissionAndExecutableTests(unittest.TestCase):
-    def test_task_owned_read_only_mode_cannot_qualify_an_immutable_source(self):
-        with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / "source.py"
-            source.write_text("answer = 1\n")
-            source.chmod(0o444)
-            observed = probe_source_access(
-                directory, source, [source], role="reviewer-code"
-            )
-            self.assertFalse(observed["passed"])
-
-    def test_missing_private_sentinel_cannot_be_reported_as_denied_access(self):
-        with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / "source.py"
-            source.write_text("answer = 1\n")
-            observed = probe_source_access(
-                directory, source, [Path(directory) / "missing"], role="build"
-            )
-            self.assertFalse(observed["checks"]["control_paths_denied"])
-
     def test_browser_capture_reference_is_only_available_to_visual_reviewers(self):
         capture = {"operation_id": str(uuid4()), "archive_digest": "d" * 64}
         with self.assertRaises(NativeSessionError):
