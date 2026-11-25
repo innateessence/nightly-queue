@@ -133,9 +133,9 @@ separately.
 The engineering input follows `compact_evidence.validate_compact_report`: exact
 deployed source revision, four service/container/image identities, current
 authenticated worker boundary and role permission proofs, and source-bound actual
-validation, dependency, browser, backup/restore, resource, restart and CLI
-packaging receipt documents with verified canonical hashes. Its fixture flags
-cannot be overridden by a `passed` boolean.
+validation, dependency, browser, backup/restore, resource, restart and runtime
+distribution packaging receipt documents with verified canonical hashes. Its
+fixture flags cannot be overridden by a `passed` boolean.
 
 UI tasks additionally need browser evidence mapping run UUID to `report` and
 `storage_root`. Worker PNG validation rereads the actual source-bound files and

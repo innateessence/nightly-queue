@@ -8,7 +8,6 @@
 - `system_logs/` owns redacted application events.
 - `vibearr_runner/` is the independent standard-library supervisor, native backends, workspaces, Git delivery and recovery. Tests and Git/OS acceptance live beside it.
 - `vibearr_executor/` owns the authenticated preprovisioned worker, task isolation, trusted checks and client. It has no runtime Docker daemon access.
-- `vibearr/` is the standalone standard-library HTTP CLI, independent of Django, runner code and database access.
 - `vibearr_app/` contains settings, root routing and ASGI/WSGI.
 - App templates/static assets live with each app; shared navigation is `templates/base.html`.
 - `deploy/docker/` owns immutable image recipes, qualification and operator tooling.
@@ -49,7 +48,7 @@ Use `bash deploy/docker/checks.sh boundary` for actual worker qualification and
 `bash deploy/docker/checks.sh operations` for browser/backup/recovery checks.
 These jobs never qualify host execution or invoke a paid model.
 
-The app image entrypoint loads private credential files for management/CLI jobs.
+The app image entrypoint loads private credential files for management jobs.
 Bare `docker compose exec` does not inherit secrets loaded by another process.
 There is no persistent tools service or tools Compose profile.
 
@@ -76,9 +75,10 @@ PRs. Runtime automatic merging is not supported.
 
 ## Security and configuration
 
-Keep `.env` and tokens untracked. Use `VIBEARR_API_TOKEN`, `VIBEARR_URL`,
-`VIBEARR_POSTGRES_PASSWORD` and `VIBEARR_CREDENTIAL_KEY`. The four persistent
-services are `app`, `postgres`, `runner` and `worker`. The app owns issue imports;
+Keep `.env` and tokens untracked. Use `VIBEARR_API_TOKEN` for queue APIs,
+`VIBEARR_URL` for the runner's queue connection, `VIBEARR_POSTGRES_PASSWORD` and
+`VIBEARR_CREDENTIAL_KEY`. The four persistent services are `app`, `postgres`,
+`runner` and `worker`. The app owns issue imports;
 the runner owns execution scheduling, selected accounts, Git delivery and private
 journals. Publication credentials are separate from issue-import credentials.
 

@@ -53,21 +53,6 @@ This is a single-user application for a private network. The browser UI has no
 login requirement. Admin access and bearer-authenticated APIs have separate
 credentials. Keep it on a private network or behind an authenticated proxy.
 
-## Submit work from the terminal
-
-The standalone HTTP client is `vibearr`; it has no Django or database dependency.
-Run it through the app image entrypoint to load the private queue credential:
-
-```sh
-docker compose run --rm -e VIBEARR_URL=http://app:8000 app python -m vibearr projects
-docker compose run --rm -e VIBEARR_URL=http://app:8000 app python -m vibearr add \
-  --project 12 "Add CSV export" --instructions "Include active filters." --priority normal
-```
-
-Use a project ID from `projects`. Successful submissions print the work item ID;
-errors exit nonzero. Explicit client configuration uses `VIBEARR_URL` and
-`VIBEARR_API_TOKEN`.
-
 ## Factory workflow
 
 ```text
@@ -108,7 +93,6 @@ captures and backup/restore. It never substitutes host execution or model calls.
 | `system_logs/` | Redacted application event history |
 | `vibearr_runner/` | Independent supervisor, native adapters, recovery and Git delivery |
 | `vibearr_executor/` | Trusted worker, authenticated client and task isolation |
-| `vibearr/` | Standalone HTTP CLI |
 | `vibearr_app/` | Django configuration |
 | `deploy/docker/` | Image-owned checks and explicit Docker operations |
 

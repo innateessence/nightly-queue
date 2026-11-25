@@ -200,7 +200,7 @@ export VIBEARR_RUNNER_IMAGE_ID VIBEARR_WORKER_IMAGE_ID
 recipe=$scratch/source
 cd "$recipe"
 compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --entrypoint python "$VIBEARR_TOOLS_IMAGE" -m deploy.docker.audit > "$output/compose-audit.log"
-compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=8m --entrypoint python "$VIBEARR_TOOLS_IMAGE" -c 'import os,sys,unittest; from pathlib import Path; Path("/tmp/compose.json").write_bytes(sys.stdin.buffer.read()); os.environ["VIBEARR_COMPOSE_CONFIG"]="/tmp/compose.json"; result=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromName("vibearr.test_compose")); sys.exit(not result.wasSuccessful())' > "$output/compose-tests.log" 2>&1
+compose config --format json | docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 128m --pids-limit 16 --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=8m --entrypoint python "$VIBEARR_TOOLS_IMAGE" -c 'import os,sys,unittest; from pathlib import Path; Path("/tmp/compose.json").write_bytes(sys.stdin.buffer.read()); os.environ["VIBEARR_COMPOSE_CONFIG"]="/tmp/compose.json"; result=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromName("deploy.docker.test_compose")); sys.exit(not result.wasSuccessful())' > "$output/compose-tests.log" 2>&1
 compose up -d --wait > "$output/start.log" 2>&1
 id_listing=$(compose ps -q) || exit $?
 mapfile -t ids <<< "$id_listing"

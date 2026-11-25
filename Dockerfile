@@ -17,13 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends git postgresql-
 
 FROM tools-base AS tools
 COPY . /app
-RUN --network=none python -m pip install --no-cache-dir --no-build-isolation --no-deps .
 USER 10001:10001
 CMD ["python", "manage.py", "check"]
 
 FROM base AS application
 COPY . /app
-RUN --network=none python -m pip install --no-cache-dir --no-build-isolation --no-deps .
 RUN --network=none python manage.py collectstatic --noinput --clear
 USER 10001:10001
 EXPOSE 8000
