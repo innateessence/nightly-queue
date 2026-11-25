@@ -78,10 +78,12 @@ def seal(payload):
     return payload
 
 
-def evidence(executor=None, cli=None):
+def evidence(executor=None, runner=None):
     wheels = [
-        wheel("vibearr-cli", cli or {"vibearr": "vibearr.cli:main"}),
-        wheel("vibearr-runner", {"vibearr-runner": "vibearr_runner.__main__:main"}),
+        wheel(
+            "vibearr-runner",
+            runner or {"vibearr-runner": "vibearr_runner.__main__:main"},
+        ),
         wheel(
             "vibearr-executor",
             executor or {"vibearr-worker": "vibearr_executor.compact_worker:main"},
@@ -96,13 +98,13 @@ def evidence(executor=None, cli=None):
                 "install",
                 "--no-index",
                 "--no-deps",
-                "/wheels/vibearr_cli.whl",
+                "/wheels/vibearr_runner.whl",
             ],
             "exit_code": 0,
             "stdout_sha256": "a" * 64,
         }
     ]
-    for name in ("vibearr", "vibearr-runner", "vibearr-worker"):
+    for name in ("vibearr-runner", "vibearr-worker"):
         commands.append(
             {
                 "argv": ["/venv/bin/" + name, "--help"],
@@ -114,7 +116,7 @@ def evidence(executor=None, cli=None):
 
 
 class PackagingEvidenceTests(unittest.TestCase):
-    def test_current_three_console_commands_are_accepted(self):
+    def test_current_runtime_console_commands_are_accepted(self):
         validate_wheels(evidence())
 
     def test_separate_executor_builds_remain_valid_distribution_evidence(self):
@@ -137,10 +139,47 @@ class PackagingEvidenceTests(unittest.TestCase):
 
     def test_legacy_cli_alias_is_rejected(self):
         payload = evidence(
-            cli={"vibearr": "vibearr.cli:main", "nq": "vibearr.cli:main"}
+            runner={
+                "vibearr-runner": "vibearr_runner.__main__:main",
+                "nq": "vibearr_runner.__main__:main",
+            }
         )
         with self.assertRaisesRegex(ValueError, "entrypoints"):
             validate_wheels(payload)
+
+    def test_removed_vibearr_distribution_is_rejected(self):
+        payload = evidence()
+        payload["wheels"].append(wheel("vibearr-cli", {"vibearr": "vibearr.cli:main"}))
+        with self.assertRaisesRegex(ValueError, "Unexpected distribution"):
+            validate_wheels(seal(payload))
+
+    def test_removed_vibearr_entrypoint_is_rejected(self):
+        payload = evidence(
+            runner={
+                "vibearr-runner": "vibearr_runner.__main__:main",
+                "vibearr": "vibearr.cli:main",
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "entrypoints"):
+            validate_wheels(payload)
+
+    def test_removed_vibearr_help_evidence_is_rejected(self):
+        payload = evidence()
+        payload["commands"].append(
+            {
+                "argv": ["/venv/bin/vibearr", "--help"],
+                "exit_code": 0,
+                "stdout_sha256": "c" * 64,
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "execution evidence"):
+            validate_wheels(seal(payload))
+
+    def test_missing_runner_distribution_is_rejected(self):
+        payload = evidence()
+        payload["wheels"].pop(0)
+        with self.assertRaisesRegex(ValueError, "required distribution"):
+            validate_wheels(seal(payload))
 
     def test_current_command_cannot_target_the_retired_service(self):
         payload = evidence(executor={"vibearr-worker": "vibearr_executor.server:main"})

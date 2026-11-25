@@ -48,7 +48,7 @@ def main():
         raise RuntimeError("Pinned packaging checks are missing.")
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
-    module.__file__ = "/work/vibearr/test_distributions.py"
+    module.__file__ = "/work/deploy/docker/test_distributions.py"
     commands, wheels = [], {}
     original = module.DistributionArtifactTests.run_command
 
@@ -80,7 +80,7 @@ def main():
 
     module.DistributionArtifactTests.run_command = recorded_command
     suite = unittest.defaultTestLoader.loadTestsFromModule(module)
-    if suite.countTestCases() != 3:
+    if suite.countTestCases() != 2:
         raise RuntimeError("Pinned packaging coverage changed.")
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful() or result.skipped:
