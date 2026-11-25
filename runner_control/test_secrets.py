@@ -179,7 +179,7 @@ class SelectedSecretTests(TestCase):
         self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer other-token"
         self.assertEqual(self.preflight().status_code, 400)
 
-    def test_generic_cli_token_cannot_read_secrets(self):
+    def test_generic_queue_api_token_cannot_read_secrets(self):
         self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer generic-token"
         self.assertEqual(self.preflight().status_code, 401)
 
