@@ -8,8 +8,8 @@ from credentials.test_models import TEST_KEY
 from work_queue.services import enqueue_item, requeue_items
 
 from .configuration import configuration_document
-from .execution_policy import current_native_policy
-from .models import RunnerIdentity
+from .native_services import authorize, lock_scope
+from .models import Run, RunnerIdentity
 from .auth import token_digest
 from .services import RunConflict, claim_run, record_evidence
 from .settings_models import ProjectRunnerSettings, RunnerSettings
@@ -93,7 +93,7 @@ class NativePolicyOwnershipTests(ConfiguredProjectTestCase):
         self.item.refresh_from_db()
 
     def test_current_policy_uses_owned_snapshot(self):
-        policy = current_native_policy(self.run, self.item.claim_token)
+        policy = authorize(*lock_scope(self.run, self.item.claim_token))
         self.assertEqual(
             policy.digest, self.run.configuration_snapshot["policy_digest"]
         )
@@ -103,19 +103,38 @@ class NativePolicyOwnershipTests(ConfiguredProjectTestCase):
         saved.execution_policy["network_hosts"] = []
         saved.save()
         with self.assertRaisesMessage(RunConflict, "policy changed"):
-            current_native_policy(self.run, self.item.claim_token)
+            authorize(*lock_scope(self.run, self.item.claim_token))
 
     def test_stale_claim_cannot_authorize_execution(self):
         requeue_items(type(self.item).objects.filter(pk=self.item.pk))
         with self.assertRaises(RunConflict):
-            current_native_policy(self.run, self.item.claim_token)
+            authorize(*lock_scope(self.run, self.item.claim_token))
 
     def test_paused_policy_cannot_authorize_execution(self):
         saved = RunnerSettings.objects.get(pk=1)
         saved.paused = True
         saved.save()
         with self.assertRaisesMessage(RunConflict, "disabled or paused"):
-            current_native_policy(self.run, self.item.claim_token)
+            authorize(*lock_scope(self.run, self.item.claim_token))
+
+    def test_disabled_policy_cannot_authorize_execution(self):
+        saved = RunnerSettings.objects.get(pk=1)
+        saved.enabled = False
+        saved.save()
+        with self.assertRaisesMessage(RunConflict, "disabled or paused"):
+            authorize(*lock_scope(self.run, self.item.claim_token))
+
+    def test_changed_snapshot_digest_cannot_authorize_execution(self):
+        snapshot = {**self.run.configuration_snapshot, "policy_digest": "0" * 64}
+        Run.objects.filter(pk=self.run.pk).update(configuration_snapshot=snapshot)
+        with self.assertRaisesMessage(RunConflict, "snapshot is invalid"):
+            authorize(*lock_scope(self.run, self.item.claim_token))
+
+    def test_non_native_snapshot_cannot_authorize_execution(self):
+        snapshot = {**self.run.configuration_snapshot, "execution_kind": "proposal"}
+        Run.objects.filter(pk=self.run.pk).update(configuration_snapshot=snapshot)
+        with self.assertRaisesMessage(RunConflict, "does not use native"):
+            authorize(*lock_scope(self.run, self.item.claim_token))
 
     def test_native_progress_does_not_require_legacy_plan(self):
         record_evidence(
