@@ -1,16 +1,19 @@
-"""Subscription and local-model CLIs in the integrated Docker runner."""
+"""Selected subscription and external Ollama CLIs in the qualified worker."""
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
+import math
 
 from vibearr_executor.contracts import Manifest, Profile, canonical, digest
-from vibearr_executor.integrated_profiles import RUNTIME, VERSIONS
+from vibearr_executor import SLOT_QUALIFICATION_VERSION
+from vibearr_executor.compact_profiles import RUNTIME
+from vibearr_executor.integrated_profiles import VERSIONS
 
 from .native_codex import (
     AUTH_PROMPT,
     MAX_OUTPUT,
     CodexEvents,
-    NativeCodexAdapter,
     auth_source,
 )
 from .native_sessions import NativeSession, NativeSessionError
@@ -21,6 +24,8 @@ from .native_claude import consume_claude
 
 class NativeEvents(CodexEvents):
     def __init__(self, provider):
+        if provider not in VERSIONS:
+            raise NativeSessionError("Unsupported native CLI.")
         super().__init__()
         self.provider = provider
         self.failure_reason = ""
@@ -60,111 +65,81 @@ class NativeEvents(CodexEvents):
             from .native_opencode import consume
 
             return consume(self, line)
-        if self.provider == "codex":
-            try:
-                event = json.loads(line)
-                if isinstance(event, dict) and event.get("type") in {
-                    "error",
-                    "turn.failed",
-                }:
-                    self.failure_reason = self.classify_failure(event)
-            except ValueError:
-                pass
-            return super().line(line)
-        if not line.strip():
-            return
-        if len(self.events) >= 2048:
-            raise NativeSessionError("Native CLI event count exceeds its limit.")
         try:
             event = json.loads(line)
-        except (ValueError, UnicodeError):
-            self.events.append({"kind": "diagnostic", "text": "Native CLI diagnostic."})
-            return
-        if not isinstance(event, dict):
-            raise NativeSessionError("Native CLI events must be objects.")
-        identity = (
-            event.get("session_id")
-            if self.provider == "claude"
-            else event.get("sessionID")
-        )
-        if identity:
-            if (
-                not isinstance(identity, str)
-                or len(identity) > 200
-                or self.session_id
-                and self.session_id != identity
-            ):
-                raise NativeSessionError("Native CLI session identity changed.")
-            if not self.session_id:
-                self.events.append({"kind": "session.started", "session_id": identity})
-            self.session_id = identity
-        kind = event.get("type", "diagnostic")
-        if kind == "error" or event.get("is_error") is True:
-            self.failed = True
-            self.failure_reason = self.classify_failure(event)
-        if self.provider == "claude" and kind == "result":
-            self.completed = (
-                event.get("subtype") == "success" and event.get("is_error") is False
-            )
-            self.failed = not self.completed
-            usage = event.get("usage", {})
-            if isinstance(usage, dict):
-                self.usage = {
-                    key: value
-                    for key, value in usage.items()
-                    if type(value) is int and 0 <= value < 2**63
-                }
-        part = event.get("part", {})
-        if not isinstance(part, dict):
-            raise NativeSessionError("Native CLI event part must be an object.")
-        if (
-            self.provider == "opencode"
-            and kind == "step_finish"
-            and isinstance(part, dict)
-        ):
-            self.completed = part.get("reason") == "stop"
-            tokens = part.get("tokens", {})
-            if isinstance(tokens, dict):
-                self.usage = {
-                    key: value
-                    for key, value in tokens.items()
-                    if type(value) is int and 0 <= value < 2**63
-                }
-        normalized = {"kind": str(kind)[:80], "session_id": self.session_id}
-        if self.failure_reason:
-            normalized["text"] = self.failure_reason
-        elif (
-            self.provider == "opencode"
-            and kind == "text"
-            and isinstance(part.get("text"), str)
-        ):
-            normalized["text"] = part["text"][:4000]
-        elif self.provider == "claude" and kind == "assistant":
-            message = event.get("message", {})
-            content = message.get("content", []) if isinstance(message, dict) else []
-            if isinstance(content, list):
-                normalized["text"] = " ".join(
-                    item["text"]
-                    for item in content
-                    if isinstance(item, dict)
-                    and item.get("type") == "text"
-                    and isinstance(item.get("text"), str)
-                )[:4000]
-        self.events.append(normalized)
+            if isinstance(event, dict) and event.get("type") in {
+                "error",
+                "turn.failed",
+            }:
+                self.failure_reason = self.classify_failure(event)
+        except ValueError:
+            pass
+        return super().line(line)
 
 
-class NativeCLIAdapter(NativeCodexAdapter):
+class NativeCLIAdapter:
     def __init__(self, client, provider):
         if provider not in VERSIONS:
             raise NativeSessionError("Unsupported native CLI.")
-        super().__init__(client)
+        self.client = client
         self.provider = provider
         self.version = VERSIONS[provider]
 
+    def start(self, session: NativeSession) -> dict:
+        capabilities = self.client.capabilities()
+        if (
+            capabilities.get("qualified") is not True
+            or capabilities.get("binding_digest") != session.runtime_binding_digest
+        ):
+            raise NativeSessionError(
+                "Runtime qualification changed before native start; reconcile existing execution."
+            )
+        operation = self.bound(session)
+        if (
+            capabilities.get("accepting_work") is not True
+            and self.client.status(operation)["state"] == "not-started"
+        ):
+            raise NativeSessionError(
+                "Runtime capacity blocks a new native start; reconcile the original operation."
+            )
+        return self.client.start(operation)
+
+    def prepare_auth_probe(self, **request) -> NativeSession:
+        return self.prepare(**request, source=auth_source(), prompt=AUTH_PROMPT)
+
+    def inspect(self, session: NativeSession) -> dict:
+        result = self.client.status(self.bound(session))
+        if result.get("operation_id") != session.manifest["operation_id"] or result.get(
+            "state"
+        ) not in {"not-started", "running", "exited", "unknown"}:
+            raise NativeSessionError(
+                "Executor returned an invalid native operation state."
+            )
+        receipt = result.get("result")
+        if receipt and (
+            receipt.get("run_id") != session.manifest["run_id"]
+            or receipt.get("operation_id") != session.manifest["operation_id"]
+        ):
+            raise NativeSessionError("Native execution receipt belongs to another run.")
+        return result
+
+    def cancel(self, session: NativeSession) -> dict:
+        self.client.stop(self.bound(session))
+        return self.inspect(session)
+
+    def reconcile(self, session: NativeSession) -> dict:
+        return self.inspect(session)
+
+    def events(self, session: NativeSession) -> list[dict]:
+        return self.read_events(session)[0].events
+
     def connection(self, credential):
-        reference = credential["credential"]
+        reference = credential.get("credential", {})
         required = "connection" if self.provider == "opencode" else "login"
-        if reference["provider"] != self.provider or reference["kind"] != required:
+        if (
+            reference.get("provider") != self.provider
+            or reference.get("kind") != required
+        ):
             raise NativeSessionError(
                 "Select a runner subscription login or external Ollama connection."
             )
@@ -180,13 +155,19 @@ class NativeCLIAdapter(NativeCodexAdapter):
 
     def selected_profile(self, policy, _kind):
         capabilities = self.client.capabilities()
+        versions = {
+            "schema_version": 1,
+            "protocol_version": 2,
+            "qualification_version": SLOT_QUALIFICATION_VERSION,
+        }
+        invalid_version = any(
+            type(capabilities.get(key)) is not int or capabilities[key] != expected
+            for key, expected in versions.items()
+        )
         if (
-            capabilities.get("runtime")
-            not in {
-                RUNTIME,
-                "compact-worker-v1",
-            }
+            capabilities.get("runtime") != RUNTIME
             or capabilities.get("qualified") is not True
+            or invalid_version
         ):
             raise NativeSessionError(
                 "Qualify the current execution worker boot before coding."
@@ -305,8 +286,7 @@ class NativeCLIAdapter(NativeCodexAdapter):
         self.client.upload("source", source)
         self.client.upload("context", context)
         prepared = self.client.prepare(manifest)
-        self.client.supply_secret(operation_id, json.dumps(connection))
-        return NativeSession.from_data(
+        session = NativeSession.from_data(
             {
                 "adapter": self.provider,
                 "agent_version": self.version,
@@ -315,9 +295,11 @@ class NativeCLIAdapter(NativeCodexAdapter):
                 "image_digest": profile.image,
                 "runtime_binding_digest": capabilities["binding_digest"],
                 "manifest": manifest,
-                "execution_identity": prepared["execution_identity"],
+                "execution_identity": prepared.get("execution_identity"),
             }
         )
+        self.client.supply_secret(operation_id, json.dumps(connection))
+        return session
 
     def bound(self, session):
         NativeSession.from_data(session.to_data())
@@ -344,10 +326,51 @@ class NativeCLIAdapter(NativeCodexAdapter):
             content.extend(chunk)
         raise NativeSessionError("Native CLI output exceeds its bound.")
 
-    def outcome(self, session, source):
-        result = super().outcome(session, source)
-        result["agent_version"] = self.version
-        return result
+    def outcome(self, session: NativeSession, source: bytes) -> dict:
+        if hashlib.sha256(source).hexdigest() != session.manifest["source_digest"]:
+            raise NativeSessionError(
+                "Outcome source does not match the prepared native session."
+            )
+        state = self.inspect(session)
+        if (
+            state["state"] != "exited"
+            or state.get("descendants_terminated") is not True
+        ):
+            raise NativeSessionError(
+                "Native outcome is still active or uncertain; reconcile the same operation."
+            )
+        result = state.get("result", {})
+        parser, logs = self.read_events(session)
+        success = (
+            type(result.get("exit_code")) is int
+            and result["exit_code"] == 0
+            and result.get("timed_out") is False
+            and not result.get("canceled")
+            and not result.get("log_truncated")
+            and parser.completed
+            and not parser.failed
+            and bool(parser.session_id)
+        )
+        if result.get("log_digest") != hashlib.sha256(logs).hexdigest():
+            raise NativeSessionError(
+                "Native event log does not match its protected receipt."
+            )
+        inventory, exported = self.client.export(
+            session.manifest["operation_id"], source
+        )
+        return {
+            "successful": bool(success),
+            "session_id": parser.session_id,
+            "agent_version": self.version,
+            "usage": parser.usage,
+            "usage_unit": "tokens",
+            "quota_supported": False,
+            "result": result,
+            "artifact": inventory,
+            "source": exported,
+            "events": parser.events,
+            "log_digest": result["log_digest"],
+        }
 
     def failure_reason(self, session):
         return (
@@ -373,7 +396,30 @@ class NativeCLIAdapter(NativeCodexAdapter):
             raise NativeSessionError(
                 "Selected login or external model failed its native probe."
             )
-        verified = datetime.fromtimestamp(outcome["result"]["ended_at"], timezone.utc)
+        capabilities = self.client.capabilities()
+        if (
+            capabilities.get("runtime") != RUNTIME
+            or capabilities.get("qualified") is not True
+            or capabilities.get("binding_digest") != session.runtime_binding_digest
+        ):
+            raise NativeSessionError(
+                "Runtime changed during native authentication probe; repeat diagnostics."
+            )
+        completed_at = outcome["result"].get("ended_at")
+        now = datetime.now(timezone.utc)
+        if (
+            type(completed_at) not in (int, float)
+            or not math.isfinite(completed_at)
+            or not 0 < completed_at <= now.timestamp()
+        ):
+            raise NativeSessionError(
+                "Native authentication completion timestamp is missing, invalid or in the future."
+            )
+        verified = datetime.fromtimestamp(completed_at, timezone.utc)
+        if now >= verified + timedelta(minutes=15):
+            raise NativeSessionError(
+                "Native authentication probe expired; run a new bounded probe."
+            )
         login_digest = ""
         if self.provider != "opencode":
             status = self.client.request(

@@ -10,7 +10,7 @@ from .test_selection import source_issue
 from .services import claim_item, claim_next, enqueue_item, import_issue
 
 
-@override_settings(NQ_API_TOKEN="test-token")
+@override_settings(VIBEARR_API_TOKEN="test-token")
 class UnifiedQueueTests(TestCase):
     def setUp(self):
         self.project = Project.objects.create(

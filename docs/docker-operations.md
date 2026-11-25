@@ -26,8 +26,7 @@ installed images; no runtime component can inspect or control Docker.
 App startup initializes private named credential volumes without replacing saved
 values, waits for PostgreSQL, migrates, and provisions the configured dedicated
 runner identity. It then supervises the web server and PostgreSQL import
-scheduler. The runner starts idle. Processing is disabled by default; migrations
-from the old fleet disable existing runner configurations for review.
+scheduler. The runner starts idle. Processing is disabled by default. Configuration alone never enables a live provider session.
 
 The UI is available at `http://127.0.0.1:7777`. Add projects, select a separate
 GitHub issue-import credential, and configure runner repository/issue credentials
@@ -126,7 +125,7 @@ candidate apps and browsers. Worker limits cover all of those processes together
 Task UID 1000 and candidate app UID 10003 can reach only scoped mediation ports
 3128/3130; administration on runner port 8792 requires distinct control tokens.
 The agent can access its own selected subscription credentials. See the
-[runtime contract](docker-only-runtime-plan.md).
+[runtime contract](architecture.md).
 
 ## Development and CI
 
@@ -156,30 +155,22 @@ configuration, hooks or credentials. Git reads and source freezing happen in a
 container. Local runs without exact input are labeled disposable snapshots and
 must not be presented as proof of a committed revision.
 
-The consolidated GitHub required check is **Application, runtime and recovery**
-in **Four-container checks**. Before switching branch protection or a configured
-merge profile, require this check and remove superseded worker-fleet check names.
-Existing required-check settings are not changed automatically. The separate
-manual deployment workflow inspects an already qualified installation and does
-not start agents or enable processing.
+The **Four-container checks** workflow runs the four required checks:
+**Run test.sh**, **Validate candidate**, **Qualify OCI executor**, and
+**Check native Codex image**. They exercise actual Docker jobs on the exact
+candidate revision; none is a status-only alias. Repository protections and
+workflow producer identities are separate trusted configuration and must not be
+bypassed. No check starts paid agents or enables processing.
 
-## Drain, upgrade and migration from the old fleet
+## Drain, backup and upgrade
 
-Retain the old image IDs, Compose recipe, database/user names, data-volume project,
-credential encryption key, application/API keys, runner identity and journals.
-Drain using the currently running old controller and its documented controls;
-wait for acknowledgement and reconcile unfinished publications before stopping
-it. Do not drop journals to make an upgrade appear idle.
+This revision uses only canonical Vibearr names and a fresh initial schema.
+Deploy it as a fresh installation rather than reusing an older database,
+private state directory or migration history. Existing installations and backups
+remain separate operator-owned state; the cleanup does not delete them.
 
-Take and verify a quiescent backup using that version's backup job. Version-1
-fleet backups must be restored with the corresponding old image/recipe before
-migration. Version-2 integrated backups retain their original six-volume recipe.
-The four-service runtime writes version-3 `compact-worker-v1` backups with an exact
-mapping of application-secrets, database-secrets, runner-secrets, runner-data,
-runner-logins, worker-secrets and worker-control. Old backups and volumes remain
-available for rollback and are never relabeled as compact snapshots.
-
-For an already integrated deployment, drain while the controller is running:
+For subsequent upgrades of this schema, drain while the trusted controller is
+running and wait for confirmed idle state before stopping services:
 
 ```sh
 docker compose exec --user 10001:10001 runner python -I -m vibearr_runner.drain on
@@ -188,30 +179,19 @@ docker compose stop runner worker app
 bash deploy/docker/operations.sh backup --quiesced
 ```
 
-The backup job requires the explicit `--quiesced` flag, no running app/runner/worker
-services and no active database runs. PostgreSQL remains running for its logical
-dump. It preserves encrypted connections, original keys, journals, execution
-receipts and subscription login state with hashes, ownership and permissions.
-Treat backups as credentials. Taking a backup never restarts processing.
+The backup job requires the explicit flag, no running app/runner/worker services
+and no active database runs. PostgreSQL remains running for its logical dump.
+The snapshot binds database fingerprints, the current private-volume recipe,
+encrypted connections, keys, journals, receipts and subscription login state with
+hashes, ownership and permissions. Treat backups as credentials. A backup never
+restarts processing.
 
-Keep original `.env` names/values on migration. Missing original credentials
-stop initialization before replacement secrets can be generated. Existing
-`postgres-data` and `runner-data` names remain stable through
-`VIBEARR_DATA_PROJECT`. The runner mounts its state volume at both canonical and
-legacy paths so retained absolute workspace paths remain resolvable.
-
-Build/start the new stack, inspect migration results, reconnect selected native
-logins, qualify the new boot and validate delivery. Runtime changes invalidate
-old execution proofs. Preserve uncertain old operations for explicit recovery;
-never replay them as new tasks. Only after acceptance should the operator remove
-specifically identified old worker/proxy/broker and development containers.
-Retain their volumes and old images until rollback has been verified. Never use
-blanket Docker pruning or affect unrelated/external Ollama services.
-
-For routine upgrades, rebuild reviewed images with `bash run.sh --build`, qualify
-the new boot, check recovery and account readiness, then explicitly clear the
-drain and enable the intended schedules. Rollback across migrations may require
-restoring the matching snapshot; automatic schema rollback is not promised.
+Build reviewed images with `bash run.sh --build`, qualify the new boot, verify
+recovery and account readiness, then explicitly clear the drain and enable the
+intended schedules. A changed runtime invalidates prior execution evidence.
+Rollback across schema changes requires the matching snapshot and images;
+automatic migration rollback is not promised. Do not blanket-prune Docker state
+or affect unrelated installations or external Ollama servers.
 
 ## Restore into a separate project
 

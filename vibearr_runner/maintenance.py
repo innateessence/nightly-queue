@@ -55,7 +55,7 @@ class Maintenance:
         self.compact(state, run_id, finish_digest)
 
     def compact(self, state, run_id, finish_digest):
-        for key in ("research", "implementation", "budgets"):
+        for key in ("budgets",):
             state.get(key, {}).pop(run_id, None)
         state["processes"] = {
             key: record

@@ -7,4 +7,4 @@ def provision_controller(test):
     test.runner.controller_digest = token_digest(CONTROLLER_SECRET)
     test.runner.save(update_fields=["controller_digest"])
     test.runner.controller_proven = True
-    test.client.defaults["HTTP_X_NQ_CONTROLLER_SECRET"] = CONTROLLER_SECRET
+    test.client.defaults["HTTP_X_VIBEARR_CONTROLLER_SECRET"] = CONTROLLER_SECRET

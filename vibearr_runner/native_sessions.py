@@ -1,4 +1,4 @@
-"""Native process sessions are separate from model proposal backends."""
+"""Sessions for selected subscription and external Ollama CLI execution."""
 
 from dataclasses import asdict, dataclass
 import json
@@ -20,15 +20,13 @@ class NativeSession:
     image_digest: str
     runtime_binding_digest: str
     manifest: dict
-    execution_identity: dict | None = None
+    execution_identity: dict
 
     def to_data(self) -> dict:
         return json.loads(json.dumps(asdict(self)))
 
     @classmethod
     def from_data(cls, value: dict) -> "NativeSession":
-        if isinstance(value, dict) and "execution_identity" not in value:
-            value = {**value, "execution_identity": None}
         if not isinstance(value, dict) or set(value) != set(cls.__dataclass_fields__):
             raise NativeSessionError("Invalid native session record.")
         manifest = value.get("manifest")
@@ -59,12 +57,16 @@ class NativeSession:
             for text in (value["adapter"], value["agent_version"], account["model"]):
                 if not isinstance(text, str) or not text or len(text) > 200:
                     raise ValueError
-            if value["auth_kind"] not in {"token", "session", "connection", "login"}:
+            if value["auth_kind"] not in {"connection", "login"}:
                 raise ValueError
-            if value["execution_identity"] is not None:
-                from .native_contract import validate_execution_identity
+            from .native_contract import validate_execution_identity
 
-                validate_execution_identity(value["execution_identity"])
+            identity = validate_execution_identity(value["execution_identity"])
+            if (
+                identity["runtime"] != "compact-worker-v1"
+                or identity["binding_digest"] != value["runtime_binding_digest"]
+            ):
+                raise ValueError
         except (KeyError, TypeError, ValueError, AttributeError):
             raise NativeSessionError("Invalid native session binding.") from None
         return cls(**json.loads(json.dumps(value)))
@@ -118,15 +120,10 @@ class NativeAdapter(Protocol):
 
 class NativeBackendRegistry:
     def create(self, provider: str, client) -> NativeAdapter:
-        if (
-            getattr(client, "integrated", False) is True
-            or getattr(client, "compact", False) is True
-        ):
-            from .native_cli import NativeCLIAdapter
+        if getattr(client, "compact", False) is not True:
+            raise NativeSessionError(
+                "Native execution requires the qualified compact worker client."
+            )
+        from .native_cli import NativeCLIAdapter
 
-            return NativeCLIAdapter(client, provider)
-        if provider == "codex":
-            from .native_codex import NativeCodexAdapter
-
-            return NativeCodexAdapter(client)
-        raise NativeSessionError("Selected provider has no installed native adapter.")
+        return NativeCLIAdapter(client, provider)

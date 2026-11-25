@@ -1,7 +1,6 @@
 # System logs
 
-Configuration → Logs opens the System Logs category. Runner Logs is reserved for
-future work and has no active viewer or collector yet.
+Configuration → Logs opens the System Logs category.
 
 System Logs records application events at Info, Warning, Error, and Critical
 levels. It includes issue synchronization results, discovery settings changes,
@@ -32,13 +31,3 @@ The collector preserves existing console logging. Storage failures cannot fail
 the caller; records cannot be recovered while the database is unavailable, before
 the initial migration, or after the caller's transaction rolls back. Historical
 console output is not imported.
-
-Rebuild the application/tools images and apply the new migration before serving:
-
-```sh
-docker compose --profile tools run --rm tools python manage.py migrate --noinput
-```
-
-The migration adds `system_logs.0001_initial`. No credential, volume, worker,
-schedule, or execution-policy changes are required. Keep live execution disabled
-until the separate Docker-only qualification work is complete.

@@ -1,18 +1,24 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from uuid import uuid4
 
 from .artifacts import pack
 from .contracts import Conflict, digest
-from .slot_gateway import Gateway
+from .dependency_gateway import DependencyGateway
+from .slot_builds import DependencyBuilds
 from .validation_profile import PACKAGE_HOSTS, ValidationProfile
 
 
 class Worker:
-    def __init__(self, profiles):
+    def __init__(self, profiles, directory):
         self.profiles = profiles
+        self.directory = directory
+        self.artifacts = directory / "artifacts"
+        self.artifacts.mkdir()
+        self.lock = threading.RLock()
         self.instance = str(uuid4())
         self.binding = "a" * 64
         self.operations = {}
@@ -32,8 +38,10 @@ class Worker:
             ],
         }
 
-    def upload(self, _kind, content):
-        return {"sha256": digest(content)}
+    def upload(self, _kind, content, expected):
+        assert digest(content) == expected
+        (self.artifacts / expected).write_bytes(content)
+        return {"sha256": expected}
 
     def prepare(self, data):
         return self.operations.setdefault(
@@ -59,13 +67,13 @@ class DependencyBuildLifecycleTests(unittest.TestCase):
         self.parent = ValidationProfile(
             "sha256:" + "b" * 64, "sha256:" + "c" * 64, digest(b"base")
         )
-        self.setup = Worker([self.parent.setup_profile()])
-        self.validation = Worker(self.parent.executor_profiles())
-        self.gateway = Gateway(
+        self.setup = Worker(
+            [self.parent.setup_profile(), *self.parent.executor_profiles()],
             Path(self.temporary.name),
-            {"setup": self.setup, "validation": self.validation},
         )
-        self.addCleanup(self.gateway.close)
+        self.validation = self.setup
+        self.gateway = DependencyGateway(self.setup)
+        self.setup.dependency_builds = DependencyBuilds(self.gateway)
         source = pack({"requirements.txt": (0o644, b"six==1.17.0\n")})
         self.gateway.upload("source", source, digest(source))
         self.request = {

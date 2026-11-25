@@ -12,7 +12,7 @@ class ProjectViewTests(TestCase):
     def setUp(self):
         self.data = {
             "name": "Nightly",
-            "repository_url": "https://github.com/example/nightly",
+            "repository_url": "https://github.com/example/vibearr",
             "base_branch": "develop",
         }
         self.url = reverse("project_list")
@@ -20,7 +20,7 @@ class ProjectViewTests(TestCase):
     def create_project(self):
         return Project.objects.create(**self.data)
 
-    @override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+    @override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
     def create_credential(self, name="GitHub work account"):
         credential = Credential(name=name, kind=Credential.Kind.TOKEN)
         credential.set_secret("private-token")
@@ -207,7 +207,7 @@ class ProjectViewTests(TestCase):
         self.assert_invalid_field("repository_url", "https://example.com/owner/repo")
 
     def test_repository_subpage_is_rejected(self):
-        url = "https://github.com/example/nightly/issues"
+        url = "https://github.com/example/vibearr/issues"
         self.assert_invalid_field("repository_url", url)
 
     def test_invalid_branch_is_rejected(self):

@@ -10,12 +10,11 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
-vibearr-executor = "vibearr_executor.server:main"
-vibearr-qualify-runtime = "vibearr_executor.qualify:main"
+vibearr-worker = "vibearr_executor.compact_worker:main"
 
 [tool.setuptools]
 packages = ["vibearr_executor"]
 package-dir = {vibearr_executor = "."}
 
 [tool.setuptools.package-data]
-vibearr_executor = ["Dockerfile", "Slot.Dockerfile", "Codex.Dockerfile", "CodexProject.Dockerfile", "validation.Dockerfile", "validation-requirements.txt", "validation_*.toml", "validation_mypy.ini"]
+vibearr_executor = ["Worker.Dockerfile", "validation-requirements.txt", "validation_*.toml", "validation_mypy.ini"]

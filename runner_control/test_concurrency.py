@@ -44,7 +44,7 @@ class RunConcurrencyTests(TransactionTestCase):
                 cursor.execute("SET statement_timeout = '5s'")
             client = Client(
                 HTTP_AUTHORIZATION=f"Bearer {self.token}",
-                HTTP_X_NQ_CONTROLLER_SECRET=CONTROLLER_SECRET,
+                HTTP_X_VIBEARR_CONTROLLER_SECRET=CONTROLLER_SECRET,
             )
             kwargs = {"run_id": run_id} if run_id else {}
             if barrier:
@@ -141,7 +141,7 @@ class RunConcurrencyTests(TransactionTestCase):
         fields = {
             "operation_id": str(uuid.uuid4()),
             "claim_token": claim["item"]["claim_token"],
-            "stage": "research",
+            "stage": "context",
         }
         barrier = Barrier(2)
         with ThreadPoolExecutor(max_workers=2) as pool:

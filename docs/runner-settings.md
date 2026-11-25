@@ -14,20 +14,15 @@ its next processing gate. Task-window limits are counted separately per runner.
 An assigned schedule cannot be deleted until its runners use another schedule.
 The default **Always on** schedule remains available for new runners.
 
-Migration 0015 preserves existing processing windows and timezones by assigning
-saved runner settings to matching schedule records. Existing continuous UTC
-settings use Always on; customized windows retain a schedule named for their
-runner. The schedule migration also supports restoring the original runner fields
-when rolled back. **Default runner** remains the fallback runner configuration.
-Provision machine identities with the Docker tools service:
-`docker compose --profile tools run --rm tools python manage.py provision_runner <name>`,
-using a dedicated token supplied through `VIBEARR_RUNNER_API_TOKEN`, then select
-the identity in the runner configuration form. An identity can be assigned to one
-configuration. Identities without an assignment continue to use Default runner.
+The built-in **Default runner** is the fallback configuration. Provision a
+dedicated identity using the app image entrypoint and a private runner token:
+`docker compose run --rm app python manage.py provision_runner <name>`.
+An identity can be assigned to one configuration. Identities without an assignment
+use Default runner.
 New configurations start disabled and may be saved before an identity is
 provisioned. Saving a configuration does not start a supervisor or qualify its
 runtime; native execution still requires the registered isolated runtime and
-verified adapter described in [runner operations](runner-operations.md).
+verified adapter described in [Docker operations](docker-operations.md).
 
 Run one independent supervisor deployment per identity, each with its own token
 and persistent state directory. The authenticated identity automatically selects
@@ -74,7 +69,3 @@ backend, model, instruction and command edits affect future attempts. Native
 execution rejects a changed configuration assignment. Configuration/project saves
 share the default settings row lock. Direct SQL/bulk updates must coordinate this
 lock. Credential delivery validates the selected runner's references and grants.
-
-Apply `docker compose --profile tools run --rm tools python manage.py migrate`
-before serving the new pages. Existing machine
-identities and supervisors continue using the preserved default configuration.

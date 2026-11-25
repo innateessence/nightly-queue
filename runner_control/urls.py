@@ -2,7 +2,6 @@ from django.urls import path
 
 from . import (
     api,
-    approval_api,
     configuration_api,
     gate_api,
     plan_api,
@@ -25,11 +24,6 @@ urlpatterns = [
         factory_api.detail,
         name="runner_factory_artifact",
     ),
-    path(
-        "runs/<uuid:run_id>/native/delivery-recovery/",
-        native_api.delivery_recovery,
-        name="runner_delivery_recovery",
-    ),
     path("candidates/", native_api.native_candidates, name="runner_candidates"),
     path(
         "runs/<uuid:run_id>/native/status/",
@@ -42,16 +36,6 @@ urlpatterns = [
         name="runner_refresh_source",
     ),
     path("health/", operations_api.health, name="runner_health"),
-    path(
-        "release/<uuid:qualification_id>/",
-        operations_api.release_suite,
-        name="runner_release_suite",
-    ),
-    path(
-        "release/<uuid:qualification_id>/claim/",
-        operations_api.release_claim,
-        name="runner_release_claim",
-    ),
     path("retention/", operations_api.retention, name="runner_retention"),
     path(
         "runs/<uuid:run_id>/retention/ack/",
@@ -86,32 +70,11 @@ urlpatterns = [
     ),
     path("runs/<uuid:run_id>/contexts/", plan_api.contexts, name="runner_contexts"),
     path("runs/<uuid:run_id>/plans/", plan_api.plans, name="runner_plans"),
-    path(
-        "runs/<uuid:run_id>/handoff/<uuid:operation_id>/",
-        plan_api.handoff_detail,
-        name="runner_handoff_detail",
-    ),
-    path("runs/<uuid:run_id>/handoff/", plan_api.handoff, name="runner_handoff"),
     path("secrets/", secrets.selected_secret, name="runner_selected_secret"),
     path("gates/", gate_api.gates, name="runner_gates"),
     path("gates/report/", gate_api.report, name="runner_gate_report"),
     path(
         "configuration/", configuration_api.configuration, name="runner_configuration"
-    ),
-    path(
-        "runs/<uuid:run_id>/approvals/",
-        approval_api.collection,
-        name="runner_approvals",
-    ),
-    path(
-        "runs/<uuid:run_id>/approvals/<uuid:approval_id>/",
-        approval_api.detail,
-        name="runner_approval",
-    ),
-    path(
-        "runs/<uuid:run_id>/approvals/<uuid:approval_id>/consume/",
-        approval_api.consume,
-        name="runner_approval_consume",
     ),
     path("identity/", api.identity, name="runner_identity"),
     path("runs/claim/", api.claim, name="runner_claim"),

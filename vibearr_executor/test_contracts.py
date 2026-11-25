@@ -4,7 +4,24 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from .contracts import Limits, Manifest, Profile, Rejected
-from .qualify import smoke_profiles
+
+
+def smoke_profiles(image):
+    limits = Limits(1, 1024, 64, 512)
+    return [
+        Profile(
+            "agent",
+            1,
+            image,
+            "agent",
+            ("python",),
+            limits,
+            ("api.openai.com",),
+            "API_KEY",
+            "",
+        ),
+        Profile("validation", 1, image, "validation", ("python",), limits, (), "", ""),
+    ]
 
 
 class ContractTests(unittest.TestCase):

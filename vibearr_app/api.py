@@ -10,7 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 
 def authentication_error(request):
-    token = settings.NQ_API_TOKEN
+    token = settings.VIBEARR_API_TOKEN
     if not token:
         message = "API disabled: configure VIBEARR_API_TOKEN."
         return JsonResponse({"error": message}, status=503)

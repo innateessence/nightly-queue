@@ -19,7 +19,7 @@ from .services import (
 )
 from .settings_models import RunnerSettings
 
-PURPOSES = ("research", "implementation", "issue", "repository")
+PURPOSES = ("implementation", "issue", "repository")
 
 
 def unavailable(message="The selected credential is unavailable."):
@@ -66,7 +66,7 @@ def selected_reference(data, runner, document):
         if type(reference) is not int or not selected or not granted:
             unavailable("This account is not selected for runner preflight.")
         return reference, backend
-    if scope not in {"run", "reconciliation", "completion"} or set(data) != {
+    if scope not in {"run", "reconciliation"} or set(data) != {
         "scope",
         "run_id",
         "claim_token",
@@ -75,21 +75,12 @@ def selected_reference(data, runner, document):
         unavailable("Use a configured preflight account or an owned active run.")
     run = owned_run(runner, uuid_field(data, "run_id"))
     reconciliation = scope == "reconciliation"
-    completion = scope == "completion"
     verify_active(
         run,
         uuid_field(data, "claim_token"),
-        allow_cancellation=reconciliation or completion,
+        allow_cancellation=reconciliation,
     )
     purpose = string_field(data, "purpose", max_length=30)
-    if hasattr(run, "delivery_recovery") and purpose not in {"issue", "repository"}:
-        unavailable("Delivery-only recovery cannot obtain coding credentials.")
-    if completion:
-        from .merge_services import completion_authority
-
-        if purpose not in {"issue", "repository"}:
-            unavailable("Completion credentials are restricted to GitHub reporting.")
-        completion_authority(run, document)
     if reconciliation:
         from .native_services import registered
 
@@ -101,11 +92,6 @@ def selected_reference(data, runner, document):
             unavailable(
                 "Reconciliation credentials require registered owned native work and a GitHub read purpose."
             )
-    if (
-        run.configuration_snapshot.get("execution_kind") == "native"
-        and purpose == "research"
-    ):
-        unavailable("Separate research credentials are inactive for native execution.")
     if purpose not in PURPOSES:
         unavailable("Choose a supported credential purpose.")
     effective = run.configuration_snapshot.get("effective", {})
@@ -127,12 +113,10 @@ def selected_reference(data, runner, document):
             "The run credential selection changed; stop and reconcile configuration."
         )
     backend = (
-        effective.get(f"{purpose}_backend")
-        if purpose in ("research", "implementation")
-        else "github"
+        effective.get(f"{purpose}_backend") if purpose == "implementation" else "github"
     )
     if (
-        purpose in ("research", "implementation")
+        purpose == "implementation"
         and project["effective"].get(f"{purpose}_backend") != backend
     ):
         unavailable(
@@ -156,8 +140,8 @@ def secret_document(data, runner):
             unavailable("The selected credential provider does not match its purpose.")
         allowed = {
             "github": ("token",),
-            "codex": ("token", "session", "login"),
-            "claude": ("token", "login"),
+            "codex": ("login",),
+            "claude": ("login",),
             "opencode": ("connection",),
         }
         if credential.kind not in allowed.get(backend, ()):
@@ -165,7 +149,7 @@ def secret_document(data, runner):
         try:
             material = credential.get_secret()
             credential.validate_provider_kind()
-            if credential.kind in (Credential.Kind.SESSION, Credential.Kind.CONNECTION):
+            if credential.kind == Credential.Kind.CONNECTION:
                 from credentials.validation import validate_structured_secret
 
                 validate_structured_secret(
@@ -191,8 +175,6 @@ def secret_document(data, runner):
         }
         if data["scope"] == "reconciliation":
             result["access_mode"] = "reconciliation-read-only"
-        elif data["scope"] == "completion":
-            result["access_mode"] = "completion-reporting-only"
         elif data["scope"] == "preflight" and data["backend"] == "github":
             result["access_mode"] = "preflight-read-only"
         return result

@@ -23,7 +23,7 @@ class GateEvidenceTests(TestCase):
         provision_controller(self)
         self.auth = {
             "HTTP_AUTHORIZATION": "Bearer gate-test-token",
-            "HTTP_X_NQ_CONTROLLER_SECRET": CONTROLLER_SECRET,
+            "HTTP_X_VIBEARR_CONTROLLER_SECRET": CONTROLLER_SECRET,
         }
         now = timezone.now()
         self.report = {

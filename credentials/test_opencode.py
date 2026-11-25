@@ -10,14 +10,13 @@ from .test_models import TEST_KEY
 from runner_control.validators import validate_backend_model
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class OpenCodeConnectionTests(TestCase):
     def data(self, **values):
         return {
             "name": "Local inference",
             "provider": "opencode",
             "kind": "connection",
-            "connection_provider": "ollama",
             "connection_endpoint": "http://ollama.example:11434",
             **values,
         }
@@ -31,7 +30,7 @@ class OpenCodeConnectionTests(TestCase):
             {"provider": "ollama", "base_url": "http://ollama.example:11434"},
         )
 
-    def test_create_hosted_connection_with_fixed_endpoint(self):
+    def test_submitted_cloud_provider_and_api_key_are_rejected(self):
         form = CredentialForm(
             data=self.data(
                 connection_provider="openai",
@@ -42,7 +41,7 @@ class OpenCodeConnectionTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertFalse(Credential.objects.exists())
 
-    def test_hosted_connection_rejects_arbitrary_endpoint(self):
+    def test_submitted_cloud_endpoint_and_api_key_are_rejected(self):
         form = CredentialForm(
             data=self.data(
                 connection_provider="openai",
@@ -52,6 +51,23 @@ class OpenCodeConnectionTests(TestCase):
         )
         self.assertFalse(form.is_valid())
         self.assertFalse(Credential.objects.exists())
+
+    def test_api_key_input_is_rejected_even_without_a_cloud_provider(self):
+        for key in ("", "private-api-key"):
+            with self.subTest(key=key):
+                form = CredentialForm(data=self.data(connection_api_key=key))
+                self.assertFalse(form.is_valid())
+        self.assertFalse(Credential.objects.exists())
+
+    def test_ollama_api_base_path_is_normalized_to_origin(self):
+        form = CredentialForm(
+            data=self.data(connection_endpoint="http://ollama.example:11434/api/")
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(
+            json.loads(form.save().get_secret()["secret"]),
+            {"provider": "ollama", "base_url": "http://ollama.example:11434"},
+        )
 
     def test_wrong_credential_provider_rejects_connection_fields(self):
         form = CredentialForm(
@@ -113,7 +129,6 @@ class OpenCodeConnectionTests(TestCase):
             with self.subTest(provider=provider):
                 form = CredentialForm(
                     data=self.data(
-                        connection_provider="",
                         connection_endpoint="",
                         secret=json.dumps({"provider": provider, "api_key": "key"}),
                     )
@@ -125,133 +140,6 @@ class OpenCodeConnectionTests(TestCase):
     def test_connection_help_is_visible(self):
         response = self.client.get(reverse("credential_list"))
         self.assertContains(response, "Ollama endpoint")
-        self.assertContains(response, "OpenCode runs inside the runner")
-
-
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
-class OpenCodeReleaseReceiptTests(TestCase):
-    def setUp(self):
-        from coding_runner.backend_transports import TRANSPORTS
-
-        self.credential = Credential(
-            name="Authorized inference", provider="opencode", kind="connection"
-        )
-        self.credential.set_secret(
-            '{"provider":"ollama","base_url":"http://runner-ollama:11434"}'
-        )
-        self.credential.save()
-        self.account = {
-            "backend": "opencode",
-            "credential_id": self.credential.pk,
-            "model": "qwen3-coder:30b",
-            "secret_version": 1,
-            "transport": TRANSPORTS["opencode"],
-        }
-        self.receipt = {
-            **self.account,
-            "receipt_kind": "local_response_digest",
-            "response_digest": "a" * 64,
-            "inference_provider": "ollama",
-            "endpoint": "http://runner-ollama:11434/api",
-        }
-
-    def verify(self, receipt=None):
-        from runner_control.release import verify_model_responses
-
-        verify_model_responses(
-            [self.receipt if receipt is None else receipt], [self.account]
-        )
-
-    def test_authorized_ollama_connection_accepts_typed_local_receipt(self):
-        self.verify()
-
-    def test_unselected_account_is_rejected_before_secret_decryption(self):
-        from unittest.mock import patch
-        from runner_control.services import RunConflict
-
-        with (
-            patch.object(Credential, "get_secret") as secret,
-            self.assertRaises(RunConflict),
-        ):
-            self.verify({**self.receipt, "credential_id": 999})
-        secret.assert_not_called()
-
-    def test_endpoint_model_version_or_provider_mismatch_is_rejected(self):
-        from runner_control.services import RunConflict
-
-        for key, value in (
-            ("endpoint", "http://127.0.0.1:11434/api"),
-            ("model", "another-model"),
-            ("secret_version", 2),
-            ("inference_provider", "openai"),
-            ("receipt_kind", "provider_response_id"),
-            ("response_digest", "invalid"),
-        ):
-            with self.subTest(key=key), self.assertRaises(RunConflict):
-                self.verify({**self.receipt, key: value})
-
-    def test_reported_ollama_flag_cannot_relabel_actual_hosted_connection(self):
-        from runner_control.services import RunConflict
-
-        self.credential.set_secret('{"provider":"openai","api_key":"hosted-secret"}')
-        self.credential.save()
-        self.account["secret_version"] = self.credential.secret_version
-        self.receipt["secret_version"] = self.credential.secret_version
-        with self.assertRaises(RunConflict):
-            self.verify()
-
-    def test_local_receipt_cannot_fabricate_provider_response_identity(self):
-        from runner_control.services import RunConflict
-
-        with self.assertRaises(RunConflict):
-            self.verify({**self.receipt, "response_id": "fabricated-provider-id"})
-
-    def test_local_version_rejects_non_database_text(self):
-        from runner_control.services import RunConflict
-
-        for version in ("0.1\x00", "invalid-\ud800"):
-            with self.subTest(version=repr(version)), self.assertRaises(RunConflict):
-                self.verify({**self.receipt, "ollama_version": version})
-
-    def test_hosted_identity_rejects_non_database_text(self):
-        from runner_control.services import RunConflict
-
-        self.credential.set_secret('{"provider":"openai","api_key":"hosted-secret"}')
-        self.credential.save()
-        self.account["secret_version"] = self.credential.secret_version
-        for response_id in ("chatcmpl_\x00", "invalid-\ud800"):
-            receipt = {
-                **self.account,
-                "inference_provider": "openai",
-                "endpoint": "https://api.openai.com/v1",
-                "receipt_kind": "provider_response_id",
-                "response_id": response_id,
-            }
-            with (
-                self.subTest(response_id=repr(response_id)),
-                self.assertRaises(RunConflict),
-            ):
-                self.verify(receipt)
-
-    def test_hosted_connection_requires_actual_provider_identity(self):
-        from runner_control.services import RunConflict
-
-        self.credential.set_secret('{"provider":"openai","api_key":"hosted-secret"}')
-        self.credential.save()
-        self.account["secret_version"] = self.credential.secret_version
-        receipt = {
-            **self.account,
-            "inference_provider": "openai",
-            "endpoint": "https://api.openai.com/v1",
-            "receipt_kind": "provider_response_id",
-            "response_id": "chatcmpl_fixture_only",
-        }
-        self.verify(receipt)
-        with self.assertRaises(RunConflict):
-            self.verify(
-                {
-                    **receipt,
-                    "receipt_kind": "local_response_digest",
-                    "response_digest": "a" * 64,
-                }
-            )
+        self.assertContains(response, "external Ollama")
+        self.assertNotContains(response, "id_connection_provider")
+        self.assertNotContains(response, "id_connection_api_key")

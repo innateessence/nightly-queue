@@ -5,8 +5,8 @@ cd "$(dirname "$0")/../.."
 candidate=$(realpath "$2")
 commit=$4
 [[ $commit =~ ^[a-f0-9]{40}$ ]] || { echo 'Select an exact candidate SHA.' >&2; exit 2; }
-project=nq-codex-image-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-${RANDOM}
-[[ $project =~ ^nq-codex-image-[a-z0-9-]+$ && ${#project} -le 63 ]] || exit 2
+project=vibearr-codex-image-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-${RANDOM}
+[[ $project =~ ^vibearr-codex-image-[a-z0-9-]+$ && ${#project} -le 63 ]] || exit 2
 scratch=$(mktemp -d /tmp/vibearr-codex-image.XXXXXXXX)
 output=${VIBEARR_CHECK_OUTPUT:-/tmp/$project-evidence}
 [[ ! -e $output ]] || { rm -rf "$scratch"; echo 'Choose a fresh evidence directory.' >&2; exit 2; }
@@ -31,8 +31,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-unset VIBEARR_API_TOKEN NQ_API_TOKEN VIBEARR_POSTGRES_PASSWORD POSTGRES_PASSWORD
-unset VIBEARR_CREDENTIAL_KEY NQ_CREDENTIAL_KEY DJANGO_SECRET_KEY VIBEARR_RUNNER_API_TOKEN NQ_RUNNER_API_TOKEN
+unset VIBEARR_API_TOKEN VIBEARR_POSTGRES_PASSWORD
+unset VIBEARR_CREDENTIAL_KEY DJANGO_SECRET_KEY VIBEARR_RUNNER_API_TOKEN
 docker build --target tools --tag "$tools" . > "$output/bootstrap-tools-build.log" 2>&1
 git_directory=$candidate/.git
 if [[ -f $git_directory ]]; then
@@ -66,4 +66,4 @@ expected=$(docker run --rm --network none --read-only --cap-drop ALL --security-
 actual=$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10001 --memory 256m --pids-limit 32 --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,size=16m --entrypoint codex "$runner" --version 2> "$output/codex-version-stderr.log")
 printf '%s\n' "$actual" > "$output/codex-version.log"
 [[ $actual == "$expected" ]] || { echo 'Built Codex version differs from the pinned release.' >&2; exit 1; }
-docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 1g --pids-limit 64 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,exec,size=512m --entrypoint sh "$tools" -c 'cp -R /app /tmp/codex-source && cd /tmp/codex-source && python -m unittest coding_runner.test_native_codex coding_runner.test_native_contract coding_runner.test_native_conformance vibearr_executor.test_codex_task' > "$output/native-contract-tests.log" 2>&1
+docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 1g --pids-limit 64 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,exec,size=512m --entrypoint sh "$tools" -c 'cp -R /app /tmp/codex-source && cd /tmp/codex-source && python -m unittest vibearr_runner.test_native_codex vibearr_runner.test_native_contract vibearr_runner.test_native_conformance vibearr_executor.test_managed_connections' > "$output/native-contract-tests.log" 2>&1

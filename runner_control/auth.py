@@ -36,8 +36,7 @@ def runner_api_view(*methods):
             runner = runner_authentication(request)
             if runner is None:
                 return unauthorized()
-            legacy_proof = request.headers.get("X-NQ-Controller-Secret", "")
-            proof = request.headers.get("X-Vibearr-Controller-Secret", legacy_proof)
+            proof = request.headers.get("X-Vibearr-Controller-Secret", "")
             protected = view.__name__ not in {
                 "identity",
                 "configuration",

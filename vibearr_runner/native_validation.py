@@ -58,8 +58,7 @@ def validation_diagnostics(policy, client=None, profile=None, *, capabilities=No
             observed.get("schema_version") != 1
             or observed.get("protocol_version") != SLOT_PROTOCOL_VERSION
             or observed.get("qualification_version") != SLOT_QUALIFICATION_VERSION
-            or observed.get("runtime")
-            not in {"compose-slot-v2", "integrated-runner-v1", "compact-worker-v1"}
+            or observed.get("runtime") != "compact-worker-v1"
         ):
             raise Rejected(
                 "The installed executor validation protocol or qualification version is unsupported."

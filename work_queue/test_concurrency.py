@@ -120,7 +120,9 @@ class ImportConcurrencyTests(TransactionTestCase):
         self.assertEqual(QueueItem.objects.count(), 1)
 
 
-@override_settings(NQ_CREDENTIAL_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+@override_settings(
+    VIBEARR_CREDENTIAL_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+)
 class SourceClaimConcurrencyTests(TransactionTestCase):
     def setUp(self):
         from credentials.models import Credential
@@ -136,12 +138,9 @@ class SourceClaimConcurrencyTests(TransactionTestCase):
         )
         metadata.start()
         self.addCleanup(metadata.stop)
-        backend = Credential.objects.create(
-            name="Backend",
-            provider="codex",
-            kind="token",
-            encrypted_payload="controlled-fixture",
-        )
+        backend = Credential(name="Backend", provider="codex", kind="login")
+        backend.set_secret("managed-subscription-login")
+        backend.save()
         github = Credential(name="GitHub", provider="github", kind="token")
         github.set_secret("controlled-github-token")
         github.save()

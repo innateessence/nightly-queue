@@ -10,7 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.1/ref/settings/
 """
 
-from .environment import getenv
+from os import getenv
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -30,10 +30,8 @@ SECRET_KEY = getenv(
 DEBUG = getenv("DJANGO_DEBUG", "True").lower() == "true"
 
 # Machine API authentication; an unset token disables the API.
-NQ_API_TOKEN = getenv("NQ_API_TOKEN", "")
-NQ_CREDENTIAL_KEY = getenv("NQ_CREDENTIAL_KEY", "")
-VIBEARR_API_TOKEN = NQ_API_TOKEN
-VIBEARR_CREDENTIAL_KEY = NQ_CREDENTIAL_KEY
+VIBEARR_API_TOKEN = getenv("VIBEARR_API_TOKEN", "")
+VIBEARR_CREDENTIAL_KEY = getenv("VIBEARR_CREDENTIAL_KEY", "")
 
 ALLOWED_HOSTS = getenv("DJANGO_ALLOWED_HOSTS", "*").split(",")
 
@@ -92,11 +90,11 @@ WSGI_APPLICATION = "vibearr_app.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": getenv("POSTGRES_DB", "nightly_queue"),
-        "USER": getenv("POSTGRES_USER", "nightly_queue"),
-        "PASSWORD": getenv("POSTGRES_PASSWORD") or "nightly_queue",
-        "HOST": getenv("POSTGRES_HOST", "localhost"),
-        "PORT": getenv("POSTGRES_PORT", "5432"),
+        "NAME": getenv("VIBEARR_POSTGRES_DB", "vibearr"),
+        "USER": getenv("VIBEARR_POSTGRES_USER", "vibearr"),
+        "PASSWORD": getenv("VIBEARR_POSTGRES_PASSWORD") or "vibearr",
+        "HOST": getenv("VIBEARR_POSTGRES_HOST", "localhost"),
+        "PORT": getenv("VIBEARR_POSTGRES_PORT", "5432"),
     }
 }
 

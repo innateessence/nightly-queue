@@ -18,7 +18,6 @@
 </fieldset>
 <fieldset class="settings-group" id="execution"><legend>Execution & delivery</legend>
 {% include "runner_control/_field.html" with field=runner_form.execution_policy %}
-{% include "runner_control/_field.html" with field=runner_form.merge_profile %}
 {% include "runner_control/_field.html" with field=runner_form.setup_commands %}
 {% include "runner_control/_field.html" with field=runner_form.validation_commands %}
 {% include "runner_control/_field.html" with field=runner_form.task_timeout_seconds %}
@@ -30,11 +29,3 @@
 {% include "runner_control/_field.html" with field=runner_form.plan_retention_days %}
 {% include "runner_control/_field.html" with field=runner_form.log_retention_days %}
 </fieldset>
-<details{% if runner_form.research_backend.errors or runner_form.research_model.errors or runner_form.research_credential.errors or runner_form.research_instructions.errors or runner_form.research_timeout_seconds.errors %} open{% endif %}><summary>Historical research settings</summary>
-<p class="field-hint">Retained for historical runs. These settings do not gate native execution.</p>
-{% include "runner_control/_field.html" with field=runner_form.research_backend %}
-{% include "runner_control/_field.html" with field=runner_form.research_model %}
-{% include "runner_control/_field.html" with field=runner_form.research_credential %}
-{% include "runner_control/_field.html" with field=runner_form.research_instructions %}
-{% include "runner_control/_field.html" with field=runner_form.research_timeout_seconds %}
-</details>

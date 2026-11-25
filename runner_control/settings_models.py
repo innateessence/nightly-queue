@@ -13,7 +13,6 @@ from .validators import (
     validate_timezone,
     validate_windows,
     validate_execution_policy,
-    validate_merge_profile,
 )
 
 
@@ -94,9 +93,6 @@ class RunnerSettings(models.Model):
     execution_policy = models.JSONField(
         default=default_execution_policy, validators=[validate_execution_policy]
     )
-    merge_profile = models.JSONField(
-        default=dict, blank=True, validators=[validate_merge_profile]
-    )
     polling_interval_seconds = models.PositiveIntegerField(
         default=60, validators=[MinValueValidator(1), MaxValueValidator(86400)]
     )
@@ -105,9 +101,6 @@ class RunnerSettings(models.Model):
     )
     task_timeout_seconds = models.PositiveIntegerField(
         default=7200, validators=[MinValueValidator(1)]
-    )
-    research_timeout_seconds = models.PositiveIntegerField(
-        default=1800, validators=[MinValueValidator(1)]
     )
     implementation_timeout_seconds = models.PositiveIntegerField(
         default=3600, validators=[MinValueValidator(1)]
@@ -118,20 +111,6 @@ class RunnerSettings(models.Model):
     reserve_enabled = models.BooleanField(default=False)
     minimum_remaining_usage_percent = models.PositiveSmallIntegerField(
         default=40, validators=[MaxValueValidator(100)]
-    )
-    research_backend = models.CharField(
-        max_length=30,
-        choices=[(backend, backend.title()) for backend in BACKENDS],
-        blank=True,
-    )
-    research_model = models.CharField(max_length=200, blank=True)
-    research_instructions = models.TextField(blank=True, max_length=20000)
-    research_credential = models.ForeignKey(
-        "credentials.Credential",
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="research_runner_settings",
     )
     implementation_backend = models.CharField(
         max_length=30,
@@ -184,7 +163,6 @@ class RunnerSettings(models.Model):
         from credentials.models import Credential
 
         for field in (
-            "research_credential",
             "implementation_credential",
             "issue_credential",
             "repository_credential",
@@ -194,7 +172,6 @@ class RunnerSettings(models.Model):
                 raise ValidationError({field: "Select an available credential."})
         for field, validator in (
             ("execution_policy", validate_execution_policy),
-            ("merge_profile", validate_merge_profile),
             ("setup_commands", validate_commands),
             ("validation_commands", validate_commands),
         ):
@@ -206,7 +183,7 @@ class RunnerSettings(models.Model):
                 validator(value)
             except ValidationError as exc:
                 raise ValidationError({field: exc.messages}) from None
-        for stage in ("research", "implementation"):
+        for stage in ("implementation",):
             try:
                 validate_backend_model(
                     getattr(self, f"{stage}_backend"), getattr(self, f"{stage}_model")

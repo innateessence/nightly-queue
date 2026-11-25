@@ -71,10 +71,11 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(set(services["runner"]["depends_on"]), {"app", "worker"})
         self.assertEqual(services["worker"]["healthcheck"]["test"][-1], "health")
 
-    def test_journal_volume_keeps_legacy_absolute_paths_accessible(self):
+    def test_runner_journal_has_one_canonical_mount(self):
         mounts = self.configuration()["services"]["runner"]["volumes"]
         targets = {entry["target"]: entry["source"] for entry in mounts}
-        self.assertEqual(targets["/var/lib/vibearr"], targets["/var/lib/coding-runner"])
+        self.assertEqual(targets["/var/lib/vibearr"], "runner-data")
+        self.assertEqual(list(targets.values()).count("runner-data"), 1)
 
     def test_runner_and_database_use_declared_named_volumes(self):
         for name, service in self.configuration()["services"].items():

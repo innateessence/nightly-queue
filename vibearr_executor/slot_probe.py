@@ -8,8 +8,6 @@ from pathlib import Path
 import socket
 import subprocess
 import time
-import urllib.error
-import urllib.request
 
 
 def main():
@@ -112,10 +110,6 @@ def main():
         raise AssertionError("Task exceeded the actual memory ceiling without OOM.")
     elif case == "flood":
         print("x" * (2 * 1024 * 1024), flush=True)
-    elif case == "credential":
-        secret = Path(os.environ["VIBEARR_BACKEND_SECRET_FILE"]).read_text()
-        print(secret, flush=True)
-        Path("/work/leaked-key.txt").write_text(secret)
     elif case == "pids":
         children = []
         try:
@@ -130,30 +124,6 @@ def main():
             assert error.errno == errno.EAGAIN
         print(json.dumps({"pid_exhausted": True}), flush=True)
         time.sleep(60)
-    elif case == "network":
-        proxy = os.environ.get("HTTPS_PROXY")
-        if os.environ["VIBEARR_PHASE"] == "validation":
-            assert not proxy
-        else:
-            target = (
-                "https://api.openai.com/v1/models"
-                if os.environ["VIBEARR_PHASE"] == "agent"
-                else "https://pypi.org/simple/"
-            )
-            opener = urllib.request.build_opener(
-                urllib.request.ProxyHandler({"https": proxy})
-            )
-            try:
-                with opener.open(target, timeout=15) as response:
-                    response.read(32)
-            except urllib.error.HTTPError:
-                pass
-            try:
-                opener.open("https://example.com/", timeout=5)
-            except urllib.error.URLError:
-                pass
-            else:
-                raise AssertionError("Worker proxy accepted an unregistered host.")
 
 
 if __name__ == "__main__":

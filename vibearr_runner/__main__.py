@@ -27,11 +27,11 @@ def main() -> int:
         signal.signal(signum, lambda *_: stop.set())
     try:
         client = Client(
-            getenv("NQ_URL", "http://vibearr:8000"),
-            getenv("NQ_RUNNER_API_TOKEN", ""),
+            getenv("VIBEARR_URL", "http://vibearr:8000"),
+            getenv("VIBEARR_RUNNER_API_TOKEN", ""),
             max_bytes=8388608,
         )
-        directory = Path(getenv("NQ_RUNNER_STATE_DIR", "/var/lib/coding-runner"))
+        directory = Path(getenv("VIBEARR_RUNNER_STATE_DIR", "/var/lib/vibearr"))
         with Journal(directory) as journal:
             maintenance = Maintenance(client, journal, directory / "workspaces")
             Controller(

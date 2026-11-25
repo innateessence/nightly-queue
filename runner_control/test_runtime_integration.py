@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 from django.test import LiveServerTestCase
 
-from coding_runner.client import AuthenticationError, Client
-from coding_runner.controller import Controller
-from coding_runner.journal import Journal
+from vibearr_runner.client import AuthenticationError, Client
+from vibearr_runner.controller import Controller
+from vibearr_runner.journal import Journal
 from projects.models import Project
 from work_queue.services import enqueue_item
 

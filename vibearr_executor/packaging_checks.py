@@ -80,7 +80,7 @@ def main():
 
     module.DistributionArtifactTests.run_command = recorded_command
     suite = unittest.defaultTestLoader.loadTestsFromModule(module)
-    if suite.countTestCases() != 4:
+    if suite.countTestCases() != 3:
         raise RuntimeError("Pinned packaging coverage changed.")
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful() or result.skipped:

@@ -76,7 +76,7 @@ def document_body(request, fields, limit):
                 str(token),
                 token.hex,
                 bearer,
-                request.headers.get("X-NQ-Controller-Secret", ""),
+                request.headers.get("X-Vibearr-Controller-Secret", ""),
             ],
         )
         if "document" in data and safe["document"] != data["document"]:
@@ -224,44 +224,3 @@ def plans(request, run_id):
             }
         )
     )
-
-
-def handoff_data(plan, context, *, bearer=""):
-    return {
-        "plan": document_data(plan, bearer=bearer),
-        "context": document_data(context, bearer=bearer),
-        "actions_require_approval": True,
-    }
-
-
-@runner_api_view("GET")
-def handoff_detail(request, run_id, operation_id):
-    def operation():
-        run = owned_run(request.runner_identity, run_id)
-        plan, context = plan_services.saved_handoff(run, operation_id)
-        return JsonResponse(handoff_data(plan, context, bearer=request_bearer(request)))
-
-    return run_response(operation)
-
-
-@runner_api_view("POST")
-def handoff(request, run_id):
-    data = document_body(
-        request,
-        ["claim_token", "operation_id", "context_id", "base_commit"],
-        MAX_PLAN_BYTES,
-    )
-    kwargs = {
-        "runner": request.runner_identity,
-        "run_id": run_id,
-        "claim_token": data["claim_token"],
-        "operation_id": data["operation_id"],
-        "context_id": uuid_field(data, "context_id"),
-        "base_commit": string_field(data, "base_commit", max_length=64),
-    }
-
-    def operation():
-        plan, context = plan_services.handoff(**kwargs)
-        return JsonResponse(handoff_data(plan, context, bearer=request_bearer(request)))
-
-    return run_response(operation)

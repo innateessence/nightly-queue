@@ -1,1 +1,0 @@
-"""Legacy Django project import."""

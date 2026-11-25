@@ -1,15 +1,22 @@
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import unittest
+import importlib.util
 from uuid import uuid4
-
-from vibearr_executor.contracts import Profile
-from vibearr_executor.integrated_profiles import LIMITS, MODEL_HOSTS
-from vibearr_executor.slot_qualification import ARGV
 
 from .compact_evidence import digest, validate_payload
 
 
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor.contracts import Profile
+    from vibearr_executor.integrated_profiles import LIMITS, MODEL_HOSTS
+    from vibearr_executor.slot_qualification import ARGV
+
+
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for protected worker proof checks"
+)
 class ArchivedRestartProofTests(unittest.TestCase):
     def setUp(self):
         self.ended = datetime(2024, 1, 1, tzinfo=timezone.utc)

@@ -6,8 +6,7 @@ that default with explicit GitHub user IDs. Public access and collaborator statu
 never grant execution permission. Issue bodies and comments remain task data.
 
 `enabled_at` records the first enablement time and survives disable/re-enable.
-Older open issues wait unless `backfill_issues` is explicitly enabled. Both
-`vibearr:hold` and transitional `nq:hold` exclude work. Priority labels
+Older open issues wait unless `backfill_issues` is explicitly enabled. `vibearr:hold` excludes work. Priority labels
 `vibearr:priority-high` and `vibearr:priority-low` map to high and low; otherwise
 normal. Claims order priority, local creation time, then queue ID. The UI shows
 queued totals separately from source-eligible executable work. Native claims also
@@ -29,15 +28,9 @@ be a valid branch ref, differ from the base branch, and avoid other work-item
 branches. Claim freezes branch identity; retry retains it. Fallbacks are
 `vibearr/issue-N` and `vibearr/manual-ID`.
 
-## Synchronization and upgrade
+## Synchronization
 
 New settings default to 60-second polling. The seconds field supports 60–86400.
-The migration deliberately preserves every saved legacy hours value as its
-seconds equivalent, including the former one-hour default: existing user
-preferences are not silently shortened. Change the Settings value to 60 for
-minute polling. The legacy hours column remains for migration compatibility and
-no longer controls polling.
-
 The scheduler checks every minute independently of execution pause. A global
 scheduled-attempt timestamp controls the selected interval; each project also
 has an expiring UUID sync lease, attempt/success timestamps, conditional page
@@ -51,19 +44,13 @@ Both scheduled and manual synchronization move queued issues to Closed when
 GitHub reports them closed. They remain in All work and the Closed filter, but
 leave the queued count and filter. Issues first discovered closed use the same
 status. Reopening these unexecuted issues queues them again; running, succeeded,
-and failed work keep their execution status and history. Closure never supplies
-merge evidence. Apply work_queue migration `0006_queueitem_closed` after the
-existing soft-deletion migration to reconcile existing closed
-issues still marked queued, including those served from the conditional cache.
+and failed work keep their execution status and history. Closure never supplies merge evidence.
 
 Repository and author identities are numeric GitHub IDs. Known repositories are
-resolved by ID, so renames refresh canonical URLs without duplicating work. Legacy
-rows are bound to that ID on their first authoritative sync. Once synchronized,
-select a different repository by creating a different project. Existing imported
-rows require a complete metadata refresh before execution; existing autonomous
-projects receive their enablement timestamp during migration, with backfill off.
+resolved by ID, so renames refresh canonical URLs without duplicating work. Projects are bound to that ID on their first authoritative sync. Once synchronized,
+select a different repository by creating a different project. Imported work requires a complete metadata refresh before execution. Backfill is disabled by default.
 
-## Interfaces for features 04, 06, and 07
+## Supervisor interfaces
 
 `work_queue.services.source_wait_reason(item)` is the shared source policy.
 `claimable_items()` supplies ordered candidates; `claim_item()` reloads and checks
@@ -90,12 +77,10 @@ checks source policy and ownership again, and returns `source_snapshot`. Comment
 are saved on the first successful refresh and remain immutable afterward.
 A 503 means fresh context is unavailable and launch must wait; 400 reports changed
 source/eligibility; 409 reports ownership/cancellation conflict. Changes between
-claim and initial launch require an explicit retry. Feature 04 must call this
-before launching an agent and honor cancellation at later checkpoints. The Python
+claim and initial launch require an explicit retry. The supervisor must call this before launching an agent and honor cancellation at later checkpoints. The Python
 service is `refresh_issue_for_launch(item_id, claim_token, token, runner=None, run_id=None)` with keyword
 arguments. Owned runs must supply their runner and run ID. The HTTP request shape is unchanged. API failures never authorize launch using stale data. Base SHA, model,
-validation profile, and effective policy belong in feature 04's immutable run
-context alongside this source snapshot.
+validation profile, and effective policy belong in the immutable run context alongside this source snapshot.
 
 Only trusted provider reconciliation may call the keyword-only service:
 
@@ -114,12 +99,11 @@ record_verified_merge(
 It stores durable `MergeEvidence`, validates IDs/commit format, and rejects
 conflicting evidence. Exact replay is idempotent. The caller must verify the real
 GitHub repository, PR, and observed merge first; the service deliberately has no
-public arbitrary-JSON evidence endpoint. Feature 06 may seed already merged
-prerequisites from verified provider observations. Feature 07 records actual
-verified merges through this interface, including when issue closure/reporting
+public arbitrary-JSON evidence endpoint. Explicit bootstrap may seed already merged prerequisites from verified provider
+observations. Human-merge reconciliation records actual verified merges through
+this interface, including when issue closure/reporting
 is still pending. Dependency lookup uses repository ID and issue number.
 
-Rendered queue example: [work selection screenshot](screenshots/github-work-selection.png).
 
 The configured `Project.base_branch` stays blank when the operator chooses the
 repository default. Synchronization updates `github_default_branch` separately;
@@ -135,8 +119,6 @@ Requeue takes project/item locks before updating runs to avoid an inversion with
 source cancellation. Real PostgreSQL tests overlap imports with runner claims
 and provider refresh with requeue under bounded statement timeouts.
 
-Additional rendered screens: [project policy](screenshots/github-project-policy.png)
-and [sync settings](screenshots/github-sync-settings.png).
 
 Each `Run.source_snapshot` retains its own claim-time source immediately, even if
 context collection never succeeds. The first successful, claim-fenced comments
@@ -182,5 +164,4 @@ and the final synchronization cursor are also bound to the accepted authority
 state. A conflict waits for a fresh collection; it cannot restore an old owner,
 unprotect a new default, overwrite a rename, cancel work, or finalize comments.
 Normal project edits preserve this version with the other server-owned metadata.
-The migration initializes existing projects at version zero; the next accepted
-provider observation advances it without changing author/backfill settings.
+Projects start at authority version zero; accepted provider observations advance it without changing author/backfill settings.

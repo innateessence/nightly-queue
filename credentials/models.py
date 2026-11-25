@@ -1,11 +1,6 @@
 import json
 
-from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.fernet import InvalidToken
-from cryptography.hazmat.primitives.serialization import (
-    load_pem_private_key,
-    load_ssh_private_key,
-)
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models, transaction
@@ -25,16 +20,12 @@ class Credential(models.Model):
 
     class Provider(models.TextChoices):
         GITHUB = "github", "GitHub"
-        GITLAB = "gitlab", "GitLab"
         CODEX = "codex", "Codex"
         CLAUDE = "claude", "Claude Code"
         OPENCODE = "opencode", "OpenCode"
 
     class Kind(models.TextChoices):
         TOKEN = "token", "Token"
-        SSH = "ssh", "SSH"
-        SECRET = "secret", "Secret (other)"
-        SESSION = "session", "Codex session (JSON)"
         CONNECTION = "connection", "OpenCode connection (JSON)"
         LOGIN = "login", "Runner subscription login"
 
@@ -99,60 +90,40 @@ class Credential(models.Model):
             )
 
     @sensitive_variables()
-    def set_secret(self, secret, passphrase=""):
+    def set_secret(self, secret):
         if not isinstance(secret, str) or not secret.strip():
             raise ValidationError({"secret": "Enter a secret value."})
-        if not isinstance(passphrase, str):
-            raise ValidationError({"passphrase": "Enter a text passphrase."})
-        if self.kind != self.Kind.SSH and passphrase:
-            raise ValidationError({"passphrase": "Only SSH keys use a passphrase."})
         self.validate_provider_kind()
-        if self.kind in (self.Kind.SESSION, self.Kind.CONNECTION):
+        if self.kind == self.Kind.CONNECTION:
             from .validation import validate_structured_secret
 
             validate_structured_secret(self.provider, self.kind, secret)
         elif self.kind == self.Kind.TOKEN:
             if any(character.isspace() for character in secret):
                 raise ValidationError({"secret": "Tokens cannot contain whitespace."})
-        elif self.kind == self.Kind.SSH:
-            self.validate_private_key(secret, passphrase)
         elif self.kind == self.Kind.LOGIN:
             if secret != "managed-subscription-login":
                 raise ValidationError(
                     {"secret": "Subscription login is managed inside the runner."}
                 )
-        elif self.kind != self.Kind.SECRET:
+        else:
             raise ValidationError({"kind": "Select a supported credential type."})
-        payload = json.dumps({"secret": secret, "passphrase": passphrase})
+        payload = json.dumps({"secret": secret})
         self.encrypted_payload = (
             credential_cipher().encrypt(payload.encode("utf-8")).decode("ascii")
         )
 
     def validate_provider_kind(self):
         allowed = {
-            self.Provider.GITHUB: (self.Kind.TOKEN, self.Kind.SSH, self.Kind.SECRET),
-            self.Provider.GITLAB: (self.Kind.TOKEN, self.Kind.SSH, self.Kind.SECRET),
-            self.Provider.CODEX: (self.Kind.TOKEN, self.Kind.SESSION, self.Kind.LOGIN),
-            self.Provider.CLAUDE: (self.Kind.TOKEN, self.Kind.LOGIN),
+            self.Provider.GITHUB: (self.Kind.TOKEN,),
+            self.Provider.CODEX: (self.Kind.LOGIN,),
+            self.Provider.CLAUDE: (self.Kind.LOGIN,),
             self.Provider.OPENCODE: (self.Kind.CONNECTION,),
         }
         if self.kind not in allowed.get(self.provider, ()):
             raise ValidationError(
                 {"kind": "Select a supported type for this provider."}
             )
-
-    @staticmethod
-    @sensitive_variables()
-    def validate_private_key(secret, passphrase):
-        password = passphrase.encode("utf-8") if passphrase else None
-        loader = load_pem_private_key
-        if secret.startswith("-----BEGIN OPENSSH PRIVATE KEY-----"):
-            loader = load_ssh_private_key
-        try:
-            loader(secret.encode("utf-8"), password=password)
-        except (ValueError, TypeError, UnsupportedAlgorithm):
-            message = "Enter a valid private key and its passphrase, if encrypted."
-            raise ValidationError({"secret": message}) from None
 
     @sensitive_variables()
     def get_secret(self):
@@ -165,7 +136,7 @@ class Credential(models.Model):
             ) from None
         try:
             value = json.loads(payload)
-            if not isinstance(value, dict) or set(value) != {"secret", "passphrase"}:
+            if not isinstance(value, dict) or set(value) != {"secret"}:
                 raise ValueError
             if not all(isinstance(entry, str) for entry in value.values()):
                 raise ValueError
@@ -227,17 +198,7 @@ class Credential(models.Model):
 
 
 class APISettings(models.Model):
-    class SyncInterval(models.IntegerChoices):
-        HOURLY = 1, "1h"
-        FOUR_HOURS = 4, "4h"
-        EIGHT_HOURS = 8, "8h"
-        TWELVE_HOURS = 12, "12h"
-        DAILY = 24, "24h"
-
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
-    auto_sync_interval_hours = models.PositiveSmallIntegerField(
-        choices=SyncInterval.choices, default=SyncInterval.HOURLY
-    )
     auto_sync_interval_seconds = models.PositiveIntegerField(
         default=60, validators=[MinValueValidator(60), MaxValueValidator(86400)]
     )
@@ -253,20 +214,12 @@ class APISettings(models.Model):
         related_name="github_api_settings",
         limit_choices_to={"provider": "github", "kind": "token"},
     )
-    gitlab_credential = models.ForeignKey(
-        Credential,
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="gitlab_api_settings",
-        limit_choices_to={"provider": "gitlab", "kind": "token"},
-    )
 
     def clean(self):
         super().clean()
         if self.pk != 1:
             raise ValidationError("Only one API settings record is allowed.")
-        for provider in (Credential.Provider.GITHUB, Credential.Provider.GITLAB):
+        for provider in (Credential.Provider.GITHUB,):
             field = f"{provider}_credential"
             credential = getattr(self, field)
             if credential is None:

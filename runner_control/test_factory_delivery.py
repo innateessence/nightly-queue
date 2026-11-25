@@ -74,7 +74,7 @@ class Provider:
         }
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class PublicationObservationTests(NativeProtocolMixin, TestCase):
     def setUp(self):
         super().setUp()

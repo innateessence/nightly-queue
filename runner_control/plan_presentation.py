@@ -129,18 +129,6 @@ def present_evidence(entry):
     return safe
 
 
-def present_approval(approval):
-    from .approvals import approval_data
-
-    try:
-        with transaction.atomic():
-            data = approval_data(approval)
-        safe, error = present_payload(approval.run, data)
-        return safe if safe is not None else {"decision_display": error}
-    except ValidationError:
-        return {"decision_display": REDACTION_UNAVAILABLE}
-
-
 def present_global_record(entry, configuration, *, field="report", run=None):
     safe = copy(entry)
     data, error = present_configuration_payload(
@@ -204,39 +192,6 @@ def present_configuration(configuration):
         "global": {},
         "projects": [],
     }
-
-
-def qualification_runs(entry):
-    from .models import Run
-
-    report = entry.evidence.get("live_report", {})
-    references = [report.get("success_run_id"), report.get("failure_run_id")]
-    references.extend(event.get("run_id") for event in entry.evidence.get("gates", []))
-    runs = []
-    for reference in set(value for value in references if isinstance(value, str)):
-        try:
-            run = (
-                Run.objects.select_related("item")
-                .filter(pk=reference, runner_id=entry.runner_id)
-                .first()
-            )
-        except (ValidationError, ValueError, TypeError):
-            continue
-        if run is not None:
-            runs.append(run)
-    return runs
-
-
-def present_release(entry, configuration):
-    safe = copy(entry)
-    fields = ("repository_url", "blocker", "authorization_note")
-    payload = [getattr(entry, field) for field in fields]
-    data, error = present_configuration_payload(
-        configuration, payload, runs=qualification_runs(entry)
-    )
-    for index, field in enumerate(fields):
-        setattr(safe, field, data[index] if data is not None else error)
-    return safe
 
 
 def form_presentation_error(form, configuration):

@@ -121,7 +121,7 @@ class Command(BaseCommand):
             if (
                 len(token) < 32
                 or any(value.isspace() for value in token)
-                or token == settings.NQ_API_TOKEN
+                or token == settings.VIBEARR_API_TOKEN
             ):
                 raise CommandError(
                     "The saved runner token must be dedicated and private."

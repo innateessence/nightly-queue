@@ -4,17 +4,15 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods
 
-from .configuration import configuration_for_settings, runner_settings, settings_values
+from .configuration import configuration_for_settings, runner_settings
 from .gate_models import RunnerGateEvidence
-from .models import ReleaseQualification, RunnerIdentity
+from .models import RunnerIdentity
 from .plan_presentation import (
     form_presentation_error,
     present_configuration,
     present_configuration_payload,
     present_gates,
-    present_release,
 )
-from .release import observe_settings
 from .services import lock_controller
 from .settings_forms import RunnerSettingsForm
 from .settings_models import RunnerSettings
@@ -77,12 +75,10 @@ def edit(request, settings_id=None):
         if settings_id
         else RunnerSettings(name="")
     )
-    before = settings_values(saved)
     data = request.POST if request.method == "POST" else None
     form = RunnerSettingsForm(data, instance=saved, prefix="runner")
     if request.method == "POST" and form.is_valid():
         form.save()
-        observe_settings(before, settings_values(saved), settings_id=saved.pk)
         messages.success(
             request,
             "Coding runner settings saved. Live execution remains release-gated.",
@@ -96,20 +92,13 @@ def edit(request, settings_id=None):
             {"pk": runner.pk, "name": name if name is not None else "Runner"}
         )
     evidence = RunnerGateEvidence.objects.select_related("runner")
-    qualifications = ReleaseQualification.objects.order_by("-created_at")
     if saved.pk == 1:
         evidence = evidence.exclude(runner__configuration__pk__gt=1)
-        qualifications = qualifications.exclude(runner__configuration__pk__gt=1)
     else:
         evidence = (
             evidence.filter(runner_id=saved.identity_id)
             if saved.identity_id
             else evidence.none()
-        )
-        qualifications = (
-            qualifications.filter(runner_id=saved.identity_id)
-            if saved.identity_id
-            else qualifications.none()
         )
     context = {
         "settings_id": saved.pk,
@@ -118,9 +107,6 @@ def edit(request, settings_id=None):
         "runner_configuration": present_configuration(configuration),
         "runner_gate_evidence": present_gates(evidence, configuration),
         "runner_identities": identities,
-        "release_qualifications": [
-            present_release(entry, configuration) for entry in qualifications[:20]
-        ],
     }
     response = render(request, "runner_control/configuration_edit.html", context)
     response["Cache-Control"] = "no-store"

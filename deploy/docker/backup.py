@@ -12,7 +12,6 @@ import subprocess
 from uuid import UUID, uuid4
 
 from .backup_files import (
-    COMPACT_VOLUMES,
     VOLUMES,
     capture,
     checksum,
@@ -28,17 +27,13 @@ RUNTIME = "compact-worker-v1"
 
 
 def backup_volumes(manifest):
-    if manifest.get("schema_version") == 2:
-        if manifest.get("runtime") != "integrated-runner-v1":
-            raise ValueError("Legacy backup runtime is invalid.")
-        return VOLUMES
     if (
         manifest.get("schema_version") != 3
         or manifest.get("runtime") != RUNTIME
-        or manifest.get("state_volumes") != list(COMPACT_VOLUMES)
+        or manifest.get("state_volumes") != list(VOLUMES)
     ):
-        raise ValueError("Compact backup state-volume mapping is invalid.")
-    return COMPACT_VOLUMES
+        raise ValueError("Vibearr backup state-volume mapping is invalid.")
+    return VOLUMES
 
 
 def write_json(path, value):
@@ -63,8 +58,8 @@ def connection(root):
     os.environ.update(
         PGHOST="postgres",
         PGPORT="5432",
-        PGUSER=os.environ.get("VIBEARR_POSTGRES_USER", "nightly_queue"),
-        PGDATABASE=os.environ.get("VIBEARR_POSTGRES_DB", "nightly_queue"),
+        PGUSER=os.environ.get("VIBEARR_POSTGRES_USER", "vibearr"),
+        PGDATABASE=os.environ.get("VIBEARR_POSTGRES_DB", "vibearr"),
         PGPASSWORD=password,
         PGCONNECT_TIMEOUT="10",
         PGOPTIONS="-c timezone=UTC -c extra_float_digits=3 -c statement_timeout=3600000",
@@ -136,7 +131,7 @@ def backup(quiesced):
         )
     connection(source)
     require_idle()
-    records = inventory(source, COMPACT_VOLUMES)
+    records = inventory(source, VOLUMES)
     state_size = sum(value["bytes"] for value in records) + len(records) * 8192
     database_size = int(sql("SELECT pg_database_size(current_database())"))
     required = state_size + database_size * 2 + 256 * 1024**2
@@ -161,7 +156,7 @@ def backup(quiesced):
         check=True,
         timeout=3600,
     )
-    records = capture(source, directory / "state.tar", COMPACT_VOLUMES)
+    records = capture(source, directory / "state.tar", VOLUMES)
     write_json(directory / "inventory.json", records)
     if before != fingerprint():
         raise ValueError(
@@ -170,7 +165,7 @@ def backup(quiesced):
     manifest = {
         "schema_version": 3,
         "runtime": RUNTIME,
-        "state_volumes": list(COMPACT_VOLUMES),
+        "state_volumes": list(VOLUMES),
         "backup_id": identity,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "database": {
@@ -231,10 +226,6 @@ def verified_backup(identity):
 def restore_files(identity):
     directory, manifest = verified_backup(identity)
     volumes = backup_volumes(manifest)
-    if volumes != COMPACT_VOLUMES:
-        raise ValueError(
-            "Restore legacy integrated snapshots with their original tools before an explicit compact migration."
-        )
     if any(Path("/restore-database").iterdir()):
         raise ValueError("Restore requires an empty dedicated PostgreSQL volume.")
     records = read_json(directory / "inventory.json")

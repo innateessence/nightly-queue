@@ -102,7 +102,7 @@ def main():
     parser.add_argument("action", choices=("on", "off", "status", "wait"))
     parser.add_argument("--timeout", type=int, default=300)
     options = parser.parse_args()
-    directory = Path(getenv("NQ_RUNNER_STATE_DIR", "/var/lib/vibearr"))
+    directory = Path(getenv("VIBEARR_RUNNER_STATE_DIR", "/var/lib/vibearr"))
     if not 1 <= options.timeout <= 3600:
         parser.error("Drain timeout must be between one second and one hour.")
     if options.action in {"on", "off"}:

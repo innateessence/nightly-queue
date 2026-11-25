@@ -364,7 +364,7 @@ def checked_factory_workspace(
     sources = [
         entry["payload"]
         for entry in evidence
-        if entry["kind"] in {"native_workspace", "native_revision"}
+        if entry["kind"] == "native_workspace"
         and entry["payload"].get("workspace") == workspace
         and entry["payload"].get("context_id") == context["id"]
         and entry["payload"].get("context_digest") == context["digest"]

@@ -134,7 +134,6 @@ def prepare_factory_runs(runs):
             "publication_observation",
             "verified_delivery",
             "native_workspace",
-            "native_revision",
             "native_validation",
         ],
         run_id__in=identities,
@@ -145,9 +144,9 @@ def prepare_factory_runs(runs):
         payload = entry.payload if isinstance(entry.payload, dict) else {}
         if entry.kind in {"publication_observation", "verified_delivery"}:
             publication[entry.run_id][entry.kind] = payload
-        if entry.kind in {"native_workspace", "native_revision"}:
+        if entry.kind in {"native_workspace"}:
             publication[entry.run_id]["candidate"] = payload
-        if entry.kind in {"native_workspace", "native_revision", "native_validation"}:
+        if entry.kind in {"native_workspace", "native_validation"}:
             evidence[entry.run_id].append(
                 {
                     "operation_id": str(entry.operation_id),

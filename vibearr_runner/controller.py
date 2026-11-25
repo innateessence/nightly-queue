@@ -11,7 +11,7 @@ from .client import (
 )
 from .journal import Journal, JournalError
 from .gates import GateEvaluator
-from .backend_registry import BackendRegistry, ScopedCredentials
+from .backend_registry import BackendRegistry
 from .recovery import RecoveryCoordinator, ReconciliationRequired
 from .lifecycle import Lifecycle
 
@@ -103,9 +103,7 @@ class Controller:
         configuration = self.client.configuration()
         self.check_shutdown()
         self.gates.adapters.update(
-            self.backends.usage_adapters(
-                configuration["accounts"], ScopedCredentials(self.client)
-            )
+            self.backends.usage_adapters(configuration["accounts"])
         )
         decision = self.gates.evaluate(
             processing_configuration(configuration),
@@ -135,7 +133,7 @@ class Controller:
         recovery.reconcile(state)
         self.check_shutdown()
         lifecycle = self.lifecycle_factory(
-            self.client, self.journal, self.backends, self.checkpoint, stop=self.stop
+            self.client, self.journal, self.checkpoint, stop=self.stop
         )
         local = state.get("run")
         if local:
@@ -173,9 +171,7 @@ class Controller:
             return "drained"
         self.check_shutdown()
         self.gates.adapters.update(
-            self.backends.usage_adapters(
-                configuration["accounts"], ScopedCredentials(self.client)
-            )
+            self.backends.usage_adapters(configuration["accounts"])
         )
         decision = self.gates.evaluate(
             processing_configuration(configuration), state, checkpoint="claim"
@@ -284,7 +280,6 @@ class Controller:
             lifecycle = self.lifecycle_factory(
                 self.client,
                 self.journal,
-                self.backends,
                 self.checkpoint,
                 stop=self.stop,
             )
@@ -300,16 +295,3 @@ class Controller:
     def check_shutdown(self) -> None:
         if self.stop.is_set():
             raise ControllerStopped
-
-
-def journaled_request(
-    client: Client, journal: Journal, state, run_id: str, kind: str, path: str, payload
-):
-    """An unresolved operation blocks all further writes, including after a crash."""
-    journal.prepare(state, run_id, kind, payload)
-    result = client.request("POST", path, payload)
-    operation = state["operation"]
-    operation["status"] = "received"
-    operation["response"] = result
-    journal.save(state)
-    return result

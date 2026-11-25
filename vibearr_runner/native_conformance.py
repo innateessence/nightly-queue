@@ -13,7 +13,7 @@ import signal
 import subprocess
 import tempfile
 import time
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from .native_sessions import NativeSession, NativeSessionError
 
@@ -480,59 +480,6 @@ class FactoryNativeAdapter:
         if source_access(self.role) == "read_only" and outcome["source"] != source:
             raise NativeSessionError("Read-only factory role changed candidate source.")
         return {**outcome, "role": self.role, "role_result": structured["payload"]}
-
-
-def probe_source_access(source_directory, source_file, private_files, *, role):
-    directory, source = Path(source_directory), Path(source_file)
-    access = source_access(role)
-    if not directory.is_dir() or not source.is_file() or not private_files:
-        raise NativeSessionError(
-            "Permission probes require registered source and private sentinels."
-        )
-    source.read_bytes()
-    writable = True
-    try:
-        descriptor = os.open(source, os.O_RDWR | os.O_NOFOLLOW)
-        os.close(descriptor)
-    except PermissionError:
-        writable = False
-    target = directory / (".factory-permission-" + str(uuid4()))
-    creatable = True
-    try:
-        target.write_bytes(b"permission probe\n")
-        target.unlink()
-    except PermissionError:
-        creatable = False
-    own_source = source.stat().st_uid == os.geteuid()
-    own_directory = directory.stat().st_uid == os.geteuid()
-    private_denied = True
-    for name in private_files:
-        try:
-            path = Path(name)
-            if path.stat().st_uid == os.geteuid():
-                private_denied = False
-            path.read_bytes()
-            private_denied = False
-        except PermissionError:
-            continue
-        except FileNotFoundError:
-            private_denied = False
-    denied = not (writable or creatable or own_source or own_directory)
-    checks = {
-        "source_write_denied": denied,
-        "candidate_write_only": writable and creatable and private_denied,
-        "control_paths_denied": private_denied,
-        "credentials_scoped": private_denied,
-    }
-    key = "candidate_write_only" if access == "read_write" else "source_write_denied"
-    return {
-        "schema_version": 1,
-        "kind": "process-permission-observation",
-        "role": role,
-        "source_access": access,
-        "passed": checks[key] and private_denied,
-        "checks": checks,
-    }
 
 
 def executable_probe(provider, *, directory=Path("/usr/local/bin"), timeout=15):

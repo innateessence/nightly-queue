@@ -342,9 +342,7 @@ class NativeLifecycle:
                     raise NativeFailure(
                         "Installed runtime changed; stop the original native attempt."
                     )
-            if self.native.get("context") and not self.native.get(
-                "delivery_recovery_generation"
-            ):
+            if self.native.get("context"):
                 account = self.native["context"]["document"]["account"]
                 grant = self.secret("implementation")
                 if (
@@ -440,15 +438,6 @@ class NativeLifecycle:
         from .native_contract import NativeContractError
 
         self.state = state
-        recovery = self.run["run"].get("delivery_recovery")
-        if (
-            recovery
-            and (state.get("native") or {}).get("delivery_recovery_generation")
-            != recovery["generation"]
-        ):
-            raise ReconciliationRequired(
-                "Delivery recovery requires its explicit original-workspace resume command."
-            )
         if "native" not in state:
             controls = self.snapshot["global"]
             claimed_at = datetime.fromisoformat(self.run["run"]["created_at"])
@@ -485,14 +474,6 @@ class NativeLifecycle:
             if (state.get("request") or {}).get("status") == "pending":
                 pending = state["request"]
                 self.metadata_request(pending["path"], pending["payload"])
-            if self.native.get("merge", {}).get("dispatched"):
-                from .native_merge import NativeMerge
-
-                if self.native["merge"].get("completed"):
-                    if self.native["delivery"].get("checkpoint") == "reporting_pending":
-                        return self.delivery()
-                    return NativeMerge(self).finalize()
-                return NativeMerge(self).reconcile()
             if self.native.get("failure"):
                 return self.finish_failure()
             if self.run["run"].get("cancellation_requested_at"):
@@ -782,10 +763,6 @@ class NativeLifecycle:
         return "\n\n".join(parts)
 
     def agent(self):
-        if self.native.get("delivery_recovery_generation"):
-            raise NativeFailure(
-                "Delivery-only recovery cannot start or repair an agent."
-            )
         from .native_contract import (
             agent_intent,
             agent_result,
@@ -1046,10 +1023,6 @@ class NativeLifecycle:
             from .factory_reviews import FactoryReviewLoop
 
             FactoryReviewLoop(FactoryLifecycle(self)).candidate_imported(source)
-        if self.native.get("publication_revision"):
-            from .native_revision import NativeRevision
-
-            NativeRevision(self).activate_candidate()
         self.save()
         return "continue"
 
@@ -1225,10 +1198,6 @@ class NativeLifecycle:
         return self.native[key]
 
     def repair(self, observed):
-        if self.native.get("delivery_recovery_generation"):
-            raise NativeFailure(
-                "Independent validation failed during delivery-only recovery; no model repair is allowed."
-            )
         if self.native["attempt"] >= min(2, self.policy.repair_limit):
             raise NativeFailure(
                 "Independent validation failed; the bounded repair allowance is exhausted."
@@ -1255,38 +1224,6 @@ class NativeLifecycle:
         from .native_delivery import NativeDelivery
 
         return NativeDelivery(self).step()
-
-    def recovery_delivery(self):
-        from .native_merge import NativeMerge
-        from .native_revision import NativeRevision
-        from .merge_github import exact_pull
-
-        if not self.checkpoint(force_source=True):
-            return "wait"
-        merge = NativeMerge(self)
-        github = merge.client()
-        raw = github.pull(merge.workspace["repository"], merge.pull["number"])
-        exact_pull(raw, merge.workspace, merge.pull["number"])
-        if (
-            raw.get("state") != "open"
-            or raw.get("merged")
-            or raw.get("draft") is not False
-        ):
-            raise NativeFailure(
-                "Delivery recovery requires the original open ready PR."
-            )
-        if github.base_sha(merge.workspace) != merge.workspace["base_revision"]:
-            return NativeRevision(self).prepare(
-                "base_update", "Base advanced while the original delivery was stopped."
-            )
-        self.native["phase"] = "delivery"
-        self.save()
-        return "continue"
-
-    def publication_revision(self):
-        from .native_revision import NativeRevision
-
-        return NativeRevision(self).step()
 
     def finish_failure(self):
         self.terminate()
@@ -1343,10 +1280,6 @@ class NativeLifecycle:
 
     def terminate(self):
         from .native_contract import termination_record, intent_operations
-        from .native_merge import NativeMerge
-
-        if self.native.get("merge"):
-            NativeMerge(self).terminal()
 
         prepared = self.native.get("metadata", {}).get("termination")
         if prepared:

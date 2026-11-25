@@ -8,8 +8,8 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from coding_runner.test_native_delivery import GitHub, Transport
-from coding_runner import test_native_lifecycle as lifecycle_fixture
+from vibearr_runner.test_native_delivery import GitHub, Transport
+from vibearr_runner import test_native_lifecycle as lifecycle_fixture
 from credentials.test_models import TEST_KEY
 from vibearr_runner.client import (
     APIError,
@@ -54,7 +54,7 @@ class APIBridge:
     shutil.which("git"),
     "Native supervisor integration requires the runner Git boundary",
 )
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class NativeSupervisionTests(NativeProtocolMixin, TestCase):
     def setUp(self):
         super().setUp()

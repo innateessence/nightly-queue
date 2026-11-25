@@ -39,16 +39,6 @@ urlpatterns = [
         name="runner_operator_retry",
     ),
     path(
-        "runner/release/authorize/",
-        operations_views.authorize_release,
-        name="runner_release_authorize",
-    ),
-    path(
-        "runner/release/<uuid:qualification_id>/revoke/",
-        operations_views.revoke_release,
-        name="runner_release_revoke",
-    ),
-    path(
         "runner/runs/<uuid:run_id>/cancel/",
         operations_views.cancel,
         name="runner_operator_cancel",

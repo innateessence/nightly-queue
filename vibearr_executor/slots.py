@@ -787,9 +787,7 @@ class SlotRuntime:
             return self.public(record)
 
     def capabilities(self):
-        from .slot_safety import capabilities
-
-        return capabilities(self)
+        raise Rejected("Use the dedicated worker's boot-bound capabilities.")
 
     def profile_for(self, data):
         if (
@@ -800,26 +798,6 @@ class SlotRuntime:
             if data.get("profile_id") == self.probe_profile.profile_id:
                 return self.probe_profile
         return self.profiles.get(data.get("profile_id"))
-
-    def qualification(self, action):
-        from .slot_qualification import qualify, prepare_restart, progress
-
-        if action == "status":
-            return progress(self)
-        if action == "run" and progress(self)["state"] in {"completed", "failed"}:
-            return progress(self)
-        if not self.qualification_lock.acquire(blocking=False):
-            return progress(self)
-        try:
-            if self.active:
-                from .slot_qualification import restart_witness
-
-                if action == "restart":
-                    return restart_witness(self)
-                raise Conflict("Stop active work before qualifying this slot.")
-            return prepare_restart(self) if action == "restart" else qualify(self)
-        finally:
-            self.qualification_lock.release()
 
     def dependency_chunk(self, operation_id, offset, limit):
         from .retention import require_available

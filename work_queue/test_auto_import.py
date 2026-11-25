@@ -106,7 +106,7 @@ class GitHubClientTests(SimpleTestCase):
         )
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class AutoImportTests(TestCase):
     def setUp(self):
         metadata = patch(
@@ -197,7 +197,7 @@ class AutoImportTests(TestCase):
         self.assertEqual(APISettings.objects.get().last_auto_sync_at, last_sync)
         fetch.assert_called_once()
 
-    @override_settings(NQ_CREDENTIAL_KEY="")
+    @override_settings(VIBEARR_CREDENTIAL_KEY="")
     @patch("work_queue.tasks.repository_issues")
     def test_skipped_scheduled_sync_does_not_advance_timer(self, fetch):
         with self.assertLogs("work_queue.tasks", level="ERROR"):
@@ -354,7 +354,7 @@ class AutoImportTests(TestCase):
         self.assertTrue(import_auto_issues()["skipped"])
         fetch.assert_not_called()
 
-    @override_settings(NQ_CREDENTIAL_KEY="")
+    @override_settings(VIBEARR_CREDENTIAL_KEY="")
     @patch("work_queue.tasks.repository_issues")
     def test_missing_encryption_key_does_not_expose_secret(self, fetch):
         with self.assertLogs("work_queue.tasks", level="ERROR") as logs:

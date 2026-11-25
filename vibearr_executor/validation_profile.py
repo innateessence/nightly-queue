@@ -162,80 +162,11 @@ def validate_dependency_provenance(
     parent: ValidationProfile | None = None,
     run_id: str | None = None,
 ) -> dict:
-    if (
-        isinstance(value, dict)
-        and type(value.get("schema_version")) is int
-        and value["schema_version"] == 2
-    ):
-        from .slot_provenance import validate
+    from .slot_provenance import validate
 
-        return validate(value, profile, parent=parent, run_id=run_id)
-    from .contracts import identifier, sha256
-    from .qualification import REQUIRED_CHECKS
-
-    expected = {
-        "schema_version",
-        "build_id",
-        "run_id",
-        "source_digest",
-        "requirements_digest",
-        "dependency_digest",
-        "parent_image",
-        "parent_profile_digest",
-        "parent_runtime_binding",
-        "setup_operation_id",
-        "setup_log_digest",
-        "derived_image",
-        "qualification_binding_digest",
-        "qualification_report_digest",
-        "boundary_checks",
-    }
-    if (
-        not isinstance(value, dict)
-        or set(value) != expected
-        or type(value["schema_version"]) is not int
-        or value["schema_version"] != 1
-    ):
-        raise Rejected("Supply complete protected dependency-build provenance.")
-    for key in ("build_id", "run_id", "setup_operation_id"):
-        identifier(value[key])
-    for key in (
-        "source_digest",
-        "requirements_digest",
-        "dependency_digest",
-        "parent_profile_digest",
-        "parent_runtime_binding",
-        "setup_log_digest",
-        "qualification_binding_digest",
-        "qualification_report_digest",
-    ):
-        sha256(value[key])
-    for key in ("parent_image", "derived_image"):
-        if not isinstance(value[key], str) or not value[key].startswith("sha256:"):
-            raise Rejected("Dependency provenance requires immutable image identities.")
-        sha256(value[key][7:])
-    if (
-        value["derived_image"] != profile.image
-        or value["requirements_digest"] != profile.dependency_digest
-        or value["setup_operation_id"] != value["build_id"]
-    ):
-        raise Rejected(
-            "Dependency provenance differs from the selected validation image."
-        )
-    if not isinstance(value["boundary_checks"], list) or sorted(
-        value["boundary_checks"]
-    ) != sorted(REQUIRED_CHECKS):
-        raise Rejected("Dependency image lacks complete boundary qualification.")
-    if parent is not None and (
-        value["parent_image"] != parent.image
-        or value["parent_profile_digest"] != parent.digest
-    ):
-        raise Rejected(
-            "Dependency image parent differs from the configured trusted image."
-        )
-    if run_id is not None and value["run_id"] != run_id:
-        raise Rejected("Dependency images are scoped to their original run.")
-    return value
+    if not isinstance(value, dict):
+        raise Rejected("Supply complete protected dependency-artifact provenance.")
+    return validate(value, profile, parent=parent, run_id=run_id)
 
 
 def main():

@@ -10,7 +10,7 @@ class QueueViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.project = Project.objects.create(
-            name="Nightly", repository_url="https://github.com/example/nightly-queue"
+            name="Vibearr", repository_url="https://github.com/example/vibearr"
         )
 
     def create_item(self, **kwargs):

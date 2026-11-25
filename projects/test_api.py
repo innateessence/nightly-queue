@@ -7,7 +7,7 @@ from django.urls import reverse
 from .models import Project
 
 
-@override_settings(NQ_API_TOKEN="test-token")
+@override_settings(VIBEARR_API_TOKEN="test-token")
 class ProjectAPITests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -53,7 +53,7 @@ class ProjectAPITests(TestCase):
         response = self.client.get(reverse("api_projects"))
         self.assertEqual(response.status_code, 401)
 
-    @override_settings(NQ_API_TOKEN="")
+    @override_settings(VIBEARR_API_TOKEN="")
     def test_missing_server_token_disables_api(self):
         response = self.client.get(reverse("api_projects"))
         self.assertEqual(response.status_code, 503)

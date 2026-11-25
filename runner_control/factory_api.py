@@ -54,7 +54,7 @@ def artifacts(request, run_id):
         )
         control_secrets = [
             request.headers.get("X-Vibearr-Controller-Secret", ""),
-            request.headers.get("X-NQ-Controller-Secret", ""),
+            request.headers.get("X-Vibearr-Controller-Secret", ""),
         ]
         supplied = [data.get("document"), data.get("reason", "")]
         if redact_payload(supplied, control_secrets) != supplied:

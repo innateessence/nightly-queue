@@ -27,10 +27,6 @@ class RunnerSettingsForm(forms.ModelForm):
             )
         return identity
 
-    def clean_merge_profile(self):
-        value = self.cleaned_data.get("merge_profile")
-        return {} if value is None else value
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["name"].required = True
@@ -41,10 +37,10 @@ class RunnerSettingsForm(forms.ModelForm):
         self.fields["schedule"].help_text = (
             "Choose a reusable schedule. Changes on the Schedules page apply to every assigned runner."
         )
-        for stage in ("research", "implementation"):
+        for stage in ("implementation",):
             self.fields[f"{stage}_model"].widget.attrs["list"] = "runner-claude-models"
             self.fields[f"{stage}_model"].help_text = (
-                "Select the configured backend model. Native adapters must qualify before execution. Separate research settings are retained for history and do not gate native execution."
+                "Select the configured backend model. Native adapters must qualify before execution."
             )
             self.fields[f"{stage}_credential"].queryset = Credential.objects.filter(
                 provider__in=BACKENDS
@@ -60,12 +56,11 @@ class RunnerSettingsForm(forms.ModelForm):
                 "setup_commands",
                 "validation_commands",
                 "execution_policy",
-                "merge_profile",
             )
         }
         help_texts = {
             "workspace_retention_days": "Remove only acknowledged terminal workspaces; active, waiting, and uncertain reporting remain protected.",
-            "plan_retention_days": "Expire context and plan contents after this many days. Approval context and reconciliation evidence remain protected; history keeps tombstones.",
+            "plan_retention_days": "Expire context and plan contents after this many days. Reconciliation evidence remains protected; history keeps tombstones.",
             "log_retention_days": "Expire protected local logs and uploaded artifacts for acknowledged terminal runs. Keep delivery, validation, stage, and recovery summaries.",
             "enabled": "Execution stays release-gated until live integration verification succeeds.",
             "paused": "Pause current work at the next safe checkpoint and prevent new claims.",
@@ -73,13 +68,11 @@ class RunnerSettingsForm(forms.ModelForm):
             "minimum_remaining_usage_percent": "40 permits work only while more than 40% remains. Zero still blocks exhausted accounts.",
             "setup_commands": "JSON list of setup commands, restricted to the configured isolated task policy.",
             "execution_policy": "Versioned native execution limits. Task content cannot change this policy. Runtime and agent installation are still required.",
-            "merge_profile": "Trusted required workflows and optional review producers. Required for automatic merge; leave unset for PR-only delivery.",
             "validation_commands": "JSON list of required validation commands.",
         }
         widgets = {
             "setup_commands": forms.Textarea(attrs={"rows": 3}),
             "validation_commands": forms.Textarea(attrs={"rows": 3}),
-            "research_instructions": forms.Textarea(attrs={"rows": 4}),
             "implementation_instructions": forms.Textarea(attrs={"rows": 4}),
         }
 
@@ -122,7 +115,7 @@ class ProjectRunnerSettingsForm(forms.Form):
                         Credential.objects.filter(provider__in=BACKENDS).defer(
                             "encrypted_payload"
                         )
-                        if key.startswith(("research", "implementation"))
+                        if key.startswith(("implementation",))
                         else Credential.objects.filter(
                             provider="github", kind="token"
                         ).defer("encrypted_payload")
@@ -139,7 +132,6 @@ class ProjectRunnerSettingsForm(forms.Form):
                 )
             elif key.endswith("commands") or key in {
                 "execution_policy",
-                "merge_profile",
                 "factory",
             }:
                 value = ConfigurationJSONField(

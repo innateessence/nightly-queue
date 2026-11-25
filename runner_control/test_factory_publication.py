@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 from django.test import TestCase, override_settings
 
 from credentials.test_models import TEST_KEY
-from coding_runner.test_factory_delivery import review_chain
+from vibearr_runner.test_factory_delivery import review_chain
 from vibearr_runner.factory_routing import default_configuration, route
 from vibearr_runner.native_contract import digest
 
@@ -16,7 +16,7 @@ from .services import RunConflict
 from .test_native_protocol import NativeProtocolMixin
 
 
-@override_settings(NQ_CREDENTIAL_KEY=TEST_KEY)
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class ServerFactoryPublicationTests(NativeProtocolMixin, TestCase):
     def setUp(self):
         super().setUp()

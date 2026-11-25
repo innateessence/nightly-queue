@@ -20,7 +20,6 @@ class CredentialAdmin(admin.ModelAdmin):
         "provider",
         "kind",
         "secret",
-        "passphrase",
         "id",
         "created_at",
         "updated_at",
@@ -54,7 +53,7 @@ class CredentialAdmin(admin.ModelAdmin):
             return (*self.readonly_fields, "kind")
         return self.readonly_fields
 
-    @method_decorator(sensitive_post_parameters("secret", "passphrase"))
+    @method_decorator(sensitive_post_parameters("secret"))
     def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
         return super().changeform_view(request, object_id, form_url, extra_context)
 

@@ -98,7 +98,7 @@ class Client:
         }
         if self.controller_secret is not None:
             headers["X-Vibearr-Controller-Secret"] = self.controller_secret
-            headers["X-NQ-Controller-Secret"] = self.controller_secret
+            headers["X-Vibearr-Controller-Secret"] = self.controller_secret
         if body is not None:
             headers["Content-Type"] = "application/json"
         request = Request(self.url + path, data=body, headers=headers, method=method)

@@ -25,7 +25,7 @@ from .native_contract import (
 from .native_evidence import digest as valid_digest
 from .merge_github import MergeGitHub, MergeRepair, MergeWait
 from .native_workspace import atomic_bytes
-from .self_acceptance import collect_run, evidence_entries, timestamp
+from .publication_acceptance import collect_run, evidence_entries, timestamp
 from .workspaces import private_directory, validate_branch
 
 
@@ -1396,7 +1396,8 @@ def main(argv=None):
     parser.add_argument("--stack-report", type=Path)
     parser.add_argument("--failure-evidence", type=Path)
     runner_directory = os.getenv(
-        "VIBEARR_RUNNER_STATE_DIR", os.getenv("NQ_RUNNER_STATE_DIR", "/var/lib/vibearr")
+        "VIBEARR_RUNNER_STATE_DIR",
+        os.getenv("VIBEARR_RUNNER_STATE_DIR", "/var/lib/vibearr"),
     )
     parser.add_argument(
         "--controller-journal",

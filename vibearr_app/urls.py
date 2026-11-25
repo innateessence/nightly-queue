@@ -21,7 +21,6 @@ from .health import health
 urlpatterns = [
     path("", include("system_logs.urls")),
     path("health/", health, name="health"),
-    path("", include("runner_control.approval_urls")),
     path("admin/", admin.site.urls),
     path("", include("credentials.urls")),
     path("", include("projects.urls")),

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vibearr-runner"
 version = "0.1.0"
-description = "Standalone vibearr supervisor"
+description = "Standalone Vibearr supervisor"
 requires-python = ">=3.12"
 dependencies = []
 
@@ -14,8 +14,10 @@ native-runtime = ["vibearr-executor==0.1.0"]
 
 [project.scripts]
 vibearr-runner = "vibearr_runner.__main__:main"
-coding-runner = "vibearr_runner.__main__:main"
 
 [tool.setuptools]
-packages = ["vibearr_runner", "coding_runner"]
-package-dir = {vibearr_runner = ".", coding_runner = "../coding_runner"}
+packages = ["vibearr_runner"]
+package-dir = {vibearr_runner = "."}
+
+[tool.setuptools.package-data]
+vibearr_runner = ["acceptance/test_*.py"]

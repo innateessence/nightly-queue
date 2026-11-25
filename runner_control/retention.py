@@ -47,8 +47,6 @@ def reported_terminal(run):
 def eligible(run):
     if not reported_terminal(run) or not run.finished_at:
         return False
-    if run.approvals.filter(decision="pending").exists():
-        return False
     retention = RunRetention.objects.filter(run=run).first()
     return bool(retention and retention.reporting_acknowledged_at)
 
@@ -87,7 +85,7 @@ def eligible_runs(runner):
         runner=runner,
         finished_at__isnull=False,
         retention__reporting_acknowledged_at__isnull=False,
-    ).exclude(approvals__decision="pending")
+    )
 
 
 def purge_candidates(runner, now=None):
@@ -96,7 +94,6 @@ def purge_candidates(runner, now=None):
     documents = models.Q(
         finished_at__lte=now - timedelta(days=effective["document_days"]),
         retention__documents_removed_at__isnull=True,
-        approvals__isnull=True,
     )
     logs = models.Q(
         finished_at__lte=now - timedelta(days=effective["log_days"]),
@@ -168,14 +165,12 @@ def purge_run(run_id, now=None):
     lock_controller()
     run = Run.objects.select_for_update().get(pk=run_id)
     if not eligible(run):
-        raise RunConflict(
-            "Active, unacknowledged, or approval-pending runs cannot be purged."
-        )
+        raise RunConflict("Active or unacknowledged runs cannot be purged.")
     now = now or timezone.now()
     effective = policy(run.runner)
     retention = RunRetention.objects.select_for_update().get(run=run)
     if run.finished_at <= now - timedelta(days=effective["document_days"]):
-        if not run.approvals.exists() and retention.documents_removed_at is None:
+        if retention.documents_removed_at is None:
             plans = PlanVersion.objects.filter(run=run)
             contexts = ContextSnapshot.objects.filter(run=run)
             artifacts = run.factory_artifacts.all()

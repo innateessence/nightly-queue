@@ -15,7 +15,7 @@ from .services import RunConflict, lock_controller, owned_run, uuid_field, verif
 @runner_api_view("POST")
 def bind_controller(request):
     read_body(request, [])
-    proof = request.headers.get("X-NQ-Controller-Secret", "")
+    proof = request.headers.get("X-Vibearr-Controller-Secret", "")
     if len(proof) != 64 or any(
         character not in "0123456789abcdef" for character in proof
     ):
@@ -90,7 +90,6 @@ def cancellation(request, run_id):
 @runner_api_view("GET")
 def operation_detail(request, run_id, operation_id):
     from .api import evidence_data
-    from .approvals import approval_data
     from .plan_api import document_data, request_bearer
 
     def operation():
@@ -115,22 +114,10 @@ def operation_detail(request, run_id, operation_id):
                     }
                 }
             )
-        approval = run.approvals.filter(operation_id=operation_id).first()
-        if approval:
-            return JsonResponse({"response": {"approval": approval_data(approval)}})
         evidence = run.evidence.filter(operation_id=operation_id).first()
         if evidence is None:
             return JsonResponse({"error": "Operation not recorded."}, status=404)
-        if evidence.kind == "plan_handoff":
-            plan = run.plans.get(pk=evidence.payload["plan_id"])
-            context = run.contexts.get(pk=evidence.payload["context_id"])
-            response = {
-                "plan": document_data(plan, bearer=request_bearer(request)),
-                "context": document_data(context, bearer=request_bearer(request)),
-                "actions_require_approval": True,
-            }
-        else:
-            response = {"evidence": evidence_data(evidence)}
+        response = {"evidence": evidence_data(evidence)}
         return JsonResponse({"response": response})
 
     return run_response(operation)

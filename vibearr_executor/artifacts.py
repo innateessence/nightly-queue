@@ -4,7 +4,7 @@ import stat
 import tarfile
 from pathlib import Path, PurePosixPath
 
-from .contracts import MAX_ARCHIVE, MAX_FILES, Rejected, canonical, digest
+from .contracts import MAX_ARCHIVE, MAX_FILES, Rejected, digest
 
 
 def safe_path(name: str) -> str:
@@ -130,61 +130,3 @@ def result_manifest(source: bytes, result: bytes) -> dict:
         "files": inventory(result),
         "deleted": sorted(set(before) - set(after)),
     }
-
-
-def import_result(
-    directory: Path, source: bytes, result: bytes, manifest: dict
-) -> None:
-    if canonical(result_manifest(source, result)) != canonical(manifest):
-        raise Rejected("Result digest or file inventory does not match.")
-    before, after = unpack(source), unpack(result)
-    # Import only after the caller has fenced this trusted checkout from other writers.
-    for name in set(before) | set(after):
-        target = directory / name
-        for parent in (target, *target.parents):
-            if parent == directory.parent:
-                break
-            if parent.is_symlink():
-                raise Rejected("Trusted checkout contains a linked import path.")
-        if target.is_dir():
-            contents = [path for path in target.rglob("*") if not path.is_dir()]
-            deleted = set(before) - set(after)
-            if any(
-                path.is_symlink()
-                or path.relative_to(directory).as_posix() not in deleted
-                for path in contents
-            ):
-                raise Rejected("Trusted checkout has a conflicting directory.")
-        if name in before:
-            mode, content = before[name]
-            if not target.exists() or target.read_bytes() != content:
-                raise Rejected(
-                    "Trusted checkout no longer matches the source artifact."
-                )
-            if (0o755 if target.stat().st_mode & 0o111 else 0o644) != mode:
-                raise Rejected("Trusted checkout file mode changed.")
-        elif target.exists() and not target.is_dir():
-            raise Rejected("Result would overwrite an unrelated file.")
-    for name in sorted(set(before) - set(after), reverse=True):
-        target = directory / name
-        target.unlink()
-        parent = target.parent
-        while parent != directory:
-            try:
-                parent.rmdir()
-            except OSError:
-                break
-            parent = parent.parent
-    for name, (mode, content) in after.items():
-        target = directory / name
-        if target.is_dir():
-            for parent in sorted(target.rglob("*"), reverse=True):
-                parent.rmdir()
-            target.rmdir()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(
-            target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, mode
-        )
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(content)
-        target.chmod(mode)

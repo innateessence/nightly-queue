@@ -6,7 +6,7 @@ from django.views.decorators.debug import sensitive_variables
 
 @sensitive_variables("key")
 def credential_cipher():
-    key = settings.NQ_CREDENTIAL_KEY
+    key = settings.VIBEARR_CREDENTIAL_KEY
     if not key:
         raise ImproperlyConfigured(
             "Configure VIBEARR_CREDENTIAL_KEY to store or use credentials."

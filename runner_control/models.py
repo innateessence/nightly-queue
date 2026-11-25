@@ -20,20 +20,6 @@ class RunnerController(models.Model):
     generation = models.PositiveBigIntegerField(default=0)
 
 
-class RepositoryMergeFence(models.Model):
-    repository_id = models.PositiveBigIntegerField(unique=True)
-    run = models.ForeignKey(
-        "Run", on_delete=models.PROTECT, related_name="merge_fences"
-    )
-    publication_id = models.UUIDField()
-    intent_id = models.UUIDField()
-    head_sha = models.CharField(max_length=64)
-    base_sha = models.CharField(max_length=64)
-    state = models.CharField(max_length=20, default="pending")
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-
 class Run(models.Model):
     class State(models.TextChoices):
         ACTIVE = "active", "Active"
@@ -126,65 +112,10 @@ class RunEvidence(models.Model):
         ]
 
 
-class ActionApproval(models.Model):
-    class Decision(models.TextChoices):
-        PENDING = "pending", "Awaiting human decision"
-        APPROVED = "approved", "Approved"
-        DENIED = "denied", "Denied"
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    run = models.ForeignKey(Run, on_delete=models.PROTECT, related_name="approvals")
-    operation_id = models.UUIDField()
-    action = models.JSONField()
-    binding_digest = models.CharField(max_length=64, editable=False)
-    decision = models.CharField(
-        max_length=10, choices=Decision.choices, default=Decision.PENDING
-    )
-    decision_note = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    decided_at = models.DateTimeField(null=True, blank=True)
-    consumed_at = models.DateTimeField(null=True, blank=True)
-    execution_id = models.UUIDField(null=True, blank=True)
-
-    class Meta:
-        ordering = ["created_at", "pk"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["run", "operation_id"], name="runner_approval_operation"
-            )
-        ]
-
-
 from .settings_models import ProjectRunnerSettings, RunnerSettings  # noqa: F401, E402
 from .settings_models import RunnerSchedule  # noqa: F401, E402
 from .gate_models import RunnerGateEvidence  # noqa: F401, E402
 from .plan_models import ContextSnapshot, PlanVersion  # noqa: F401, E402
-from .plan_models import ImmutableQuerySet  # noqa: E402
 from .factory_models import FactoryArtifact  # noqa: F401, E402
-from .operations_models import ReleaseQualification, RunRetention  # noqa: F401, E402
+from .operations_models import RunRetention  # noqa: F401, E402
 from .operations_models import RunnerHealth  # noqa: F401, E402
-
-
-class NativeDeliveryRecovery(models.Model):
-    objects = ImmutableQuerySet.as_manager()
-    run = models.OneToOneField(
-        Run, on_delete=models.PROTECT, related_name="delivery_recovery"
-    )
-    operation_id = models.UUIDField(unique=True, editable=False)
-    request = models.JSONField(editable=False)
-    archive = models.JSONField(editable=False)
-    resume = models.JSONField(editable=False)
-    claim_token = models.UUIDField(editable=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def save(self, *args, **kwargs):
-        if not self._state.adding:
-            from django.core.exceptions import ValidationError
-
-            raise ValidationError("Delivery recovery history is immutable.")
-        return super().save(*args, **kwargs)
-
-    def delete(self, *args, **kwargs):
-        from django.core.exceptions import ValidationError
-
-        raise ValidationError("Delivery recovery history is immutable.")

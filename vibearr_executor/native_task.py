@@ -115,8 +115,8 @@ def main():
 
         database = urlsplit(os.environ["DATABASE_URL"])
         os.environ.update(
-            POSTGRES_HOST=database.hostname or "",
-            POSTGRES_PORT=str(database.port or 5432),
+            VIBEARR_POSTGRES_HOST=database.hostname or "",
+            VIBEARR_POSTGRES_PORT=str(database.port or 5432),
             VIBEARR_POSTGRES_DB="task",
             VIBEARR_POSTGRES_USER="task",
             VIBEARR_POSTGRES_PASSWORD=database.password or "",

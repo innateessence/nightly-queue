@@ -35,7 +35,7 @@ class RunnerSettingsTests(TestCase):
 
     def test_sync_interval_does_not_change_configuration_revision(self):
         original = configuration_document()
-        APISettings.objects.create(auto_sync_interval_hours=12)
+        APISettings.objects.create(auto_sync_interval_seconds=43200)
         updated = configuration_document()
         self.assertEqual(original, updated)
 
@@ -131,7 +131,7 @@ class RunnerSettingsTests(TestCase):
 
     def test_model_rejects_null_override_instructions(self):
         overrides = {
-            "research_instructions": {
+            "implementation_instructions": {
                 "mode": "replace",
                 "value": "research\x00instructions",
             }
@@ -173,18 +173,20 @@ class RunnerSettingsTests(TestCase):
 
     def test_override_inheritance_replace_and_clear(self):
         saved = RunnerSettings.objects.get(pk=1)
-        saved.research_model = "global-model"
+        saved.implementation_model = "global-model"
         saved.implementation_instructions = "global instructions"
         saved.save()
         overrides = {
-            "research_model": {"mode": "replace", "value": "project-model"},
+            "implementation_model": {"mode": "replace", "value": "project-model"},
             "implementation_instructions": {"mode": "clear"},
         }
         ProjectRunnerSettings.objects.create(project=self.project, overrides=overrides)
         effective = effective_project_configuration(self.project)
-        self.assertEqual(effective["effective"]["research_model"], "project-model")
+        self.assertEqual(
+            effective["effective"]["implementation_model"], "project-model"
+        )
         self.assertEqual(effective["effective"]["implementation_instructions"], "")
-        self.assertEqual(effective["sources"]["research_backend"], "global")
+        self.assertEqual(effective["sources"]["implementation_backend"], "global")
 
     def test_blank_project_inputs_inherit(self):
         form = ProjectRunnerSettingsForm({})
@@ -199,10 +201,10 @@ class RunnerSettingsTests(TestCase):
 
     def test_replace_requires_value(self):
         form = ProjectRunnerSettingsForm(
-            {"research_model_mode": "replace", "research_model": ""}
+            {"implementation_model_mode": "replace", "implementation_model": ""}
         )
         self.assertFalse(form.is_valid())
-        self.assertIn("research_model", form.errors)
+        self.assertIn("implementation_model", form.errors)
 
     def test_override_rejects_unknown_fields(self):
         with self.assertRaises(ValidationError):
@@ -246,14 +248,14 @@ class RunnerSettingsTests(TestCase):
             {
                 "name": "New",
                 "repository_url": "https://github.com/example/new",
-                "runner-research_model_mode": "replace",
-                "runner-research_model": "project-model",
+                "runner-implementation_model_mode": "replace",
+                "runner-implementation_model": "project-model",
             },
         )
         self.assertEqual(response.status_code, 302)
         project = Project.objects.get(name="New")
         self.assertEqual(
-            project.runner_settings.overrides["research_model"]["value"],
+            project.runner_settings.overrides["implementation_model"]["value"],
             "project-model",
         )
 
@@ -264,7 +266,7 @@ class RunnerSettingsTests(TestCase):
         self.assertContains(response, "release-gated")
 
     def test_settings_post_does_not_modify_import_settings(self):
-        APISettings.objects.create(auto_sync_interval_hours=12)
+        APISettings.objects.create(auto_sync_interval_seconds=43200)
         saved = RunnerSettings()
         data = {
             f"runner-{field.name}": field.value_from_object(saved)
@@ -285,7 +287,9 @@ class RunnerSettingsTests(TestCase):
         response = self.client.post("/coding-runners/1/", data)
         self.assertEqual(response.status_code, 302)
         self.assertTrue(RunnerSettings.objects.get(pk=1).paused)
-        self.assertEqual(APISettings.objects.get(pk=1).auto_sync_interval_hours, 12)
+        self.assertEqual(
+            APISettings.objects.get(pk=1).auto_sync_interval_seconds, 43200
+        )
 
 
 class ConfiguredProjectMixin:
@@ -300,20 +304,16 @@ class ConfiguredProjectMixin:
             kind="token",
             encrypted_payload="encrypted-reference",
         )
-        # Backend credential creation is owned by the following feature branch.
         self.backend = Credential(
             name="Backend",
             provider="codex",
-            kind="token",
+            kind="login",
             encrypted_payload="backend-encrypted-reference",
         )
         Credential.objects.bulk_create([self.backend])
         saved = RunnerSettings.objects.get(pk=1)
-        saved.research_backend = "codex"
         saved.implementation_backend = "codex"
-        saved.research_model = "research-model"
         saved.implementation_model = "implementation-model"
-        saved.research_credential = self.backend
         saved.implementation_credential = self.backend
         saved.issue_credential = self.github
         saved.repository_credential = self.github
@@ -367,13 +367,15 @@ class ConfigurationWriteConcurrencyTests(ConfiguredProjectMixin, TransactionTest
     def test_global_write_waits_for_claim_snapshot(self):
         def writer():
             saved = RunnerSettings.objects.get(pk=1)
-            saved.research_model = "future-model"
+            saved.implementation_model = "future-model"
             saved.save()
 
         snapshot = self.assert_write_waits_for_snapshot(writer)
-        self.assertEqual(snapshot["effective"]["research_model"], "research-model")
         self.assertEqual(
-            configuration_document()["global"]["research_model"], "future-model"
+            snapshot["effective"]["implementation_model"], "implementation-model"
+        )
+        self.assertEqual(
+            configuration_document()["global"]["implementation_model"], "future-model"
         )
 
     def test_override_write_waits_for_claim_snapshot(self):
@@ -381,14 +383,16 @@ class ConfigurationWriteConcurrencyTests(ConfiguredProjectMixin, TransactionTest
             ProjectRunnerSettings.objects.create(
                 project=self.project,
                 overrides={
-                    "research_model": {"mode": "replace", "value": "future-model"}
+                    "implementation_model": {"mode": "replace", "value": "future-model"}
                 },
             )
 
         snapshot = self.assert_write_waits_for_snapshot(writer)
-        self.assertEqual(snapshot["effective"]["research_model"], "research-model")
+        self.assertEqual(
+            snapshot["effective"]["implementation_model"], "implementation-model"
+        )
         effective = effective_project_configuration(self.project)
-        self.assertEqual(effective["effective"]["research_model"], "future-model")
+        self.assertEqual(effective["effective"]["implementation_model"], "future-model")
 
     def test_project_write_waits_for_claim_snapshot(self):
         def writer():
@@ -423,10 +427,12 @@ class EffectiveConfigurationTests(ConfiguredProjectTestCase):
                 self.project, configuration_document()["revision"]
             )
         saved = RunnerSettings.objects.get(pk=1)
-        saved.research_model = "next-model"
+        saved.implementation_model = "next-model"
         saved.paused = True
         saved.save()
-        self.assertEqual(snapshot["effective"]["research_model"], "research-model")
+        self.assertEqual(
+            snapshot["effective"]["implementation_model"], "implementation-model"
+        )
         self.assertFalse(snapshot["global"]["paused"])
         self.assertNotEqual(revision, configuration_document()["revision"])
         self.assertTrue(configuration_document()["global"]["paused"])

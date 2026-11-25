@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from .artifacts import extract, import_result, pack, result_manifest, snapshot, unpack
+from .artifacts import pack, snapshot, unpack
 from .contracts import Rejected
 
 
@@ -79,64 +79,3 @@ class ArchiveTests(unittest.TestCase):
             os.link(root / "first", root / "second")
             with self.assertRaises(Rejected):
                 snapshot(root)
-
-    def test_import_preserves_additions_deletions_and_modes(self):
-        before = pack({"delete": (0o644, b"old"), "change": (0o644, b"old")})
-        after = pack({"add": (0o755, b"new"), "change": (0o755, b"changed")})
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            extract(before, root)
-            (root / ".git").mkdir()
-            (root / ".git" / "config").write_text("trusted")
-            import_result(root, before, after, result_manifest(before, after))
-            self.assertFalse((root / "delete").exists())
-            self.assertEqual((root / "change").read_bytes(), b"changed")
-            self.assertEqual((root / "add").stat().st_mode & 0o777, 0o755)
-            self.assertEqual((root / ".git" / "config").read_text(), "trusted")
-
-    def test_import_rejects_digest_changes_before_writes(self):
-        before = pack({"file": (0o644, b"old")})
-        after = pack({"file": (0o644, b"new")})
-        manifest = result_manifest(before, after)
-        manifest["files"][0]["sha256"] = "0" * 64
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            extract(before, root)
-            with self.assertRaises(Rejected):
-                import_result(root, before, after, manifest)
-            self.assertEqual((root / "file").read_bytes(), b"old")
-
-    def test_import_rejects_preexisting_symlink_parent(self):
-        before = pack({})
-        after = pack({"linked/file": (0o644, b"new")})
-        with (
-            tempfile.TemporaryDirectory() as temporary,
-            tempfile.TemporaryDirectory() as other,
-        ):
-            root = Path(temporary)
-            (root / "linked").symlink_to(other, target_is_directory=True)
-            with self.assertRaises(Rejected):
-                import_result(root, before, after, result_manifest(before, after))
-            self.assertFalse((Path(other) / "file").exists())
-
-    def test_file_directory_transitions_are_preserved(self):
-        cases = [
-            ({"a": (0o644, b"old")}, {"a/b": (0o644, b"new")}),
-            ({"a/b": (0o644, b"old")}, {"a": (0o644, b"new")}),
-        ]
-        for before_files, after_files in cases:
-            before, after = pack(before_files), pack(after_files)
-            with tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                extract(before, root)
-                import_result(root, before, after, result_manifest(before, after))
-                self.assertEqual(unpack(snapshot(root)), after_files)
-
-    def test_conflicting_untracked_file_is_preserved(self):
-        before, after = pack({}), pack({"extra": (0o644, b"new")})
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root / "extra").write_text("unrelated")
-            with self.assertRaises(Rejected):
-                import_result(root, before, after, result_manifest(before, after))
-            self.assertEqual((root / "extra").read_text(), "unrelated")

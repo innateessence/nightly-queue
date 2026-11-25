@@ -2,7 +2,7 @@ import json
 from unittest.mock import patch
 from uuid import uuid4
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from projects.models import Project
@@ -10,8 +10,11 @@ from work_queue.models import QueueItem
 from work_queue.services import enqueue_item, requeue_items
 
 from .auth import token_digest
-from .models import Run, RunnerIdentity
+from .models import ContextSnapshot, Run, RunnerIdentity
 from .recovery_services import request_cancellation
+from .test_native_protocol import NativeProtocolMixin
+from credentials.test_models import TEST_KEY
+from django.db import models
 
 
 class ControllerOwnershipTests(TestCase):
@@ -40,7 +43,7 @@ class ControllerOwnershipTests(TestCase):
         )
 
     def bind(self):
-        self.client.defaults["HTTP_X_NQ_CONTROLLER_SECRET"] = self.proof
+        self.client.defaults["HTTP_X_VIBEARR_CONTROLLER_SECRET"] = self.proof
         self.assertEqual(self.post("runner_controller").status_code, 200)
 
     def claim(self):
@@ -69,7 +72,7 @@ class ControllerOwnershipTests(TestCase):
     def test_second_volume_cannot_bind_recover_or_finish(self):
         self.bind()
         token = self.claim()
-        self.client.defaults["HTTP_X_NQ_CONTROLLER_SECRET"] = "b" * 64
+        self.client.defaults["HTTP_X_VIBEARR_CONTROLLER_SECRET"] = "b" * 64
         self.assertEqual(self.post("runner_controller").status_code, 409)
         self.assertEqual(self.post("runner_recover", run=True).status_code, 409)
         self.assertEqual(
@@ -82,7 +85,7 @@ class ControllerOwnershipTests(TestCase):
     def test_revoked_bearer_after_authentication_cannot_bind_volume(self):
         from .services import lock_controller
 
-        self.client.defaults["HTTP_X_NQ_CONTROLLER_SECRET"] = self.proof
+        self.client.defaults["HTTP_X_VIBEARR_CONTROLLER_SECRET"] = self.proof
 
         def revoke_before_binding(runner):
             RunnerIdentity.objects.filter(pk=runner.pk).update(enabled=False)
@@ -177,89 +180,53 @@ class ControllerOwnershipTests(TestCase):
         )
 
 
-class OperationLookupTests(TestCase):
+@override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
+class OperationLookupTests(NativeProtocolMixin, TestCase):
     def setUp(self):
-        from .test_plans import ContextPlanAPITests
-
-        ContextPlanAPITests.setUp(self)
-
-    def context(self):
-        from coding_runner.context import manual_context
-        from coding_runner.test_plans import BASE
-        from .test_plans import ContextPlanAPITests
-
-        return ContextPlanAPITests.post(
-            self,
-            "runner_contexts",
-            {
-                "document": manual_context(self.claimed),
-                "base_commit": BASE,
-                "resolved_base_branch": "main",
-                "reason": "Inspect",
-            },
-        )
+        super().setUp()
+        self.prepare_context()
 
     def lookup(self, operation_id):
         return self.client.get(
-            reverse("runner_operation", args=[self.run_id, operation_id])
+            reverse("runner_operation", args=[self.run.pk, operation_id])
         )
 
     def test_context_operation_recovers_exact_immutable_response(self):
-        response = self.context()
-        context = response.json()["context"]
-        recovered = self.lookup(context["operation_id"])
+        response = self.client.get(
+            reverse("runner_context_detail", args=[self.run.pk, self.context.pk])
+        )
+        recovered = self.lookup(self.context.operation_id)
         self.assertEqual(recovered.status_code, 200)
         self.assertEqual(recovered.json()["response"], response.json())
 
-    def test_operation_lookup_redacts_current_bearer_from_saved_document(self):
-        from coding_runner.context import manual_context
-        from coding_runner.test_plans import BASE
-        from .test_plans import ContextPlanAPITests
-
-        document = manual_context(self.claimed)
+    def test_operation_lookup_redacts_a_new_current_bearer(self):
+        document = dict(self.context.document)
         future_token = "future-runner-token"
-        document["title"] = future_token
-        self.item.title = future_token
-        self.item.save(update_fields=["title"])
-        response = ContextPlanAPITests.post(
-            self,
-            "runner_contexts",
-            {
-                "document": document,
-                "base_commit": BASE,
-                "resolved_base_branch": "main",
-                "reason": "Inspect",
-            },
+        document["acceptance_criteria"] = [future_token]
+        models.QuerySet.update(
+            ContextSnapshot.objects.filter(pk=self.context.pk), document=document
         )
-        self.assertEqual(response.status_code, 200, response.content)
-        context = response.json()["context"]
         RunnerIdentity.objects.filter(pk=self.runner.pk).update(
             token_digest=token_digest(future_token)
         )
-        self.client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {future_token}"
-        recovered = self.lookup(context["operation_id"])
+        self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer " + future_token
+        recovered = self.lookup(self.context.operation_id)
         self.assertEqual(recovered.status_code, 200)
         self.assertNotIn(future_token, recovered.content.decode())
         self.assertTrue(recovered.json()["response"]["context"]["presentation_only"])
 
     def test_plan_operation_recovers_exact_response(self):
-        from coding_runner.test_plans import proposed_plan
-        from .test_plans import ContextPlanAPITests
-
-        context = self.context().json()["context"]
-        response = ContextPlanAPITests.post(
-            self,
-            "runner_plans",
-            {"document": proposed_plan(context), "reason": "Save plan"},
+        plan = self.run.plans.get()
+        response = self.client.get(
+            reverse("runner_plan_document", args=[self.run.pk, plan.pk])
         )
-        plan = response.json()["plan"]
         self.assertEqual(
-            self.lookup(plan["operation_id"]).json()["response"], response.json()
+            self.lookup(plan.operation_id).json()["response"], response.json()
         )
 
     def test_unknown_operation_is_proven_absent(self):
         self.assertEqual(self.lookup(uuid4()).status_code, 404)
 
     def test_operation_lookup_requires_volume_proof(self):
-        self.client.defaults.pop("HTTP_X_NQ_CONTROLLER_SECRET")
+        self.client.defaults.pop("HTTP_X_VIBEARR_CONTROLLER_SECRET")
         self.assertEqual(self.lookup(uuid4()).status_code, 409)

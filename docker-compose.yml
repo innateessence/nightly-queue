@@ -1,4 +1,4 @@
-name: "${COMPOSE_PROJECT_NAME:-nightly-queue}"
+name: "${COMPOSE_PROJECT_NAME:-vibearr}"
 
 x-security: &security
   read_only: true
@@ -24,14 +24,14 @@ services:
     environment:
       DJANGO_DEBUG: "False"
       DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-*}"
-      VIBEARR_POSTGRES_DB: "${VIBEARR_POSTGRES_DB-${POSTGRES_DB-nightly_queue}}"
-      VIBEARR_POSTGRES_USER: "${VIBEARR_POSTGRES_USER-${POSTGRES_USER-nightly_queue}}"
-      VIBEARR_POSTGRES_PASSWORD: "${VIBEARR_POSTGRES_PASSWORD-${POSTGRES_PASSWORD-}}"
-      VIBEARR_API_TOKEN: "${VIBEARR_API_TOKEN-${NQ_API_TOKEN-}}"
-      VIBEARR_CREDENTIAL_KEY: "${VIBEARR_CREDENTIAL_KEY-${NQ_CREDENTIAL_KEY-}}"
+      VIBEARR_POSTGRES_DB: "${VIBEARR_POSTGRES_DB:-vibearr}"
+      VIBEARR_POSTGRES_USER: "${VIBEARR_POSTGRES_USER:-vibearr}"
+      VIBEARR_POSTGRES_PASSWORD: "${VIBEARR_POSTGRES_PASSWORD-}"
+      VIBEARR_API_TOKEN: "${VIBEARR_API_TOKEN-}"
+      VIBEARR_CREDENTIAL_KEY: "${VIBEARR_CREDENTIAL_KEY-}"
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY-}"
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
+      VIBEARR_POSTGRES_HOST: postgres
+      VIBEARR_POSTGRES_PORT: "5432"
       VIBEARR_RUNTIME_PROTOCOL: compact-worker-v1
       VIBEARR_RUNNER_NAME: "${VIBEARR_RUNNER_NAME:-docker-runner}"
     ports: ["${VIBEARR_BIND:-127.0.0.1}:${PORT:-7777}:8000"]
@@ -63,8 +63,8 @@ services:
     cpus: 1
     entrypoint: [sh, -c, 'until test -s /run/vibearr/database/password; do sleep 1; done; exec docker-entrypoint.sh postgres']
     environment:
-      POSTGRES_DB: "${VIBEARR_POSTGRES_DB-${POSTGRES_DB-nightly_queue}}"
-      POSTGRES_USER: "${VIBEARR_POSTGRES_USER-${POSTGRES_USER-nightly_queue}}"
+      POSTGRES_DB: "${VIBEARR_POSTGRES_DB:-vibearr}"
+      POSTGRES_USER: "${VIBEARR_POSTGRES_USER:-vibearr}"
       POSTGRES_PASSWORD_FILE: /run/vibearr/database/password
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -102,7 +102,6 @@ services:
       VIBEARR_MEDIATION_CONTROLLER_TOKEN_FILE: /var/lib/vibearr/mediation-controller-token
     volumes:
       - runner-data:/var/lib/vibearr
-      - runner-data:/var/lib/coding-runner
       - runner-secrets:/run/vibearr/runner
       - worker-secrets:/run/vibearr/worker:ro
       - runner-logins:/logins
@@ -168,13 +167,12 @@ networks:
 
 volumes:
   postgres-data:
-    name: "${VIBEARR_DATA_PROJECT:-${COMPOSE_PROJECT_NAME:-nightly-queue}}_postgres-data"
+    name: "${VIBEARR_DATA_PROJECT:-${COMPOSE_PROJECT_NAME:-vibearr}}_postgres-data"
   application-secrets:
   database-secrets:
   runner-secrets:
   runner-data:
-    name: "${VIBEARR_DATA_PROJECT:-${COMPOSE_PROJECT_NAME:-nightly-queue}}_runner-data"
-  runner-control:
+    name: "${VIBEARR_DATA_PROJECT:-${COMPOSE_PROJECT_NAME:-vibearr}}_runner-data"
   runner-logins:
   worker-control:
   worker-secrets:

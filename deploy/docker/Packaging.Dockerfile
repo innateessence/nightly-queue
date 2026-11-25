@@ -6,7 +6,6 @@ FROM ${TOOLS_IMAGE} AS tools
 FROM ${WORKER_IMAGE}
 COPY --from=tools /usr/local/bin/actionlint /usr/local/bin/actionlint
 COPY vibearr_runner /opt/executor/vibearr_runner
-COPY coding_runner /opt/executor/coding_runner
 COPY deploy /opt/executor/deploy
 COPY vibearr/test_distributions.py /opt/validation/distribution_checks.py
 COPY .github/actionlint.yaml /opt/validation/actionlint.yaml

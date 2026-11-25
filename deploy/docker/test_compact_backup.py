@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import tempfile
 import stat
@@ -7,8 +8,8 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from .backup import backup_volumes
-from .backup_files import COMPACT_VOLUMES, VOLUMES, capture, inventory, restore
+from .backup import backup_volumes, connection
+from .backup_files import VOLUMES, capture, inventory, restore
 from .worker_recovery import recover, registered_channel
 
 
@@ -18,7 +19,7 @@ class CompactBackupTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.source, self.target = self.root / "source", self.root / "target"
-        for volume in COMPACT_VOLUMES:
+        for volume in VOLUMES:
             (self.source / volume).mkdir(parents=True)
             (self.target / volume).mkdir(parents=True)
 
@@ -27,42 +28,61 @@ class CompactBackupTests(unittest.TestCase):
         (self.source / "runner-logins/selected").write_text("private selected login")
         (self.source / "worker-secrets/control-token").write_text("a" * 64)
         archive = self.root / "state.tar"
-        records = capture(self.source, archive, COMPACT_VOLUMES)
-        restore(archive, records, self.target, COMPACT_VOLUMES)
-        self.assertEqual(inventory(self.target, COMPACT_VOLUMES), records)
+        records = capture(self.source, archive, VOLUMES)
+        restore(archive, records, self.target, VOLUMES)
+        self.assertEqual(inventory(self.target, VOLUMES), records)
         self.assertEqual(
             (self.target / "runner-logins/selected").read_text(),
             "private selected login",
         )
-        self.assertFalse((self.target / "runner-control").exists())
+        self.assertEqual({path.name for path in self.target.iterdir()}, set(VOLUMES))
 
-    def test_legacy_schema_is_not_relabelled_as_compact(self):
-        legacy = {"schema_version": 2, "runtime": "integrated-runner-v1"}
-        self.assertEqual(backup_volumes(legacy), VOLUMES)
-        legacy.update(schema_version=3, runtime="compact-worker-v1")
+    def test_unsupported_schema_is_rejected(self):
+        manifest = {
+            "schema_version": 2,
+            "runtime": "compact-worker-v1",
+            "state_volumes": list(VOLUMES),
+        }
         with self.assertRaisesRegex(ValueError, "mapping"):
-            backup_volumes(legacy)
+            backup_volumes(manifest)
 
     def test_compact_manifest_requires_exact_active_volume_mapping(self):
         manifest = {
             "schema_version": 3,
             "runtime": "compact-worker-v1",
-            "state_volumes": list(COMPACT_VOLUMES),
+            "state_volumes": list(VOLUMES),
         }
-        self.assertEqual(backup_volumes(manifest), COMPACT_VOLUMES)
-        manifest["state_volumes"].append("runner-control")
+        self.assertEqual(backup_volumes(manifest), VOLUMES)
+        manifest["state_volumes"].append("unregistered-volume")
         with self.assertRaisesRegex(ValueError, "mapping"):
             backup_volumes(manifest)
 
     def test_wrong_volume_archive_is_rejected_before_restore(self):
-        legacy = self.root / "legacy"
-        for volume in VOLUMES:
-            (legacy / volume).mkdir(parents=True)
-        archive = self.root / "legacy.tar"
-        records = capture(legacy, archive)
+        unrelated = self.root / "unrelated"
+        volumes = (*VOLUMES[:-1], "unregistered-control")
+        for volume in volumes:
+            (unrelated / volume).mkdir(parents=True)
+        archive = self.root / "unrelated.tar"
+        records = capture(unrelated, archive, volumes)
         with self.assertRaises(ValueError):
-            restore(archive, records, self.target, COMPACT_VOLUMES)
+            restore(archive, records, self.target)
         self.assertEqual(list((self.target / "worker-control").iterdir()), [])
+
+
+class BackupConnectionTests(unittest.TestCase):
+    def test_fresh_connection_uses_vibearr_database_and_user(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            secrets = root / "database-secrets"
+            secrets.mkdir()
+            (secrets / "password").write_text("private database password")
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch("deploy.docker.backup.sql", return_value="170000"),
+            ):
+                connection(root)
+                self.assertEqual(os.environ["PGDATABASE"], "vibearr")
+                self.assertEqual(os.environ["PGUSER"], "vibearr")
 
 
 class WorkerChannelModeTests(unittest.TestCase):

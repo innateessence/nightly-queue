@@ -2,9 +2,7 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from django.db import connection
-from django.db.migrations.executor import MigrationExecutor
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.urls import reverse
 
 from credentials.models import APISettings
@@ -13,9 +11,8 @@ from work_queue.services import enqueue_item
 
 from .auth import token_digest
 from .configuration import configuration_document, settings_values
-from .execution_policy import current_native_policy
 from .models import Run, RunnerIdentity
-from .native_services import authorize
+from .native_services import authorize, lock_scope
 from .services import RunConflict, claim_run
 from .settings_models import RunnerSettings, RunnerSchedule
 from .test_settings import ConfiguredProjectTestCase
@@ -251,16 +248,13 @@ class MultipleRunnerExecutionTests(ConfiguredProjectTestCase):
             configuration_revision=configuration_document(self.runner)["revision"],
         )
         self.assertEqual(
-            authorize(run).digest, run.configuration_snapshot["policy_digest"]
-        )
-        self.assertEqual(
-            current_native_policy(run, run.item.claim_token).digest,
+            authorize(*lock_scope(run, run.item.claim_token)).digest,
             run.configuration_snapshot["policy_digest"],
         )
         self.settings.paused = True
         self.settings.save()
         with self.assertRaisesMessage(RunConflict, "disabled or paused"):
-            authorize(run)
+            authorize(*lock_scope(run, run.item.claim_token))
 
     def test_assignment_change_fences_native_execution(self):
         enqueue_item(project=self.project, title="Active")
@@ -272,36 +266,4 @@ class MultipleRunnerExecutionTests(ConfiguredProjectTestCase):
         self.settings.identity = None
         self.settings.save()
         with self.assertRaisesMessage(RunConflict, "assignment changed"):
-            authorize(run)
-
-
-class MultipleRunnerMigrationTests(TransactionTestCase):
-    def restore_schema(self):
-        executor = MigrationExecutor(connection)
-        executor.migrate(executor.loader.graph.leaf_nodes())
-
-    def test_migration_preserves_schedule_and_ids_but_disables_old_processing(self):
-        self.addCleanup(self.restore_schema)
-        target = [("runner_control", "0013_nativedeliveryrecovery")]
-        executor = MigrationExecutor(connection)
-        executor.migrate(target)
-        apps = executor.loader.project_state(target).apps
-        legacy = apps.get_model("runner_control", "RunnerSettings")
-        windows = [{"days": [0], "start": "22:00", "end": "06:00"}]
-        legacy.objects.update_or_create(
-            pk=1,
-            defaults={
-                "enabled": True,
-                "schedule_mode": "windows",
-                "timezone": "America/Los_Angeles",
-                "windows": windows,
-            },
-        )
-        self.restore_schema()
-        saved = RunnerSettings.objects.get(pk=1)
-        self.assertFalse(saved.enabled)
-        self.assertEqual(saved.schedule.windows, windows)
-        self.assertEqual(saved.schedule.timezone, "America/Los_Angeles")
-        self.assertEqual(saved.name, "Default runner")
-        additional = RunnerSettings.objects.create(name="Additional")
-        self.assertGreater(additional.pk, 1)
+            authorize(*lock_scope(run, run.item.claim_token))
