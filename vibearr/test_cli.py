@@ -7,12 +7,15 @@ from unittest import TestCase
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
-from nq.cli import NoRedirects, main, positive_id, request_api, validate_server_url
+from vibearr.cli import NoRedirects, main, positive_id, request_api, validate_server_url
 
 
 class CLITests(TestCase):
     def setUp(self):
-        values = {"NQ_API_TOKEN": "test-token", "NQ_URL": "http://localhost:8000"}
+        values = {
+            "VIBEARR_API_TOKEN": "test-token",
+            "VIBEARR_URL": "http://localhost:8000",
+        }
         environment = patch.dict("os.environ", values, clear=True)
         environment.start()
         self.addCleanup(environment.stop)
@@ -29,7 +32,7 @@ class CLITests(TestCase):
             self.run_cli(argv)
         self.assertEqual(raised.exception.code, 2)
 
-    @patch("nq.cli.request_api")
+    @patch("vibearr.cli.request_api")
     def test_add_sends_project_and_instructions(self, request):
         item = {"id": 42, "project": {"id": 12}, "title": "Add export"}
         request.return_value = {"item": item}
@@ -44,7 +47,7 @@ class CLITests(TestCase):
         url = "http://localhost:8000"
         request.assert_called_once_with(url, "test-token", "items/", expected)
 
-    @patch("nq.cli.request_api")
+    @patch("vibearr.cli.request_api")
     def test_add_reports_created_item(self, request):
         item = {"id": 42, "project": {"id": 12}, "title": "Add export"}
         request.return_value = {"item": item}
@@ -53,7 +56,7 @@ class CLITests(TestCase):
         self.assertIn("Queued item #42 for project #12: Add export", output)
         self.assertEqual(errors, "")
 
-    @patch("nq.cli.request_api")
+    @patch("vibearr.cli.request_api")
     def test_projects_lists_existing_ids(self, request):
         project = {
             "id": 12,
@@ -65,14 +68,14 @@ class CLITests(TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(output, "12\tExample\thttps://github.com/a/b.git\n")
 
-    @patch("nq.cli.request_api")
+    @patch("vibearr.cli.request_api")
     def test_projects_explains_empty_list(self, request):
         request.return_value = {"projects": []}
         status, output, _ = self.run_cli(["projects"])
         self.assertEqual(status, 0)
         self.assertEqual(output, "No projects. Create one in Django admin first.\n")
 
-    @patch("nq.cli.request_api")
+    @patch("vibearr.cli.request_api")
     def test_projects_json_preserves_api_values(self, request):
         project = {
             "id": 9007199254740993,
@@ -94,13 +97,13 @@ class CLITests(TestCase):
             "http://localhost:8000", "test-token", "projects/"
         )
 
-    @patch("nq.cli.request_api")
+    @patch("vibearr.cli.request_api")
     def test_projects_json_empty_list(self, request):
         request.return_value = {"projects": []}
         status, output, errors = self.run_cli(["projects", "--json"])
         self.assertEqual((status, output, errors), (0, '{"projects": []}\n', ""))
 
-    @patch("nq.cli.request_api")
+    @patch("vibearr.cli.request_api")
     def test_projects_json_api_error(self, request):
         request.side_effect = RuntimeError("API returned HTTP 403: Forbidden")
         status, output, errors = self.run_cli(["projects", "--json"])
@@ -112,7 +115,7 @@ class CLITests(TestCase):
     def test_projects_json_module_entrypoints(self, request):
         response = {"projects": [{"id": 12, "name": "東京"}]}
         request.return_value = response
-        for module in ("vibearr", "nq"):
+        for module in ("vibearr",):
             with self.subTest(module=module):
                 output = io.StringIO()
                 errors = io.StringIO()
@@ -135,25 +138,25 @@ class CLITests(TestCase):
         self.assert_usage_error(["add", "Task", "--project", "no"])
 
     def test_missing_token_exits_nonzero(self):
-        with patch.dict("os.environ", {"NQ_API_TOKEN": ""}):
+        with patch.dict("os.environ", {"VIBEARR_API_TOKEN": ""}):
             status, _, errors = self.run_cli(["projects"])
         self.assertEqual(status, 1)
         self.assertIn("set VIBEARR_API_TOKEN", errors)
 
     def test_invalid_server_url_exits_nonzero(self):
-        with patch.dict("os.environ", {"NQ_URL": "file:///tmp/db"}):
+        with patch.dict("os.environ", {"VIBEARR_URL": "file:///tmp/db"}):
             status, _, errors = self.run_cli(["projects"])
         self.assertEqual(status, 1)
         self.assertIn("VIBEARR_URL must be an HTTP(S) server URL", errors)
 
-    @patch("nq.cli.request_api")
+    @patch("vibearr.cli.request_api")
     def test_server_validation_error_exits_nonzero(self, request):
         request.side_effect = RuntimeError("API returned HTTP 400: Unknown project")
         status, _, errors = self.run_cli(["add", "Task", "--project", "12"])
         self.assertEqual(status, 1)
         self.assertIn("Unknown project", errors)
 
-    @patch("nq.cli.request_api")
+    @patch("vibearr.cli.request_api")
     def test_unexpected_response_exits_nonzero(self, request):
         request.return_value = {}
         status, _, errors = self.run_cli(["projects"])
@@ -163,7 +166,7 @@ class CLITests(TestCase):
 
 class HTTPClientTests(TestCase):
     def setUp(self):
-        opener_patch = patch("nq.cli.build_opener")
+        opener_patch = patch("vibearr.cli.build_opener")
         build_opener = opener_patch.start()
         self.addCleanup(opener_patch.stop)
         self.opener = build_opener.return_value

@@ -77,7 +77,6 @@ class DistributionArtifactTests(unittest.TestCase):
                 stream = source_archive.extractfile(archived_configuration)
                 self.assertIsNotNone(stream)
                 content = stream.read().decode() if stream else ""
-                self.assertNotIn('"../coding_runner"', content)
                 self.assertNotIn('"../vibearr_runner"', content)
             wheels = root / "wheels"
             arguments = [
@@ -108,20 +107,15 @@ class DistributionArtifactTests(unittest.TestCase):
                 ],
                 root,
             )
-            if runner:
-                canonical, legacy = "vibearr_runner.client", "coding_runner.client"
-                commands = ["vibearr-runner", "coding-runner"]
-            else:
-                canonical, legacy = "vibearr.cli", "nq.cli"
-                commands = ["vibearr", "nq"]
-            check = "import importlib,sys; "
-            check += f'assert importlib.import_module("{canonical}") is importlib.import_module("{legacy}"); '
-            check += 'assert "django" not in sys.modules'
+            canonical = "vibearr_runner.client" if runner else "vibearr.cli"
+            command_name = "vibearr-runner" if runner else "vibearr"
+            check = "import importlib,importlib.util,sys; "
+            check += f'importlib.import_module("{canonical}"); '
+            check += 'assert "django" not in sys.modules; '
+            check += 'assert importlib.util.find_spec("nq") is None; '
+            check += 'assert importlib.util.find_spec("coding_runner") is None'
             self.run_command([str(executable), "-I", "-c", check], root)
-            for command_name in commands:
-                self.run_command(
-                    [str(environment / "bin" / command_name), "--help"], root
-                )
+            self.run_command([str(environment / "bin" / command_name), "--help"], root)
             if runner:
                 self.check_installed_native_client(executable, root)
         self.assertEqual(hashlib.sha256(configuration.read_bytes()).digest(), before)
@@ -131,8 +125,7 @@ class DistributionArtifactTests(unittest.TestCase):
 import importlib.metadata
 from vibearr_runner.native_runtime import runtime_diagnostics
 from vibearr_runner.policy import default_execution_policy
-import vibearr_runner.native_contract, coding_runner.native_contract
-assert vibearr_runner.native_contract is coding_runner.native_contract
+import vibearr_runner.native_contract
 assert vibearr_runner.native_contract.status_document(sequence=1, stage='waiting')['sequence'] == 1
 requirements = importlib.metadata.requires('vibearr-runner') or []
 assert any('vibearr-executor' in value and 'native-runtime' in value for value in requirements)
@@ -159,7 +152,6 @@ import importlib, os, pathlib, sys
 import vibearr_executor.client
 from vibearr_runner.native_runtime import runtime_diagnostics
 from vibearr_runner.policy import default_execution_policy
-assert importlib.import_module('coding_runner.native_runtime') is importlib.import_module('vibearr_runner.native_runtime')
 assert pathlib.Path(vibearr_executor.client.__file__).is_relative_to(sys.prefix)
 os.environ.pop('VIBEARR_EXECUTOR_URL', None)
 os.environ.pop('VIBEARR_EXECUTOR_TOKEN_FILE', None)
@@ -192,12 +184,12 @@ assert 'django' not in sys.modules
             )
             check = """
 import pathlib, sys
-import vibearr_executor, vibearr_executor.client, vibearr_executor.server
+import vibearr_executor, vibearr_executor.client, vibearr_executor.compact_worker
 root = pathlib.Path(vibearr_executor.__file__).parent
 assert root.is_relative_to(sys.prefix)
-for name in ('Dockerfile', 'Slot.Dockerfile', 'Codex.Dockerfile', 'CodexProject.Dockerfile', 'codex_task.py', 'secret_material.py', 'worker.py', 'firewall.py', 'proxy.py', 'smoke.py', 'pg_smoke.py'):
+for name in ('Worker.Dockerfile', 'compact_worker.py', 'slot_exec.py', 'slot_probe.py', 'secret_material.py'):
     assert (root / name).is_file(), name
-for name in ('validation.Dockerfile', 'validation-requirements.txt', 'validation_black.toml', 'validation_ruff.toml', 'validation_mypy.ini'):
+for name in ('validation-requirements.txt', 'validation_black.toml', 'validation_ruff.toml', 'validation_mypy.ini'):
     assert (root / name).is_file(), name
 from vibearr_executor.validation_profile import CHECK_IDS, ValidationProfile
 profile = ValidationProfile('sha256:' + 'a' * 64, 'sha256:' + 'b' * 64, 'c' * 64)
@@ -209,9 +201,6 @@ assert 'django' not in sys.modules
 
     def test_canonical_runner_sdist_installs_without_checkout(self):
         self.check_artifact("vibearr_runner", runner=True)
-
-    def test_legacy_runner_sdist_installs_without_checkout(self):
-        self.check_artifact("coding_runner", runner=True)
 
     def test_cli_sdist_installs_without_django(self):
         self.check_artifact(".", runner=False)

@@ -33,9 +33,9 @@ termination still decide whether the native operation succeeded.
 
 ## Verification and limits
 
-`coding_runner.test_factory_opencode` covers stream, connection and configuration
+`vibearr_runner.test_factory_opencode` covers stream, connection and configuration
 failure cases alongside existing native/relay regression tests. The explicit
-`coding_runner.acceptance.test_factory_opencode_cli` suite runs the actual pinned
+`vibearr_runner.acceptance.test_factory_opencode_cli` suite runs the actual pinned
 binary offline: version/help and effective configuration for every role, including
 candidate-plugin/model injection and inherited environment overrides. It needs a
 Docker image containing the verified 1.19.5 artifact and runs with network disabled.

@@ -1,6 +1,6 @@
 import argparse
 import json
-from .environment import getenv
+import os
 import sys
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -117,15 +117,11 @@ def add_item(base_url, token, args):
 def main(argv=None):
     parser = create_parser()
     args = parser.parse_args(argv)
-    try:
-        base_url = getenv("NQ_URL", "http://127.0.0.1:8000").rstrip("/")
-        token = getenv("NQ_API_TOKEN", "")
-    except ValueError as exc:
-        print(f"vibearr: {exc}", file=sys.stderr)
-        return 1
+    base_url = os.getenv("VIBEARR_URL", "http://127.0.0.1:8000").rstrip("/")
+    token = os.getenv("VIBEARR_API_TOKEN", "")
     if not token:
         print(
-            "vibearr: set VIBEARR_API_TOKEN (legacy NQ_API_TOKEN) to the server's API token.",
+            "vibearr: set VIBEARR_API_TOKEN to the server's API token.",
             file=sys.stderr,
         )
         return 1

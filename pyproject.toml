@@ -11,12 +11,11 @@ dependencies = []
 
 [project.scripts]
 vibearr = "vibearr.cli:main"
-nq = "vibearr.cli:main"
 
 [tool.setuptools]
 
 [tool.setuptools.packages.find]
-include = ["vibearr", "nq"]
+include = ["vibearr"]
 
 [tool.ruff]
 line-length = 120

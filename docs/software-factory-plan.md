@@ -1,319 +1,43 @@
-# Codex-first software factory
+# Factory execution contract
 
-Revision: 2026-11-22. Planning baseline: `84ada44` on `main`.
-This is the target runner workflow and implementation backlog. It does not claim
-these stages exist or qualify autonomous execution. The
-[Docker-only runtime contract](docker-only-runtime-plan.md) remains authoritative.
+The current pipeline is:
 
-## Desired loop
-
-```mermaid
-flowchart TD
-    Q[Eligible issue or manual task] --> I[Intake: scope, risk, affected surfaces]
-    I --> S[Saved specification and acceptance criteria]
-    I --> W[Needs information or rejected: visible outcome]
-    S --> B[Builder in isolated task workspace]
-    B --> G[Trusted deterministic checks]
-    G -->|pass| R[Code review plus routed security, UX and UI reviews]
-    G -->|fail: budget remains| B
-    R -->|changes: budget remains| B
-    R -->|all required reviews pass| D[Recorded decision]
-    D -->|ready| P[Supervisor publishes or updates one PR]
-    D -->|unresolved| F[Failed run with diagnostics]
-    P --> H[Human reviews current PR and required CI, then merges]
-    H --> M[Read-only reconciliation verifies actual merge]
-    M --> N[Dependent task starts from verified merge]
-    G -->|budget exhausted| F
-    R -->|budget exhausted or unresolved decision| F
+```text
+Issue → Intake → Specification → Build → Trusted checks → Reviews → Decision → PR → Human merge
 ```
 
-The independent supervisor drives this loop from durable state. Agents perform
-bounded roles and return artifacts; trusted code checks evidence and advances the
-run. Codex supplies every agent role in the first implementation. Claude Code and
-OpenCode later implement the same contract, including complete single-provider
-pipelines. A mixed-provider configuration is optional, never a prerequisite.
+Intake and specification freeze scope, risk, acceptance criteria and affected
+surfaces. Only the builder may modify candidate source. Code review always runs;
+trusted paths and intake surfaces add security and UX/UI reviewers. Missing
+required role or browser capability stops dispatch. Role settings cannot change
+the selected account, backend, executable, network policy or tool grants.
 
-Humans merge every PR through the MVP and factory rollout. Use the existing
-`delivery_mode: "pull_request"`; automatic merge stays disabled. The final agent
-decision recommends readiness for human review and grants no merge authority.
+Contexts, plans, role outputs, routing records and round decisions are immutable
+and bound to the owning run, selected connection, configuration, specification,
+candidate and protected worker identity. A model's narrative, `passed` boolean or
+PR URL cannot replace trusted execution, validation or delivery evidence.
 
-The [reference video](https://www.youtube.com/watch?v=RiaTyJ2POVo) and
-[software-factory-claude-code-v2](https://github.com/zazencodes/zazencodes-season-3/tree/de4598a8fab54425366952d886bbdb083f075af6/src/software-factory-claude-code-v2)
-set the direction. The inspected source separates intake, specification, build,
-scripted checks, routed reviews and a final decision, with artifacts per round.
-This proposal adapts that pattern to vibearr's services and execution policy.
-The video could not be fetched during this review; detailed comparisons below
-are based on the linked source, not a verified viewing of the video.
+Checks and reviews apply to one exact candidate. Repairs share the minimum of the
+execution-policy allowance, frozen factory allowance and hard maximum of two.
+An explicit zero allows no repairs. A changed candidate requires fresh validation
+and routed reviews. An exhausted or canceled run cannot publish a change.
 
-## Adaptation decisions
+Native adapters retain the prepare/start/inspect/events/outcome/cancel/reconcile
+contract. Unknown execution retains its fence; lost responses never authorize a
+replacement invocation. Worker termination, source exports, complete bounded
+transcripts and usage evidence remain distinct authorities.
 
-| Reference pattern | vibearr target |
-| --- | --- |
-| A Claude session orchestrates role agents | The existing standard-library supervisor schedules backend-neutral role sessions through Docker worker APIs |
-| A factory label selects issues | Preserve permitted-author selection, priorities, holds and dependencies; an opt-in label filter may be configured later |
-| Local job files and worktrees | PostgreSQL stores immutable display artifacts and run metadata; private named volumes hold supervisor journals and isolated snapshots |
-| Script-owned state transitions | Extend the current owned-run services and operation journal; agents cannot mutate authoritative state |
-| Risk and affected surfaces route reviews | Trusted routing combines intake with changed paths and configured rules; code review always runs, UI adds UX/UI, security adds security review |
-| Build, gate, review rounds | One initial build plus at most two repairs by default, sharing the existing run budget with CI and base updates |
-| Agent-written verdict and merge step | A role records readiness; the supervisor publishes a PR, a human merges, and read-only reconciliation verifies the resulting merge |
-| Concurrent jobs and reviewers | One active task initially; execute reviewers sequentially on the existing slot, then add parallelism only with separately qualified capacity |
-| Transcript-based cost display | Record measured provider usage when available; distinguish estimates from billed cost and report unavailable telemetry honestly |
+The runtime is the [four-container architecture](architecture.md). Factory mode
+is disabled by default. Enabling a setting does not establish a qualified worker,
+account, model, browser or release. Engineering evidence is source/image/boot
+bound and cannot substitute for live selected-provider acceptance.
 
-Role artifacts are data. They cannot grant credentials, enable execution, change
-tool permissions, select a new image, weaken checks, or bypass repository rules.
-No host worktrees, user-home transcript scanning, CLI installation instructions,
-or reference scripts are imported. This docs change adds no upstream code.
+Humans merge every PR. Automatic merging and deployment remain disabled until a
+separate explicit rollout. A delivered PR releases the execution slot so unrelated
+eligible work can continue while a human reviews it. Dependent work waits for
+verified human merge ancestry.
 
-## Stage and artifact contract
-
-All rows describe new orchestration to implement. Reuse existing immutable context
-and plan versions where they fit; introduce explicit versioned schemas for the new
-artifacts. Markdown is a display rendering, not a state-transition protocol.
-
-| Stage / role | Required input | Required result and transition |
-| --- | --- | --- |
-| Intake | Frozen issue/manual-task context, configured policy, inspected base | `accept`, `needs_info`, or `reject`; scoped intent, acceptance criteria, risk, surfaces, rationale and concrete questions. Acceptance proceeds to specification; other outcomes stop this attempt after confirmed cleanup. |
-| Specification | Accepted intake, repository context, base identity | Immutable specification with testable acceptance criteria, scope, exclusions and verification plan. The spec references the intake/context digests; no human plan approval. |
-| Builder | Specification, current source, prior round diagnostics | Candidate snapshot and build summary mapping acceptance criteria to changes and checks. Only this role receives write access to candidate source. |
-| Deterministic gate | Candidate tree, trusted validation profile, dependency artifact | Existing independent validation receipts, actual exit results and protected-path checks. A failure returns diagnostics to the builder; do not spend reviewer calls on a failing gate. |
-| Required reviewers | Same gated candidate and spec, diff, check results; UI evidence where required | One structured verdict per routed role: `pass`, `changes`, or `blocked`, findings with evidence and stable IDs, acceptance-criterion coverage. Missing, malformed, failed or timed-out reviews prevent advancement. |
-| Decision role | Full required review set, current gate and findings | Recorded `ready` or `unresolved` decision with rationale, from a separate agent session. It cannot waive required findings, substitute for a gate, or authorize merge. |
-| Delivery / human merge | Verified artifacts, current ownership and project policy | Supervisor commit/push/PR receipts finish the run at verified delivery. A human reviews and merges through GitHub; separate read-only reconciliation records the actual merge before dependencies unlock. |
-
-Intake may clarify or propose splitting oversized work; it cannot silently remove
-requested acceptance criteria. A changed outcome requires an explicit unresolved
-question or a separately tracked follow-up with its relationship recorded. Manual
-tasks use the same artifact and review pipeline without requiring a GitHub issue.
-
-Keep queue statuses `queued`, `running`, `succeeded`, and `failed`. Record the new
-stages and structured outcomes on the run. `needs_info` and `reject` map to failed
-attempts with distinct reasons, leaving the issue open and requiring a changed
-context or explicit retry before another attempt. They must not churn on every
-poll or hold the only task slot indefinitely. A reply becomes a new context and
-attempt; prior artifacts remain immutable. Automatic issue comments or follow-up
-creation require configured GitHub write scope and operation reconciliation.
-
-Code review checks correctness, scope, maintainability and weakened tests. Security
-review inspects trust boundaries and credential exposure. UX review checks whether
-the flow meets the requested outcome; UI review inspects actual rendered evidence.
-Reviewers get separate sessions, read-only source and only their registered tools.
-They may request changes, but the supervisor alone decides state transitions.
-
-Routing is saved before review and recomputed against the actual diff. Unknown
-paths or ambiguous risk use conservative configured routing. A builder cannot
-remove a required reviewer by describing its change as low risk. If a required
-browser or reviewer capability is unavailable, the run reports the missing
-capability instead of silently skipping the review. Browser execution stays in
-the Docker browser job against disposable services, without production secrets.
-
-## Rounds, authority and recovery
-
-Each artifact binds run ID, context/spec version, round, role, operation ID,
-backend/model and pinned CLI version, prompt/configuration digest, source tree,
-base/head identities where applicable, timestamps and payload digest. Worker
-receipts retain instance/boot identities. Persist the required reviewer set and
-each role's completion separately; a summary cannot stand in for those records.
-
-After any edit, rerun the gate and all required reviews on the new candidate.
-Never carry a prior tree's pass into a later round. A changed base invalidates
-affected spec, validation and review evidence; reconcile it, rebuild if needed,
-and obtain fresh evidence before marking the PR ready again. Human review and
-required GitHub checks apply to the actual current PR head. Protected validation
-configuration stays outside candidate control; changing it requires a separately reviewed
-profile/image and qualification, not a builder exception.
-
-Count the initial build as round 1. At most two repair sessions follow by default;
-test failures, reviewer requests, CI failures and base changes spend the same
-repair budget. Transport retries keep their operation identity and do not grant
-another model session. Charge all roles to aggregate agent time, account capacity
-and configured reserve limits; use stage deadlines within the existing run
-deadline. An unresolved decision ends with useful evidence rather than spawning
-unbounded judges or resetting the budget. Optional human feedback starts an
-explicit new attempt; it is not a command/plan approval step in routine work.
-
-Journal each role operation before dispatch. After a restart or lost response,
-query that operation and worker boot before resuming. Resume remaining reviewers
-only after reconciling completed and uncertain operations. Heartbeat age, a
-missing artifact or a model's final message never proves process termination.
-Unknown operations keep their fence; confirmed failures release capacity.
-Pause/cancel covers every active role and browser/check job, with descendant
-termination confirmed before slot reuse. GitHub writes reconcile their original
-operation and repository/branch/head; a retry reuses the same PR identity.
-
-After delivery, mark the attempt `succeeded` with outcome `delivered` and release
-its claim and worker capacity. Display the PR as awaiting human review separately
-from the finished run. Independent work may continue; dependent work stays blocked.
-A read-only reconciliation path, using currently authorized project read scope
-rather than the completed claim, verifies repository/PR/head, actual merge SHA and
-base ancestry before recording dependency completion. PR creation, a readiness
-verdict, issue closure, or a closed-unmerged PR never satisfies a dependency.
-Late CI failures remain visible; a repair after delivery requires an explicit new
-attempt and reuses the existing PR, without resurrecting the finished claim.
-
-## Required footprint: four always-on containers
-
-The single-repository, single-active-task release must use **four always-on
-containers**, including Codex account authentication. Simplification is required
-before release. The previous 14-container main / 16-container account topology is
-the implementation to replace, not an acceptable default or an optional later
-cleanup. The Compose files have not yet been changed by this documentation PR.
-
-| Container | Responsibility |
-| --- | --- |
-| `app` | Existing Django UI/API plus one supervised issue-import scheduling loop, reusing the current import services and database locks |
-| `postgres` | Production application data only; preserve the existing volume, database identity and credentials |
-| `runner` | Independent supervisor, Git/PR delivery, durable journals, direct worker client, selected backend/account lifecycle and narrowly scoped egress mediation |
-| `worker` | One authenticated, preprovisioned execution slot; sequential setup, coding, review and independent validation phases, with browser/test-service subprocesses only while needed |
-
-Remove Celery worker/Beat and Valkey from the target runtime. PostgreSQL remains
-the durable queue and scheduling authority; reuse synchronization leases,
-backoff, pagination, and source eligibility rather than introduce another broker.
-The app's import loop continues while agent execution is paused. A trusted
-container entrypoint supervises web/import children, forwards signals, and reports
-a failed child through health/restart behavior. Avoid starting a scheduler in
-every web worker; test duplicate app starts against the database lease.
-
-Collapse the worker gateway into the runner's direct authenticated client. Account
-storage/renewal and model/package/account egress mediation become runner modules,
-without standalone account or proxy containers. The runner remains a separate
-standard-library process with no Django/database imports or production DB access.
-Persist selected account state in its protected volume; never scan a host login.
-Implement these as shared runner modules with one operation journal and lifecycle;
-do not just move the old gateway/account/proxy daemons unchanged into one container.
-
-The worker includes pinned test PostgreSQL and browser binaries in its immutable
-image. Start a fresh local test PostgreSQL cluster and disposable app/browser
-subprocesses only for a phase needing them; stop and discard them before phase
-reuse. No permanent test-DB or browser sidecars. Their memory, CPU, PIDs, tmpfs,
-deadlines and descendants count against the worker's real container limits.
-Projects requiring unsupported external services report that requirement instead
-of dynamically creating containers or silently expanding the default stack.
-
-### Preserve the boundaries inside the smaller stack
-
-All candidate code stays in the worker. Trusted PID 1 and image-owned tools use
-separate UIDs/private control paths from task processes. Setup, agent/reviewer and
-validation phases never overlap. Seal and export the candidate, confirm termination,
-discard writable state/credentials/test DBs, then import a verified fresh snapshot
-for the next phase. Independent validation runs trusted commands without backend
-or GitHub credentials; it must not reuse the builder's environment or test database.
-Reviews use separate sessions and read-only candidate inputs.
-
-The worker has no production DB network/volume, runner journal or publication
-credentials. Task egress can reach only the runner's operation-scoped mediation
-endpoint and approved phase-local test services. Protect the worker management
-port and runner control/account endpoints from task UIDs. Mediation binds the
-active operation, phase and configured public hosts; validation has no public
-egress. Being on a Docker private network is not sufficient enforcement.
-
-There is no runtime Docker socket, dynamic container launcher, host execution or
-privileged fallback. One role does not add one container. Codex, then Claude and
-OpenCode, use selected profiles in the same worker image/slot; do not start three
-provider fleets. Parallel workers remain later feature 13.
-
-### Startup and operations budget
-
-Initialize secrets and apply migrations as ordered, retry-safe entrypoint steps
-inside these four services. Do not add mandatory init/migration sidecars or start
-claims before migrations, account readiness and worker qualification pass. If a
-later step fails, stop unhealthy and preserve initialized identities for retry.
-
-CLI, backup/restore and developer/CI packaging/qualification remain explicit one-shot
-tooling jobs, stopped after use; count them separately from the four runtime
-containers. Normal coding, validation and UI review must work with just the four.
-Any packaging check required by a task runs as a worker phase using pinned tools.
-Measure idle/active use and recovery on that topology. Do not shrink by hiding
-additional always-running services behind optional profiles or external endpoints.
-
-The [compact runtime sequence](docker-only-runtime-plan.md#required-simplification-branches)
-S1–S4 replaces the old topology before factory release. Requalify phase isolation,
-process supervision, account renewal, restart/cancel, resource limits, backup/
-restore and human-merge reconciliation on the four-container stack. Earlier
-multi-container evidence remains historical and cannot qualify consolidation.
-
-## Current code and implementation ownership
-
-The baseline contains the queue, issue selection, settings/schedules, immutable
-context/plans, native Codex lifecycle, Docker slots, independent validation,
-delivery/merge and recovery code. Its recorded
-[Docker progress](docker-only-progress.json) explicitly leaves autonomous execution
-unqualified. Existing functionality must be adapted and requalified; its presence
-does not establish the new pipeline or live readiness.
-
-| Owner | Extend |
-| --- | --- |
-| `runner_control/` | Run stage/outcome schema, immutable role/round artifacts, owned APIs, required-review set and transition validation, display evidence |
-| `vibearr_runner/` | Existing native lifecycle, backend registry, role dispatch, trusted routing, shared budgets, journals, artifact import and delivery/merge prerequisites |
-| `vibearr_executor/` | One phase-switching worker, registered role capabilities, local disposable test services, read-only reviewer inputs, source/credential separation, authenticated receipts and cleanup |
-| `work_queue/services.py` | Shared eligibility, terminal transitions and retry/context behavior; preserve generic API clients |
-| `projects/`, `credentials/` | Versioned project routing/model overrides and explicitly selected backend connections; snapshot them at claim |
-| Existing app views and Docker jobs | Activity/History round evidence, browser artifacts, qualification and CI |
-
-Do not build a second queue, a Django-dependent supervisor, or a separate factory
-dashboard/service. The standalone HTTP CLI stays independent of the runner and DB.
-Keep compatibility imports in `coding_runner/` and `nq/` intact during migration.
-
-## Branch sequence and acceptance
-
-Create each feature on its own branch from updated `main` after prerequisites
-merge. F IDs extend the [existing roadmap](autonomous-ai-queue-plan.md); they do
-not renumber completed features. These are proposed branches, not existing PRs.
-S1–S4 in the compact runtime plan are mandatory runtime work. Artifact/API work
-can proceed independently; role integration uses the compact worker, and live
-qualification requires that four-container stack and the selected connection.
-
-| ID / proposed branch | Depends on | Reviewable result and acceptance |
-| --- | --- | --- |
-| F1 `feat/factory-role-contracts` | Existing owned runs, native protocol | Versioned role/round artifacts, stage/outcome migrations, required-role sets, configuration snapshots and idempotent APIs. Reject stale ownership, conflicting replay, invalid transitions and artifacts for another tree/round. Preserve old history and generic queue clients. |
-| F2 `feat/codex-intake-spec` | F1, S3, native Codex | Codex intake/spec sessions through the compact worker; accepted work has saved criteria, unanswered questions and rejected work produce distinct outcomes without occupying capacity or repeated automatic retries. Test manual tasks and context-change retries. |
-| F3 `feat/codex-build-review-loop` | F2, independent validation | Builder, gate, trusted routing and separate code/security/UX/UI reviewer sessions; read-only reviewer source, fresh evidence, complete review barrier and shared repair budget. Demonstrate test failure repair, review-request repair and honest exhaustion; a missing reviewer blocks delivery. |
-| F4 `feat/factory-delivery-recovery` | F3, existing delivery/reconciliation | Recorded decision and server-enforced delivery prerequisites, one PR, claim release at delivery, and read-only human-merge reconciliation. Test lost dispatch/push/PR responses, late/stale reviews, changed base, confirmed cleanup, unrelated work while review waits, and no runner merge request. |
-| F5 `feat/factory-activity-evidence` | F4 | Activity/History show scope, spec, risk, required reviewers, round findings, check/browser evidence, decision, time/usage availability and PR/merge. Docker browser acceptance covers desktop/mobile, missing data and failed/recovered runs. |
-| F6 `test/codex-factory-acceptance` | F5, S4, usable Codex auth | Actual four-container Codex two-dependent-issue scenario with a human merging each PR, artifact chain, a routed UI/security case, bounded repair, cancellation and restart evidence. Record service count, images, CLI/profile identities, trees, human merge actors and ancestry; verify zero runner merge calls and no permanent helper containers. Fixtures alone cannot qualify this milestone. |
-| F7 `feat/claude-factory-roles` | F6, native Claude feature 08 | Claude-only pipeline passes the shared role conformance suite and genuine Docker auth/tool/read-only-review/cancel/resume acceptance, then its own two-issue loop. |
-| F8 `feat/opencode-factory-roles` | F6, native OpenCode feature 09 | OpenCode-only pipeline passes the same suite and genuine Docker acceptance for its pinned CLI/provider/model, then its own two-issue loop; Ollama remains an optional separately verified connection. |
-
-F7 and F8 may proceed independently after F6. Each provider needs role-specific
-structured results, noninteractive tools, durable operation identity, termination
-and capability probes. Do not equate a native adapter PR, API transport, or an
-advertised capability with factory conformance. Model selection is configured
-per role; do not hard-code the reference's model names or assume equivalent quota
-and resume interfaces across providers.
-
-The existing native/delivery contracts remain prerequisites; S4 proves the compact
-stack's engineering boundary without paid calls. F6 supplies the real two-issue
-MVP/factory proof on that stack: both issues traverse intake/spec/build/gate/review/
-decision, a human merges each PR, B starts from A's verified merge, and the same
-run evidence appears in Activity/History. There are no manual command or plan
-approval prompts; human PR review and merge are required for every provider.
-Automatic deployment remains later feature 12; multi-task/parallel-review capacity
-remains feature 13 with an explicit qualified slot budget.
-
-## Later automatic merge: maturity gate
-
-Automatic merge is outside the MVP, F1–F8 and their acceptance criteria. Existing
-merge code and earlier signoffs do not authorize its use. Keep delivery mode
-`pull_request` and GitHub auto-merge disabled; no agent role may merge or enable it.
-
-Revisit feature 07 only after sustained human-reviewed operation across real
-changes demonstrates reliable scope, check/review quality, dependency handling,
-and recovery. Track escaped defects, human corrections/rejections, false passes,
-repair exhaustion and duplicate-side-effect incidents. An operator must agree
-evaluation thresholds and a representative observation period, review the actual
-results and unresolved incidents, and explicitly approve a separate limited
-rollout. Passing F6, elapsed time or an agent readiness decision cannot enable it.
-That later change must include current-head CI/review enforcement, compatible
-repository protection without bypass, opt-in per-project scope, audit evidence,
-and a tested immediate return to human merging. Required human reviews must never
-be removed or bypassed automatically. Automatic deployment remains independent.
-
-## Source notes
-
-Reference inspection used factory revision `de4598a8fab54425366952d886bbdb083f075af6`:
-[README](https://github.com/zazencodes/zazencodes-season-3/blob/de4598a8fab54425366952d886bbdb083f075af6/src/software-factory-claude-code-v2/README.md),
-[design](https://github.com/zazencodes/zazencodes-season-3/blob/de4598a8fab54425366952d886bbdb083f075af6/src/software-factory-claude-code-v2/DESIGN.md),
-[orchestrator workflow](https://github.com/zazencodes/zazencodes-season-3/blob/de4598a8fab54425366952d886bbdb083f075af6/src/software-factory-claude-code-v2/.claude/skills/factory/SKILL.md),
-and [routing configuration](https://github.com/zazencodes/zazencodes-season-3/blob/de4598a8fab54425366952d886bbdb083f075af6/src/software-factory-claude-code-v2/factory/config.json).
-The adaptation choices and F1–F8 contracts above are proposed vibearr design.
-Provider commands and capabilities must be verified against the versions pinned
-by the existing native-adapter work before implementation.
+See [settings and routing](factory-routing.md), [native conformance](native-factory-conformance.md),
+[Claude Code](native-claude-factory.md), [OpenCode](factory-opencode.md), and the
+[read-only acceptance observer](factory-acceptance.md). The
+[release contract](vibearr-mvp.md) defines the evidence still needed for live use.

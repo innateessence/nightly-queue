@@ -8,9 +8,7 @@ execution and a source-bound capture.
 
 `require_factory_capabilities(capabilities, roles, browser=False)` accepts only
 authenticated `compact-worker-v1` capability responses with capability schema 1,
-worker protocol 2 and qualification version 1. The integrated runtime remains
-available to ordinary native sessions and historical readback, but cannot qualify
-active factory roles. Every selected role names a registered profile and protected
+worker protocol 2 and qualification version 1. Only the compact-worker runtime qualifies native sessions and factory roles. Every selected role names a registered profile and protected
 `worker-boundary` qualification with the exact
 profile/image, binding, instance and worker boot. The qualification references its
 protected probe digest and successful source/control/credential/cleanup checks.
@@ -49,5 +47,4 @@ deadline, output bound and process-group cleanup are separate from the later
 actual worker permission probes and selected-account live acceptance. Passing
 offline tests or a version probe must never enable processing or automatic merge.
 
-Implementation plan: [PR #146](https://github.com/innateessence/nightly-queue/pull/146).
 Humans review and merge every implementation PR.

@@ -55,5 +55,5 @@ model claims and advertised booleans do not substitute for worker-boundary proof
 
 Protected-path changes remain subject to the trusted validation-profile and
 separate qualification policy. Routing marks them for security review; it cannot
-authorize replacing checks. Factory repairs are capped by the existing execution
-policy. Every PR still requires a human merge.
+authorize replacing checks. Factory repairs use the minimum of the frozen factory and execution-policy
+allowances and a hard maximum of two. An explicit zero allows no repairs. Every PR still requires a human merge.

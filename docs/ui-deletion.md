@@ -36,20 +36,3 @@ from normal queries and secret delivery; redaction explicitly includes retained
 credential material. Existing ORM hard-deletion protections are preserved.
 Deletion shares the existing controller, configuration, project, and claim locks.
 Stale claims and saves cannot restore deleted records.
-
-## Upgrade
-
-Apply credentials migration 0009, projects migration 0007, and work_queue
-migration 0005 before serving this revision:
-
-```sh
-docker compose --profile tools run --rm tools python manage.py migrate --noinput
-```
-
-Existing records remain active. No remote deletion permission or new credential
-is required. The old POST-only queue removal route remains available and uses
-the same local deletion rules. This change does not add a public DELETE API.
-
-Before rolling back the credential migration, reconcile any duplicate names
-created by reusing a deleted credential's name: the older schema requires names
-to be unique across all retained rows.

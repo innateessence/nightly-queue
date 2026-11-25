@@ -6,7 +6,7 @@ key or database credentials. Ordinary configuration and credential pages contain
 names, IDs, provider/type, rotation version, revocation status and timestamps.
 Execution remains release-gated.
 
-The integrated runner uses **Runner subscription login** credential references
+The trusted runner uses **Runner subscription login** credential references
 for Codex/Claude Code. Sign in, reconnect and log out inside the runner using the
 [current operations procedure](docker-operations.md#subscription-login). Login
 files stay in the private runner volume; the app holds only the selected reference.
@@ -102,7 +102,5 @@ storage/form/UI tests, schema upgrade preservation, old-version report redaction
 retry reconciliation, and rotation/revocation races against secret delivery.
 Black, Ruff, mypy, Django checks and migration drift checks pass. The standalone
 CLI/runtime suites also pass. The rendered credential UI is recorded in
-[screenshot](screenshots/runner-credentials.png); the protected deletion response is
-[also captured](screenshots/runner-credential-protection.png). No live provider login, allowance
 probe or backend invocation was performed; execution remains disabled pending the
 separate adapter/sandbox/release verification work.
