@@ -162,7 +162,7 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
             policy_digest=self.run.configuration_snapshot["policy_digest"],
             account=selected_account(self.run),
             validation_profile=self.profile,
-            runtime_binding_digest="e" * 64,
+            runtime_binding_digest=self.worker_identity["binding_digest"],
             acceptance_criteria=["Pass the independent required validation checks."],
         )
         self.context = save_context(
@@ -226,7 +226,7 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
             selected_account(self.run),
             "login",
             fixed.image,
-            "e" * 64,
+            self.worker_identity["binding_digest"],
             manifest,
             self.worker_identity,
         )
@@ -481,9 +481,6 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
                 "mode": "pull_request",
                 "pushed_sha": self.workspace["commit_sha"],
                 "pull_request": self.pull,
-                "checks": [],
-                "merge": None,
-                "issue_completion": None,
             },
         }
 

@@ -87,14 +87,14 @@ class OperationsUITests(TestCase):
 
     @override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
     def test_activity_redacts_selected_credentials_and_claim_tokens(self):
-        credential = Credential(name="UI backend", provider="codex", kind="token")
+        credential = Credential(name="UI repository", provider="github", kind="token")
         credential.set_secret("ui-selected-secret")
         credential.save()
         claim = uuid4()
         QueueItem.objects.filter(pk=self.item.pk).update(claim_token=claim)
         Run.objects.filter(pk=self.attempt.pk).update(
             configuration_snapshot={
-                "effective": {"implementation_credential_id": credential.pk}
+                "effective": {"repository_credential_id": credential.pk}
             },
             native_status={"detail": f"ui-selected-secret {claim}"},
         )
