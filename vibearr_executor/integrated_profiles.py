@@ -1,10 +1,9 @@
-"""The single runner's immutable CLI and validation recipes."""
+"""Immutable CLI and validation recipes installed in the dedicated worker."""
 
 from .contracts import Limits, Profile
 from .validation_profile import ValidationProfile
 
 
-RUNTIME = "integrated-runner-v1"
 VERSIONS = {"codex": "0.169.0", "claude": "2.1.118", "opencode": "1.19.5"}
 LIMITS = Limits(2, 4096, 128, 2048)
 MODEL_HOSTS = (

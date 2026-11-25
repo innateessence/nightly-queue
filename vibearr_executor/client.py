@@ -59,9 +59,7 @@ class Client:
                 raise Rejected(
                     "Docker worker control must resolve on private container networks."
                 )
-        if parsed.scheme not in {"http", "https"} or (
-            parsed.scheme == "http" and not loopback and not compact
-        ):
+        if parsed.scheme not in {"http", "https"}:
             raise Rejected("Use HTTPS or loopback executor control.")
         if (
             parsed.username

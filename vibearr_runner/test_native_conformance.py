@@ -33,7 +33,7 @@ SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
 if SDK_AVAILABLE:
     from vibearr_executor.artifacts import pack, result_manifest
     from vibearr_executor.contracts import Limits, Profile
-    from vibearr_executor.integrated_profiles import ARGV, RUNTIME, VERSIONS
+    from vibearr_executor.integrated_profiles import ARGV, VERSIONS
     from vibearr_runner.native_cli import NativeCLIAdapter
 
 
@@ -79,7 +79,7 @@ def transcript(provider, payload=None, *, session=None):
 class RecordedExecutor:
     """Protocol fixtures do not produce a persisted worker qualification."""
 
-    integrated = True
+    compact = True
     runtime = "compact-worker-v1"
 
     def __init__(self):
@@ -258,7 +258,7 @@ class RoleCapabilityTests(unittest.TestCase):
             require_factory_capabilities(self.capabilities, ["reviewer-code"])
 
     def test_integrated_runtime_cannot_qualify_active_factory_roles(self):
-        self.capabilities["runtime"] = RUNTIME
+        self.capabilities["runtime"] = "integrated-runner-v1"
         with self.assertRaises(NativeSessionError):
             require_factory_capabilities(self.capabilities, ["reviewer-code"])
 
@@ -577,14 +577,14 @@ class FactoryNativeAdapterTests(unittest.TestCase):
         with self.assertRaises(NativeSessionError):
             adapter.context(account, "Inspect source", "login", factory_role="browser")
 
-    def test_ordinary_integrated_native_selection_stays_available(self):
+    def test_retired_integrated_runtime_cannot_supply_a_native_profile(self):
         executor = RecordedExecutor()
-        executor.runtime = RUNTIME
+        executor.runtime = "integrated-runner-v1"
         adapter = NativeCLIAdapter(executor, "codex")
         policy = default_execution_policy()
         policy["runtime_profile"] = "factory-build"
-        profile = adapter.selected_profile(ExecutionPolicy.from_data(policy), "login")
-        self.assertEqual(profile.profile_id, "factory-build")
+        with self.assertRaises(NativeSessionError):
+            adapter.selected_profile(ExecutionPolicy.from_data(policy), "login")
 
     def test_actual_native_adapter_rejects_truthy_worker_qualification(self):
         executor = RecordedExecutor()

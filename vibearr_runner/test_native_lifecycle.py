@@ -19,7 +19,7 @@ from uuid import uuid4
 from vibearr_runner.context import manual_context
 from vibearr_runner.client import ConflictError, SupersededSourceError
 from vibearr_runner.journal import Journal
-from vibearr_runner.native_codex import codex_profile
+from vibearr_executor.compact_profiles import profiles as worker_profiles
 from vibearr_runner.native_lifecycle import NativeLifecycle
 from vibearr_runner.native_github import NativeGitHub
 from vibearr_runner.policy import ExecutionPolicy
@@ -40,9 +40,11 @@ if SDK_AVAILABLE:
 
 
 class Executor:
+    compact = True
+
     def __init__(self, profile):
-        self.instance = str(uuid4())
-        self.agent = codex_profile("sha256:" + "a" * 64, "token")
+        self.instance, self.boot = str(uuid4()), str(uuid4())
+        self.agent = worker_profiles(profile.image, profile.dependency_digest)[0][0]
         self.profiles = [
             self.agent,
             *profile.executor_profiles(),
@@ -63,18 +65,33 @@ class Executor:
     def capabilities(self):
         return {
             "schema_version": 1,
-            "runtime": "compose-slot-v2",
+            "runtime": "compact-worker-v1",
             "protocol_version": PROTOCOL_VERSION,
             "qualification_version": QUALIFICATION_VERSION,
             "qualified": True,
             "accepting_work": True,
             "binding_digest": "e" * 64,
             "instance_id": self.instance,
+            "worker_boot": self.boot,
             "profiles": [
                 {**profile.data(), "profile_digest": profile.digest}
                 for profile in self.profiles
             ],
         }
+
+    def identity(self):
+        return {
+            "runtime": "compact-worker-v1",
+            "protocol_version": 2,
+            "instance_id": self.instance,
+            "worker_boot": self.boot,
+            "binding_digest": "e" * 64,
+        }
+
+    def request(self, path, data=None):
+        if path.startswith("/v3/logins/"):
+            return {"available": True, "login_digest": "d" * 64}
+        raise AssertionError("Unexpected executor route: " + path)
 
     def upload(self, kind, content):
         self.artifacts[digest(content)] = content
@@ -86,7 +103,11 @@ class Executor:
             assert self.manifests[identity] == manifest
         else:
             self.manifests[identity] = deepcopy(manifest)
-            self.states[identity] = {"operation_id": identity, "state": "not-started"}
+            self.states[identity] = {
+                "operation_id": identity,
+                "state": "not-started",
+                "execution_identity": self.identity(),
+            }
         return self.status(identity)
 
     def supply_secret(self, *args):
@@ -127,10 +148,11 @@ class Executor:
             "operation_id": identity,
             "state": "exited",
             "descendants_terminated": True,
-            "container_id": digest(identity.encode()),
+            "execution_identity": self.identity(),
             "result": {
                 "run_id": manifest["run_id"],
                 "operation_id": identity,
+                "execution_identity": self.identity(),
                 "terminated": True,
                 "started_at": now,
                 "ended_at": now,
@@ -147,7 +169,25 @@ class Executor:
     def status(self, identity):
         if identity in self.unknown:
             return {"operation_id": identity, "state": "unknown"}
-        return deepcopy(self.states[identity])
+        value = deepcopy(self.states[identity])
+        value.setdefault("execution_identity", self.identity())
+        value.setdefault("worker_boot", self.boot)
+        if "result" in value:
+            value["result"].setdefault("execution_identity", self.identity())
+        return value
+
+    def termination_receipt(self, identity):
+        observed = self.status(identity)
+        return {
+            "schema_version": 1,
+            "instance_id": self.instance,
+            "operation_id": identity,
+            "run_id": self.manifests[identity]["run_id"],
+            "manifest_digest": digest(canonical(self.manifests[identity])),
+            "state": observed["state"],
+            "resources_terminated": observed.get("descendants_terminated") is True,
+            "receipt_digest": digest(canonical(observed.get("result", {}))),
+        }
 
     def stop(self, identity):
         if self.states[identity]["state"] == "not-started":
@@ -156,6 +196,7 @@ class Executor:
                 "operation_id": identity,
                 "state": "exited",
                 "descendants_terminated": True,
+                "execution_identity": self.identity(),
                 "result": {
                     "run_id": manifest["run_id"],
                     "operation_id": identity,
@@ -209,10 +250,10 @@ class Queue:
                 "credential": {
                     "id": 1,
                     "provider": "codex",
-                    "kind": "token",
+                    "kind": "login",
                     "version": 2,
                 },
-                "material": {"secret": "fixture-codex-token-0123456789"},
+                "material": {"secret": "codex:1"},
             }
         if path.endswith("/contexts/") or path.endswith("/plans/"):
             name = "context" if path.endswith("/contexts/") else "plan"
@@ -292,6 +333,7 @@ class NativeLifecycleTests(unittest.TestCase):
             ExecutionPolicy(),
             runtime_profile=self.executor.agent.profile_id,
             validation_profile=self.profile.profile_id,
+            network_hosts=self.executor.agent.network_hosts,
         )
         item = {
             "title": "Update the answer",
