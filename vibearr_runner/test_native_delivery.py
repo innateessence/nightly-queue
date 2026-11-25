@@ -101,7 +101,7 @@ class Host:
                 "credential_version": 1,
                 "model": "test",
             },
-            "token",
+            "login",
             "sha256:" + "d" * 64,
             "e" * 64,
             {
@@ -110,7 +110,14 @@ class Host:
                 "source_digest": "f" * 64,
                 "context_digest": "a" * 64,
                 "profile_digest": "b" * 64,
-                "profile_id": "agent-v1",
+                "profile_id": "native-default",
+            },
+            {
+                "runtime": "compact-worker-v1",
+                "protocol_version": 2,
+                "instance_id": str(uuid4()),
+                "worker_boot": str(uuid4()),
+                "binding_digest": "e" * 64,
             },
         )
         workspace = {

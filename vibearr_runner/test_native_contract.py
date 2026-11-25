@@ -72,7 +72,17 @@ def observed_operation():
         "log_digest": hashlib.sha256(b"events").hexdigest(),
         "artifact": result_manifest(original, changed),
     }
+    identity = {
+        "runtime": "compact-worker-v1",
+        "protocol_version": 2,
+        "instance_id": str(uuid4()),
+        "worker_boot": str(uuid4()),
+        "binding_digest": "b" * 64,
+    }
+    result["execution_identity"] = identity
     observed = {
+        "execution_identity": identity,
+        "worker_boot": identity["worker_boot"],
         "state": "exited",
         "operation_id": operation_id,
         "descendants_terminated": True,
@@ -186,6 +196,7 @@ class NativeExecutorContractTests(unittest.TestCase):
                 "run_id": observed["result"]["run_id"],
                 "operation_id": observed["operation_id"],
             },
+            observed["execution_identity"],
         )
         outcome = {
             "result": observed["result"],
