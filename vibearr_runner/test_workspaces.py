@@ -3,11 +3,8 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from .approvals import ActionSpec
 from .workspaces import (
-    SourceStore,
     WorkspaceManager,
-    content_digest,
     git,
 )
 
@@ -45,23 +42,6 @@ class WorkspaceFixture:
             self.root / "workspaces", trusted_local_root=self.root
         )
         self.workspace = self.manager.prepare(str(uuid4()), self.item)
-        self.sources = SourceStore(self.root / "supervisor-sources")
-
-    def action(self, argv=None, **overrides):
-        source = self.sources.register(
-            "comment", "https://example.com/comment/1", b"Untrusted proposed command"
-        )
-        data = {
-            "argv": argv or ["/usr/bin/true"],
-            "mode": "exec",
-            "source_kind": "comment",
-            "source_reference": "https://example.com/comment/1",
-            "source_digest": source,
-            "workspace_id": self.workspace.workspace_id,
-            "base_revision": self.workspace.base_revision,
-            "content_digest": content_digest(self.workspace.checkout),
-        }
-        return ActionSpec.from_data({**data, **overrides})
 
 
 if __name__ == "__main__":

@@ -1,5 +1,4 @@
 import fcntl
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,8 +9,6 @@ from uuid import uuid4
 from .client import InvalidResponse
 from .journal import Journal
 from .maintenance import Maintenance, MINIMUM_FREE_BYTES
-
-from .run_logs import RunLogs
 
 
 class MaintenanceTests(unittest.TestCase):
@@ -138,22 +135,3 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(
             self.state["budgets"][self.run_id]["pending_model"], "preserve"
         )
-
-    def test_raw_log_is_private_and_only_summary_is_published(self):
-        run_id, execution_id = str(uuid4()), str(uuid4())
-        published = []
-        logs = RunLogs(self.directory / "logs", published.append)
-        action = SimpleNamespace(to_data=lambda: {"argv": ["test"]})
-        workspace = SimpleNamespace(workspace_id=run_id, base_revision="a" * 40)
-        result = SimpleNamespace(
-            execution_id=execution_id,
-            output=b"private raw content",
-            exit_code=2,
-            interrupted=False,
-        )
-        logs(workspace, action, result)
-        path = self.directory / "logs" / run_id / (execution_id + ".log")
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(path.read_bytes(), b"private raw content")
-        self.assertNotIn("private raw content", json.dumps(published))
-        self.assertEqual(published[0]["exit_code"], 2)

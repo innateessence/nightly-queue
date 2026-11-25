@@ -3,9 +3,8 @@ from django.db import transaction
 
 from credentials.redaction import redact_run_payload
 
-from vibearr_runner.context import ContextError, digest
-from vibearr_runner.native_contract import NativeContractError
-from vibearr_runner.plans import revision
+from vibearr_runner.context import digest
+from vibearr_runner.native_contract import NativeContractError, sha
 
 from .models import ContextSnapshot, PlanVersion
 from .services import (
@@ -21,7 +20,7 @@ MAX_DOCUMENTS = 200
 def checked(operation):
     try:
         return operation()
-    except (ContextError, NativeContractError) as exc:
+    except NativeContractError as exc:
         raise ValidationError({"document": str(exc)}) from None
 
 
@@ -76,7 +75,7 @@ def save_context(
                 "resolved_base_branch": "Base branch contains selected credential material."
             }
         )
-    checked(lambda: revision(base_commit))
+    checked(lambda: sha(base_commit, git=True))
     if not resolved_base_branch.strip() or (
         run.item.base_branch and resolved_base_branch != run.item.base_branch
     ):

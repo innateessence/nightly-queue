@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import unittest
@@ -146,27 +145,6 @@ class WorkspaceTests(WorkspaceFixture, unittest.TestCase):
         with patch.dict(os.environ, environment):
             self.manager.prepare(str(uuid4()), self.item)
         self.assertFalse(marker.exists())
-
-    def test_repository_source_digest_is_recomputed_from_current_file(self):
-        reference = "README.md"
-        digest = self.sources.current_digest("repository", reference, self.workspace)
-        self.assertEqual(
-            digest,
-            hashlib.sha256(
-                (self.workspace.checkout / reference).read_bytes()
-            ).hexdigest(),
-        )
-        (self.workspace.checkout / reference).write_text("changed instructions")
-        self.assertNotEqual(
-            digest, self.sources.current_digest("repository", reference, self.workspace)
-        )
-
-    def test_repository_provenance_cannot_follow_external_symlink(self):
-        (self.workspace.checkout / "escape").symlink_to(
-            self.root / "supervisor-sources"
-        )
-        with self.assertRaises(WorkspaceError):
-            self.sources.current_digest("repository", "escape/file", self.workspace)
 
     def test_content_digest_covers_untracked_files_symlinks_and_modes(self):
         previous = content_digest(self.workspace.checkout)

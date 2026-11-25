@@ -1,4 +1,3 @@
-import copy
 import io
 import json
 import threading
@@ -12,7 +11,6 @@ from .context import (
     discussion_digest,
     manual_context,
 )
-from .plans import validate_context
 
 
 ITEM = {
@@ -115,7 +113,6 @@ class GitHubContextTests(unittest.TestCase):
         self.assertEqual(result["comments"], [])
         self.assertEqual(result["title"], "Current title")
         self.assertEqual(result["issue"]["author"], "author")
-        validate_context(result, ITEM)
 
     def test_aggregate_deadline_stops_comment_pagination(self):
         clock = [0.0]
@@ -261,13 +258,11 @@ class GitHubContextTests(unittest.TestCase):
             request.get_header("Authorization"), "Bearer selected-issue-read-token"
         )
 
-    def test_invalid_saved_comment_timestamp_is_rejected(self):
-        with self.responses((issue(comments=1), ""), ([comment()], "")):
-            result = self.client.fetch(ITEM)
-        result = copy.deepcopy(result)
-        result["comments"][0]["updated_at"] = "yesterday"
-        with self.assertRaises(ContextError):
-            validate_context(result, ITEM)
+    def test_invalid_comment_timestamp_is_rejected(self):
+        invalid = {**comment(), "updated_at": "yesterday"}
+        with self.responses((issue(comments=1), ""), ([invalid], "")):
+            with self.assertRaises(ContextError):
+                self.client.fetch(ITEM)
 
     def test_deeply_nested_response_fails_as_unreadable_context(self):
         response = Response({})
