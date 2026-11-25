@@ -121,6 +121,24 @@ class DistributionArtifactTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(configuration.read_bytes()).digest(), before)
 
     def check_installed_native_client(self, executable, root):
+        source = (
+            Path(__file__).resolve().parent.parent / "vibearr_runner" / "acceptance"
+        )
+        expected = {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in source.glob("test_*.py")
+        }
+        self.assertTrue(
+            expected, "The runner's portable acceptance checks must be included."
+        )
+        inventory = "import hashlib,pathlib,vibearr_runner; "
+        inventory += f"expected = {expected!r}; "
+        inventory += (
+            "source = pathlib.Path(vibearr_runner.__file__).parent / 'acceptance'; "
+        )
+        inventory += "actual = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in source.glob('test_*.py')}; "
+        inventory += "assert actual == expected, 'Installed acceptance checks differ from the source distribution'"
+        self.run_command([str(executable), "-I", "-c", inventory], root)
         missing = """
 import importlib.metadata
 from vibearr_runner.native_runtime import runtime_diagnostics
@@ -187,7 +205,7 @@ import pathlib, sys
 import vibearr_executor, vibearr_executor.client, vibearr_executor.compact_worker
 root = pathlib.Path(vibearr_executor.__file__).parent
 assert root.is_relative_to(sys.prefix)
-for name in ('Worker.Dockerfile', 'compact_worker.py', 'slot_exec.py', 'slot_probe.py', 'secret_material.py'):
+for name in ('Worker.Dockerfile', 'compact_worker.py', 'slot_processes.py', 'slot_child.py', 'slot_probe.py', 'secret_material.py'):
     assert (root / name).is_file(), name
 for name in ('validation-requirements.txt', 'validation_black.toml', 'validation_ruff.toml', 'validation_mypy.ini'):
     assert (root / name).is_file(), name
@@ -198,6 +216,9 @@ assert ValidationProfile.parse(profile.data()) == profile
 assert 'django' not in sys.modules
 """
             self.run_command([str(executable), "-I", "-c", check], root)
+            self.run_command(
+                [str(environment / "bin" / "vibearr-worker"), "--help"], root
+            )
 
     def test_canonical_runner_sdist_installs_without_checkout(self):
         self.check_artifact("vibearr_runner", runner=True)

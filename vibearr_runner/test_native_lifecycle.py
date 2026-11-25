@@ -19,7 +19,6 @@ from uuid import uuid4
 from vibearr_runner.context import manual_context
 from vibearr_runner.client import ConflictError, SupersededSourceError
 from vibearr_runner.journal import Journal
-from vibearr_executor.compact_profiles import profiles as worker_profiles
 from vibearr_runner.native_lifecycle import NativeLifecycle
 from vibearr_runner.native_github import NativeGitHub
 from vibearr_runner.policy import ExecutionPolicy
@@ -30,6 +29,7 @@ from vibearr_runner.workspaces import WorkspaceManager
 SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
 REPOSITORY_READ = NativeGitHub.repository
 if SDK_AVAILABLE:
+    from vibearr_executor.compact_profiles import profiles as worker_profiles
     from vibearr_executor import (
         SLOT_PROTOCOL_VERSION as PROTOCOL_VERSION,
         SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION,

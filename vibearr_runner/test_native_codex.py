@@ -7,12 +7,12 @@ import unittest
 from uuid import uuid4
 
 from vibearr_runner.native_codex import CodexEvents
-from vibearr_runner.native_cli import NativeCLIAdapter
 from vibearr_runner.native_sessions import NativeSession, NativeSessionError
 from vibearr_runner.policy import default_execution_policy
 
 EXECUTOR_INSTALLED = importlib.util.find_spec("vibearr_executor") is not None
 if EXECUTOR_INSTALLED:
+    from vibearr_runner.native_cli import NativeCLIAdapter
     from vibearr_executor import SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION
     from vibearr_executor.artifacts import pack, result_manifest
     from vibearr_executor.contracts import Conflict

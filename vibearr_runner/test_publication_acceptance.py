@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import importlib.util
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -231,6 +232,10 @@ class ProviderObservationTests(unittest.TestCase):
         self.assertEqual(query["head"], ["owner:acceptance/task&state=closed"])
 
 
+@unittest.skipUnless(
+    importlib.util.find_spec("vibearr_executor"),
+    "Install the native-runtime extra for protected native acceptance checks",
+)
 class NativeAcceptanceEvidenceTests(unittest.TestCase):
     def test_explicit_validation_profile_does_not_require_an_environment_fallback(self):
         from vibearr_executor import SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION

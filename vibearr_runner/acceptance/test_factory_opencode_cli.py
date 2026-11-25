@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -6,13 +7,18 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from vibearr_executor.opencode_task import ROLES, command
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor.opencode_task import ROLES, command
 
 
 BINARY = Path("/usr/local/bin/opencode")
 
 
-@unittest.skipUnless(BINARY.is_file(), "Build the pinned OpenCode probe image")
+@unittest.skipUnless(
+    SDK_AVAILABLE and BINARY.is_file(),
+    "Install the native-runtime extra and build the pinned OpenCode probe image",
+)
 class OpenCodeExecutableTests(unittest.TestCase):
     def test_pinned_cli_exposes_registered_noninteractive_arguments(self):
         version = subprocess.check_output([BINARY, "--version"], text=True, timeout=20)
