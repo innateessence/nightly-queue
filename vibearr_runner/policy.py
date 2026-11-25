@@ -59,8 +59,10 @@ class ExecutionPolicy:
         for key, (lower, upper) in bounds.items():
             if type(value[key]) is not int or not lower <= value[key] <= upper:
                 raise PolicyError("Execution resource or repair limit is out of range.")
-        if value["delivery_mode"] not in ("pull_request", "merge"):
-            raise PolicyError("Choose pull request or merge delivery.")
+        if value["delivery_mode"] != "pull_request":
+            raise PolicyError(
+                "Only pull request delivery is supported; a human must merge it."
+            )
         hosts = value["network_hosts"]
         if not isinstance(hosts, list) or len(hosts) > 64:
             raise PolicyError("Supply at most 64 explicit network hosts.")

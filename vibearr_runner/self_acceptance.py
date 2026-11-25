@@ -249,13 +249,10 @@ def collect_run(
     failed=False,
     review_observer=None,
     snapshot=None,
-    delivery_mode="pull_request",
 ):
     from .native_contract import validate_native_artifact
     from vibearr_executor.validation_profile import CHECK_IDS
 
-    if delivery_mode not in {"pull_request", "merge"}:
-        raise ValueError("Choose pull_request or merge delivery readback.")
     response = queue.reconcile(run_id)
     run, item = response["run"], response["item"]
     if snapshot is not None and any(
@@ -277,9 +274,7 @@ def collect_run(
         raise ValueError(
             "Acceptance result is not a completed owned run for the selected issue/project."
         )
-    expected = (
-        "failed" if failed else ("merged" if delivery_mode == "merge" else "delivered")
-    )
+    expected = "failed" if failed else "delivered"
     if run["native_outcome"] != expected or run["result_status"] != (
         "failed" if failed else "succeeded"
     ):
@@ -302,13 +297,6 @@ def collect_run(
     ):
         raise ValueError(
             "Frozen source does not identify the actual selected provider issue/repository."
-        )
-    approvals = queue.request("GET", f"/api/v1/runner/runs/{run_id}/approvals/")[
-        "approvals"
-    ]
-    if approvals:
-        raise ValueError(
-            "Native acceptance must not create or consume legacy approvals."
         )
     entries = evidence_entries(queue, run_id)
     facts = {}
@@ -353,10 +341,8 @@ def collect_run(
         "created_at": issue["created_at"],
         "discovered_at": item["created_at"],
         "claimed_at": run["created_at"],
-        "delivery_recovery": run.get("delivery_recovery"),
         "finished_at": run["finished_at"],
         "outcome": expected,
-        "approvals": 0,
         "repair_attempt": max(attempts),
     }
     times = [
@@ -416,7 +402,7 @@ def collect_run(
     delivery = validate_native_evidence(verified[0]["data"])
     if (
         delivery["run_id"] != run_id
-        or delivery["delivery"]["mode"] != delivery_mode
+        or delivery["delivery"]["mode"] != "pull_request"
         or delivery["workspace"]["repository_id"] != repository_id
     ):
         raise ValueError(
@@ -450,9 +436,7 @@ def collect_run(
         )
     pull = delivery["delivery"]["pull_request"]
     workspace = delivery["workspace"]
-    observed, provider_snapshot, current = observe_pull(
-        github, delivery, snapshot if delivery_mode == "pull_request" else None
-    )
+    observed, provider_snapshot, current = observe_pull(github, delivery, snapshot)
     matches = pulls_for_branch(
         github, name, workspace["branch"], workspace["base_branch"]
     )
@@ -571,7 +555,6 @@ def collect_scenario(
             "base_sha": next_base,
             "ancestor": True,
         },
-        "merge_acceptance": "not-run-feature07",
         "api_key_live_acceptance": (
             "passed"
             if records[1]["agent_intent"]["data"]["session"]["auth_kind"] == "token"
@@ -830,7 +813,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--export-scenarios", action="store_true")
     parser.add_argument("--execute", action="store_true")
-    parser.add_argument("--scenario", choices=("delivery", "merge"), default="delivery")
     parser.add_argument("--state", type=Path)
     parser.add_argument("--project-id", type=int)
     parser.add_argument("--failure-issue", type=int)
@@ -845,24 +827,6 @@ def main():
         return 0
     if not args.execute:
         parser.error("Explicitly choose --execute.")
-    if args.scenario == "merge":
-        from .merge_acceptance import main as merge_main
-
-        if args.failure_issue is not None:
-            parser.error("Merge acceptance selects only its two useful UI issues.")
-        forwarded = ["--execute", "--max-seconds", str(args.max_seconds)]
-        for field in (
-            "state",
-            "project_id",
-            "first_issue",
-            "second_issue",
-            "evidence",
-            "screenshots",
-        ):
-            value = getattr(args, field)
-            if value is not None:
-                forwarded.extend(["--" + field.replace("_", "-"), str(value)])
-        return merge_main(forwarded)
     identities = (
         args.project_id,
         args.failure_issue,

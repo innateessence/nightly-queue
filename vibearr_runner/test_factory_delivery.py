@@ -133,11 +133,6 @@ class FactoryDeliveryTests(unittest.TestCase):
             delivery.step()
         delivery.clients.assert_not_called()
 
-    def test_direct_merge_entrypoint_never_dispatches_provider_write(self):
-        delivery = NativeDelivery(SimpleNamespace(native={}))
-        with self.assertRaises(DeliveryError):
-            delivery.merge()
-
     def test_nonfactory_pr_delivery_does_not_require_factory_artifacts(self):
         host = SimpleNamespace(policy=ExecutionPolicy(), snapshot={})
         self.assertIsNone(factory_delivery_barrier(host))

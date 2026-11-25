@@ -27,16 +27,12 @@ class FactoryBaseUpdate:
         self.host, self.native = native, native.native
 
     def unpublished(self):
-        if (
-            self.native.get("delivery")
-            or self.native.get("publication_history")
-            or self.native.get("delivery_recovery_generation")
-        ):
+        if self.native.get("delivery") or self.native.get("publication_history"):
             raise ReconciliationRequired(
                 "Reconcile the original publication before any factory base repair."
             )
         if any(
-            value.get("kind") in {"delivery", "revision", "merge"}
+            value.get("kind") not in {"agent", "validation", "dependency"}
             for value in self.native.get("intents", {}).values()
         ):
             raise ReconciliationRequired(

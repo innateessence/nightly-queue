@@ -15,8 +15,8 @@ from vibearr_runner.browser_receipts import (
     collect_report,
     validate_binding,
     validate_receipt,
+    validate_capture_receipts,
 )
-from vibearr_runner.merge_acceptance import capture_page, screenshot_receipts
 
 
 def fixture_png(*, reverse=False, width=1440, height=1000):
@@ -127,16 +127,6 @@ class DockerBrowserReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Docker browser"):
             self.validate({"schema_version": 1, "browser": "/opt/google/chrome/chrome"})
 
-    def test_host_capture_helper_cannot_launch_a_browser(self):
-        with self.assertRaisesRegex(RuntimeError, "retired"):
-            capture_page(
-                source_checkout="/unused",
-                revision="a" * 40,
-                url="http://127.0.0.1:8000",
-                output="/unused.png",
-                browser_profile="/unused",
-            )
-
     def test_receipt_cannot_read_an_arbitrary_file_outside_browser_artifacts(self):
         frame = self.frame()
         frame["path"] = str(self.directory / "outside.png")
@@ -185,24 +175,24 @@ class DockerBrowserReceiptTests(unittest.TestCase):
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.capture.stat().st_mode & 0o777, 0o700)
 
-    def test_direct_merge_acceptance_requires_all_four_capture_modes(self):
+    def test_capture_receipt_set_requires_all_four_capture_modes(self):
         with self.assertRaisesRegex(ValueError, "all desktop/mobile"):
-            screenshot_receipts(
+            validate_capture_receipts(
                 [self.frame()], self.binding["revision"], artifact_root=self.root
             )
 
-    def test_direct_merge_acceptance_rejects_mixed_application_images(self):
+    def test_capture_receipt_set_rejects_mixed_application_images(self):
         frames = json.loads(self.report().read_bytes())["screenshots"]
         frames[3]["application_image"] = "sha256:" + "f" * 64
         with self.assertRaisesRegex(ValueError, "one source/image binding"):
-            screenshot_receipts(
+            validate_capture_receipts(
                 frames, self.binding["revision"], artifact_root=self.root
             )
 
-    def test_direct_merge_acceptance_accepts_one_complete_bound_capture(self):
+    def test_capture_receipt_set_accepts_one_complete_bound_capture(self):
         frames = json.loads(self.report().read_bytes())["screenshots"]
         self.assertEqual(
-            screenshot_receipts(
+            validate_capture_receipts(
                 frames,
                 self.binding["revision"],
                 expected_tree=self.binding["tree_sha"],

@@ -132,11 +132,6 @@ class NativeDelivery:
             )
 
     def _step(self):
-        historical = self.native.get("merge", {})
-        if historical.get("dispatched") or historical.get("merge"):
-            from .native_merge import NativeMerge
-
-            return NativeMerge(self.host).reconcile()
         require_human_delivery(self.host.policy)
         if self.data.get(
             "checkpoint"
@@ -253,11 +248,6 @@ class NativeDelivery:
         self.host.save()
         return "continue"
 
-    def merge(self):
-        raise DeliveryError(
-            "Automatic merge is disabled; a human must merge the pull request."
-        )
-
     def report(self):
         require_human_delivery(self.host.policy)
         pull = self.data["pull_request"]
@@ -346,32 +336,6 @@ class NativeDelivery:
                 "mode": self.host.policy.delivery_mode,
                 "pull_request": pull,
                 "pushed_sha": workspace["commit_sha"],
-                "checks": [
-                    {
-                        key: entry[key]
-                        for key in (
-                            "name",
-                            "producer_id",
-                            "head_sha",
-                            "conclusion",
-                            "url",
-                        )
-                    }
-                    for entry in self.native.get("merge", {})
-                    .get("receipt", {})
-                    .get("checks", [])
-                ],
-                "merge": (
-                    {
-                        key: self.native["merge"]["merge"][key]
-                        for key in ("commit_sha", "head_sha")
-                    }
-                    if self.native.get("merge", {}).get("merge")
-                    else None
-                ),
-                "issue_completion": self.native.get("merge", {}).get(
-                    "issue_completion"
-                ),
             },
         }
 

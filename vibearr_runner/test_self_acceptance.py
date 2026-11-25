@@ -1,4 +1,3 @@
-import importlib.util
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
@@ -38,33 +37,6 @@ class AcceptanceTests(unittest.TestCase):
         self.assertIn("status-filter", scenarios["merge"]["tasks"][0]["body"])
         self.assertNotIn("Add a queue status filter", repr(scenarios["delivery"]))
         self.assertTrue(scenarios["merge"]["available"])
-
-    def test_merge_scenario_delegates_to_exact_two_issue_driver(self):
-        with (
-            patch(
-                "sys.argv",
-                [
-                    "self_acceptance",
-                    "--execute",
-                    "--scenario=merge",
-                    "--project-id",
-                    "1",
-                    "--first-issue",
-                    "12",
-                    "--second-issue",
-                    "13",
-                    "--state",
-                    "/tmp/owned-state",
-                    "--evidence",
-                    "/tmp/owned-evidence",
-                ],
-            ),
-            patch("vibearr_runner.merge_acceptance.main", return_value=0) as merge_main,
-        ):
-            self.assertEqual(self_acceptance.main(), 0)
-        arguments = merge_main.call_args.args[0]
-        self.assertIn("--execute", arguments)
-        self.assertEqual(arguments[arguments.index("--second-issue") + 1], "13")
 
     def test_evidence_history_fetches_all_pages(self):
         queue = Mock()
@@ -332,92 +304,56 @@ class ProviderObservationTests(unittest.TestCase):
                 )
 
 
-@unittest.skipUnless(
-    importlib.util.find_spec("vibearr_executor"),
-    "Install the native-runtime extra for real native receipt parsing",
-)
 class NativeAcceptanceEvidenceTests(unittest.TestCase):
     def test_explicit_validation_profile_does_not_require_an_environment_fallback(self):
         from vibearr_executor import SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION
-        from vibearr_executor.validation_profile import ValidationProfile
-        from vibearr_runner.native_codex import codex_profile
+        from vibearr_executor.compact_profiles import profiles
         from vibearr_runner.native_runtime import runtime_diagnostics
         from vibearr_runner.policy import default_execution_policy
 
-        validation = ValidationProfile(
-            "sha256:" + "a" * 64, "sha256:" + "b" * 64, "c" * 64
-        )
-        profiles = [
-            codex_profile("sha256:" + "d" * 64, "token"),
-            *validation.executor_profiles(),
-        ]
+        installed, validation = profiles("sha256:" + "d" * 64, "c" * 64)
         executor = Mock()
         executor.capabilities.return_value = {
             "schema_version": 1,
             "protocol_version": 2,
             "qualification_version": QUALIFICATION_VERSION,
-            "runtime": "compose-slot-v2",
+            "runtime": "compact-worker-v1",
             "qualified": True,
             "accepting_work": True,
             "binding_digest": "e" * 64,
             "profiles": [
-                {**value.data(), "profile_digest": value.digest} for value in profiles
+                {**value.data(), "profile_digest": value.digest} for value in installed
             ],
         }
         policy = default_execution_policy()
-        policy.update(
-            runtime_profile="codex-token-v1", validation_profile=validation.profile_id
-        )
+        policy.update(validation_profile=validation.profile_id)
         with patch.dict("os.environ", {"VIBEARR_VALIDATION_PROFILE_FILE": ""}):
             result = runtime_diagnostics(
                 policy, executor, validation_profile=validation
             )
         self.assertTrue(result["runtime_ready"], result["reason"])
+        self.assertFalse(result["native_agent_ready"])
 
-    def test_profile_selection_adds_all_checks_without_agent_package_egress(self):
-        from vibearr_executor.validation_profile import ValidationProfile
-        from vibearr_runner.bootstrap_profiles import profiles
+    def test_profiles_install_fixed_checks_without_agent_package_egress(self):
+        from vibearr_executor.compact_profiles import profiles
 
-        validation = ValidationProfile(
-            "sha256:" + "a" * 64, "sha256:" + "b" * 64, "c" * 64
+        image = "sha256:" + "d" * 64
+        installed, validation = profiles(image, "c" * 64)
+        agent = next(
+            value for value in installed if value.profile_id == "native-default"
         )
-        values = profiles("sha256:" + "d" * 64, validation, "token")
-        self.assertEqual(len(values), 11)
-        agent = next(value for value in values if value["phase"] == "agent")
-        self.assertEqual(agent["network_hosts"], ["api.openai.com"])
-        self.assertEqual(agent["database_image"], validation.database_image)
-        checks = [value for value in values if value["phase"] == "validation"]
-        self.assertEqual(len(checks), 9)
+        self.assertNotIn("pypi.org", agent.network_hosts)
+        self.assertNotIn("files.pythonhosted.org", agent.network_hosts)
+        self.assertEqual(agent.backend_secret_env, "VIBEARR_NATIVE_CONNECTION")
+        self.assertEqual(agent.database_image, image)
+        checks = [value for value in installed if value.phase == "validation"]
+        self.assertEqual(len(checks), len(validation.data()["required_checks"]))
         self.assertTrue(
             all(
-                not value["backend_secret_env"] and not value["network_hosts"]
+                not value.backend_secret_env and not value.network_hosts
                 for value in checks
             )
         )
-
-    def test_existing_profile_choice_cannot_be_replaced(self):
-        from vibearr_executor.validation_profile import ValidationProfile
-        from vibearr_runner.bootstrap_profiles import profiles
-
-        validation = ValidationProfile(
-            "sha256:" + "a" * 64, "sha256:" + "b" * 64, "c" * 64
-        )
-        original = profiles("sha256:" + "d" * 64, validation, "token")
-        with self.assertRaisesRegex(ValueError, "differs"):
-            profiles("sha256:" + "e" * 64, validation, "token", original)
-
-    def test_private_profile_writer_is_idempotent_and_preserves_other_choices(self):
-        from vibearr_runner.bootstrap_profiles import save_new
-
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "profiles.json"
-            self.assertTrue(save_new(path, [{"profile_id": "selected"}]))
-            original = path.stat().st_mtime_ns
-            self.assertFalse(save_new(path, [{"profile_id": "selected"}]))
-            self.assertEqual(path.stat().st_mtime_ns, original)
-            self.assertEqual(path.stat().st_mode & 0o077, 0)
-            with self.assertRaisesRegex(ValueError, "never overwrites"):
-                save_new(path, [{"profile_id": "different"}])
 
     def test_non_native_run_cannot_claim_acceptance(self):
         queue = Mock()
@@ -431,32 +367,6 @@ class NativeAcceptanceEvidenceTests(unittest.TestCase):
             "item": {"project": {"id": 1}, "issue_number": 10},
         }
         with self.assertRaisesRegex(ValueError, "actual native lifecycle"):
-            self_acceptance.collect_run(queue, Mock(), str(uuid4()), 1, 10)
-
-    def test_approval_record_prevents_native_acceptance(self):
-        queue = Mock()
-        queue.reconcile.return_value = {
-            "run": {
-                "state": "completed",
-                "native_outcome": "delivered",
-                "result_status": "succeeded",
-                "configuration_snapshot": {
-                    "execution_kind": "native",
-                    "autonomous": True,
-                },
-                "source_snapshot": {"issue_number": 10, "repository_id": 99},
-            },
-            "item": {
-                "project": {"id": 1},
-                "issue_number": 10,
-                "source": "github",
-                "github_repository_id": 99,
-            },
-        }
-        queue.request.return_value = {
-            "approvals": [{"consumed_at": "2026-11-16T00:00:00+00:00"}]
-        }
-        with self.assertRaisesRegex(ValueError, "legacy approvals"):
             self_acceptance.collect_run(queue, Mock(), str(uuid4()), 1, 10)
 
     def test_claimed_success_without_native_evidence_is_rejected(self):
@@ -480,7 +390,6 @@ class NativeAcceptanceEvidenceTests(unittest.TestCase):
             },
         }
         queue.request.side_effect = [
-            {"approvals": []},
             {"evidence": [], "has_more": False},
         ]
         with self.assertRaisesRegex(ValueError, "genuine successful native"):

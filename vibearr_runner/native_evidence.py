@@ -170,9 +170,9 @@ def validate_native_evidence(value: Any) -> dict[str, Any]:
     delivery = value["delivery"]
     fields(
         delivery,
-        {"mode", "pull_request", "pushed_sha", "checks", "merge", "issue_completion"},
+        {"mode", "pull_request", "pushed_sha"},
     )
-    if delivery["mode"] not in ("pull_request", "merge"):
+    if delivery["mode"] != "pull_request":
         raise EvidenceError("Native evidence has an invalid delivery mode.")
     digest(delivery["pushed_sha"], git=True)
     if delivery["pushed_sha"] != workspace["commit_sha"]:
@@ -192,34 +192,4 @@ def validate_native_evidence(value: Any) -> dict[str, Any]:
         raise EvidenceError(
             "The pull request must identify the delivered branch and commit."
         )
-    if not isinstance(delivery["checks"], list) or len(delivery["checks"]) > 128:
-        raise EvidenceError("Native remote checks must be a bounded list.")
-    for check in delivery["checks"]:
-        fields(check, {"name", "producer_id", "head_sha", "conclusion", "url"})
-        text(check["name"])
-        text(check["url"])
-        positive(check["producer_id"])
-        if (
-            check["head_sha"] != workspace["commit_sha"]
-            or check["conclusion"] != "success"
-        ):
-            raise EvidenceError("Remote checks must pass for the delivered commit.")
-    if delivery["mode"] == "pull_request":
-        if delivery["merge"] is not None or delivery["issue_completion"] is not None:
-            raise EvidenceError(
-                "PR-only evidence cannot claim a merge or issue completion."
-            )
-        return value
-    merge = delivery["merge"]
-    fields(merge, {"commit_sha", "head_sha"})
-    digest(merge["commit_sha"], git=True)
-    if merge["head_sha"] != workspace["commit_sha"] or not delivery["checks"]:
-        raise EvidenceError("Merge evidence requires exact-head remote checks.")
-    completion = delivery["issue_completion"]
-    if completion is not None:
-        fields(completion, {"operation_id", "issue_number", "state"})
-        identifier(completion["operation_id"])
-        positive(completion["issue_number"])
-        if completion["state"] != "closed":
-            raise EvidenceError("Issue completion must record closure.")
     return value

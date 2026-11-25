@@ -62,9 +62,6 @@ def receipt():
                 "head_sha": sha,
             },
             "pushed_sha": sha,
-            "checks": [],
-            "merge": None,
-            "issue_completion": None,
         },
     }
 
@@ -122,28 +119,8 @@ class NativeEvidenceTests(unittest.TestCase):
         with self.assertRaises(EvidenceError):
             validate_native_evidence(value)
 
-    def test_merge_mode_requires_actual_merge_and_remote_checks(self):
+    def test_automatic_merge_mode_cannot_form_delivery_evidence(self):
         value = receipt()
         value["delivery"]["mode"] = "merge"
-        value["delivery"]["merge"] = {"commit_sha": "e" * 40, "head_sha": "a" * 40}
-        with self.assertRaises(EvidenceError):
-            validate_native_evidence(value)
-
-    def test_merge_receipt_binds_remote_checks_to_head(self):
-        value = receipt()
-        delivery = value["delivery"]
-        delivery["mode"] = "merge"
-        delivery["merge"] = {"commit_sha": "e" * 40, "head_sha": "a" * 40}
-        delivery["checks"] = [
-            {
-                "name": "Tests",
-                "producer_id": 1,
-                "head_sha": "a" * 40,
-                "conclusion": "success",
-                "url": "https://github.com/example/repo/actions/runs/1",
-            }
-        ]
-        self.assertEqual(validate_native_evidence(value), value)
-        delivery["checks"][0]["head_sha"] = "d" * 40
         with self.assertRaises(EvidenceError):
             validate_native_evidence(value)
