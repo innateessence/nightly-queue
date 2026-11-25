@@ -17,6 +17,7 @@ from vibearr_runner.native_contract import (
     termination_record,
     validate_context,
     validate_native_artifact,
+    validate_receipt,
 )
 from vibearr_runner.native_sessions import NativeSession
 
@@ -178,6 +179,32 @@ class NativeExecutorContractTests(unittest.TestCase):
         with self.assertRaisesRegex(NativeContractError, "observed worker boot"):
             receipt_summary(observed)
 
+    def test_container_id_cannot_replace_protected_worker_identity(self):
+        _, _, observed = observed_operation()
+        observed.pop("execution_identity")
+        observed.pop("worker_boot")
+        observed["result"].pop("execution_identity")
+        with self.assertRaises(NativeContractError):
+            receipt_summary(observed)
+
+    def test_container_only_receipt_format_is_rejected(self):
+        _, _, observed = observed_operation()
+        value = receipt_summary(observed)
+        value.pop("schema_version")
+        value.pop("execution_identity")
+        value["container_id"] = "c" * 64
+        with self.assertRaises(NativeContractError):
+            validate_receipt(value)
+
+    def test_cancelled_unstarted_operation_keeps_protected_terminal_receipt(self):
+        _, _, observed = observed_operation()
+        observed["result"].update(
+            exit_code=None, started_at=None, canceled=True, artifact=None
+        )
+        value = receipt_summary(observed)
+        self.assertEqual(validate_receipt(value), value)
+        self.assertFalse(receipt_passed(value))
+
     def test_agent_result_accepts_generic_session_and_usage(self):
         original, changed, observed = observed_operation()
         session = NativeSession(
@@ -219,7 +246,10 @@ class NativeExecutorContractTests(unittest.TestCase):
 
     def test_agent_result_rejects_export_mismatch(self):
         _, changed, observed = observed_operation()
-        session = {"manifest": {"operation_id": observed["operation_id"]}}
+        session = {
+            "manifest": {"operation_id": observed["operation_id"]},
+            "execution_identity": observed["execution_identity"],
+        }
         outcome = {
             "result": observed["result"],
             "artifact": observed["result"]["artifact"],
@@ -228,8 +258,13 @@ class NativeExecutorContractTests(unittest.TestCase):
             "session_id": "ses_123",
             "agent_version": "1.2.3",
         }
-        with self.assertRaises(NativeContractError):
-            agent_result(intent_id=str(uuid4()), session=session, outcome=outcome)
+        with self.assertRaisesRegex(NativeContractError, "export bytes"):
+            agent_result(
+                intent_id=str(uuid4()),
+                session=session,
+                outcome=outcome,
+                observed=observed,
+            )
 
 
 class NativeContractTests(unittest.TestCase):
