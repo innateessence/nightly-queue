@@ -50,8 +50,8 @@ def preserve_interruption(directory, stdout, stderr, returncode):
 
 def client():
     return Client(
-        getenv("NQ_URL", "http://vibearr:8000"),
-        getenv("NQ_RUNNER_API_TOKEN", ""),
+        getenv("VIBEARR_URL", "http://vibearr:8000"),
+        getenv("VIBEARR_RUNNER_API_TOKEN", ""),
         max_bytes=8388608,
     )
 

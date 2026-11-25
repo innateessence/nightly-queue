@@ -15,14 +15,14 @@ LEGACY_BOUNDARY_TESTS = {
 def suite(kind: str) -> unittest.TestSuite:
     loader = unittest.TestLoader()
     if kind == "cli":
-        result = loader.discover(str(WORK / "nq"), top_level_dir=str(WORK))
+        result = loader.discover(str(WORK / "vibearr"), top_level_dir=str(WORK))
         result.addTests(loader.discover(str(WORK / "vibearr"), top_level_dir=str(WORK)))
         return result
     if kind == "runner":
-        return loader.discover(str(WORK / "coding_runner"), top_level_dir=str(WORK))
+        return loader.discover(str(WORK / "vibearr_runner"), top_level_dir=str(WORK))
     result = unittest.TestSuite()
-    for path in sorted((WORK / "coding_runner" / "acceptance").glob("test_*.py")):
-        tests = loader.loadTestsFromName("coding_runner.acceptance." + path.stem)
+    for path in sorted((WORK / "vibearr_runner" / "acceptance").glob("test_*.py")):
+        tests = loader.loadTestsFromName("vibearr_runner.acceptance." + path.stem)
 
         def append(group):
             for test in group:

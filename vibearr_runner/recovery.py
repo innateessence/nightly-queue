@@ -53,10 +53,8 @@ class DurableClient:
         durable = endpoint in {
             "contexts",
             "plans",
-            "handoff",
             "progress",
             "artifacts",
-            "approvals",
         }
         if method != "POST" or not durable:
             return self.client.request(method, path, payload, **limits)
@@ -155,7 +153,7 @@ class RecoveryCoordinator:
                     raise ReconciliationRequired(
                         "Remote owned work conflicts with the pending claim."
                     ) from None
-                from .backend_registry import BackendRegistry, ScopedCredentials
+                from .backend_registry import BackendRegistry
 
                 self.check_shutdown()
                 configuration = self.client.configuration()
@@ -164,9 +162,7 @@ class RecoveryCoordinator:
                     if pending_claim
                     else configuration["accounts"]
                 )
-                adapters = BackendRegistry().usage_adapters(
-                    accounts, ScopedCredentials(self.client)
-                )
+                adapters = BackendRegistry().usage_adapters(accounts)
                 for key, adapter in adapters.items():
                     self.gates.adapters.setdefault(key, adapter)
                 from .controller import processing_configuration
@@ -277,79 +273,3 @@ class RecoveryCoordinator:
             )
         state["operation"] = None
         self.journal.save(state)
-
-
-from .plan_store import ContextPlanStore  # noqa: E402
-from .context import digest  # noqa: E402
-from .plans import register_context_sources  # noqa: E402
-
-
-class DurableContextPlanStore(ContextPlanStore):
-    def _resume(self, endpoint, pending, **limits):
-        payload = pending["payload"]
-        document = {
-            key: value
-            for key, value in payload.items()
-            if key not in {"operation_id", "claim_token"}
-        }
-        return self._post(endpoint, document, payload["operation_id"], **limits)
-
-    def refresh(self, item, base_commit, **kwargs):
-        pending = self.client.state.get("request")
-        path = f"/api/v1/runner/runs/{self.run_id}/contexts/"
-        if not pending or pending["path"] != path:
-            return super().refresh(item, base_commit, **kwargs)
-        payload = pending["payload"]
-        if payload["base_commit"] != base_commit:
-            raise ReconciliationRequired(
-                "Pending context names a different inspected base."
-            )
-        limits = {
-            key: kwargs[key]
-            for key in ("deadline", "checkpoint", "inflight_checkpoint")
-            if key in kwargs
-        }
-        saved = self._resume("contexts", pending, **limits)["context"]
-        if saved.get("presentation_only") or saved.get("unavailable"):
-            raise ReconciliationRequired(
-                "Recovered context is only a redacted presentation."
-            )
-        if saved["digest"] != digest(saved["document"]):
-            raise ReconciliationRequired("Recovered context digest did not match.")
-        saved["sources"] = register_context_sources(saved["document"], self.sources)
-        return saved
-
-    def handoff(self, item, base_commit, **kwargs):
-        pending = self.client.state.get("request")
-        path = f"/api/v1/runner/runs/{self.run_id}/handoff/"
-        if not pending or pending["path"] != path:
-            return super().handoff(item, base_commit, **kwargs)
-        payload = pending["payload"]
-        if payload["base_commit"] != base_commit:
-            raise ReconciliationRequired(
-                "Pending handoff names a different inspected base."
-            )
-        operation_id = kwargs.get("operation_id")
-        if operation_id and str(operation_id) != payload["operation_id"]:
-            raise ReconciliationRequired(
-                "Pending handoff belongs to another operation."
-            )
-        timeout = kwargs.get("timeout_seconds")
-        deadline = None if timeout is None else time.monotonic() + timeout
-        result = self._resume(
-            "handoff",
-            pending,
-            deadline=deadline,
-            checkpoint=kwargs.get("checkpoint"),
-            inflight_checkpoint=kwargs.get("inflight_checkpoint"),
-        )
-        documents = [result["context"], result["plan"]]
-        if any(
-            entry.get("presentation_only") or entry.get("unavailable")
-            for entry in documents
-        ):
-            raise ReconciliationRequired(
-                "Recovered handoff is only a redacted presentation."
-            )
-        register_context_sources(result["context"]["document"], self.sources)
-        return result

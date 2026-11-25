@@ -33,8 +33,8 @@ def fixture(requirements):
         {
             "answer.py": (0o644, b"def answer():\n    return 0\n"),
             "requirements.txt": (0o644, requirements),
-            "coding_runner/__init__.py": (0o644, b""),
-            "coding_runner/test_answer.py": (
+            "vibearr_runner/__init__.py": (0o644, b""),
+            "vibearr_runner/test_answer.py": (
                 0o644,
                 b"import unittest\nfrom answer import answer\n\nclass AnswerTest(unittest.TestCase):\n    def test_answer(self):\n        self.assertEqual(answer(), 42)\n",
             ),
@@ -222,7 +222,7 @@ def acceptance(
             run_id=run_id,
             operation_id=next_operation(),
             source=source,
-            prompt="This is a bounded fixture. First run python -c 'import time; time.sleep(8)' to leave an observation window. Then edit only answer.py so answer() returns 42. Do not modify coding_runner/test_answer.py, requirements.txt or .codex/config.toml. Run python -m unittest discover -s /work/coding_runner -p test_answer.py and finish. Do not install dependencies or access other repositories.",
+            prompt="This is a bounded fixture. First run python -c 'import time; time.sleep(8)' to leave an observation window. Then edit only answer.py so answer() returns 42. Do not modify vibearr_runner/test_answer.py, requirements.txt or .codex/config.toml. Run python -m unittest discover -s /work/vibearr_runner -p test_answer.py and finish. Do not install dependencies or access other repositories.",
             model=model,
             policy=policy,
             deadline=(datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),

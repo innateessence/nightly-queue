@@ -69,7 +69,7 @@ def main():
     settings.DEBUG = False
     settings.ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
     settings.STATIC_ROOT = directory / "static"
-    settings.NQ_API_TOKEN = settings.VIBEARR_API_TOKEN = ""
+    settings.VIBEARR_API_TOKEN = settings.VIBEARR_API_TOKEN = ""
     settings.LOGGING = {"version": 1, "disable_existing_loggers": True}
     import django
 

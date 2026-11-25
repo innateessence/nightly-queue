@@ -60,11 +60,11 @@ def boundary():
         "/run/user/1000/docker.sock",
         "/home/jack/dockers/nightly-queue",
         "/var/lib/vibearr-runner",
-        "/var/lib/coding-runner",
+        "/var/lib/vibearr-runner",
     ):
         check(not Path(path).exists(), "Host/control state was mounted: " + path)
     for key in (
-        "NQ_API_TOKEN",
+        "VIBEARR_API_TOKEN",
         "VIBEARR_API_TOKEN",
         "DATABASE_PASSWORD",
         "DJANGO_SECRET_KEY",

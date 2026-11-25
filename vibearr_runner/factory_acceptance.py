@@ -1396,7 +1396,8 @@ def main(argv=None):
     parser.add_argument("--stack-report", type=Path)
     parser.add_argument("--failure-evidence", type=Path)
     runner_directory = os.getenv(
-        "VIBEARR_RUNNER_STATE_DIR", os.getenv("NQ_RUNNER_STATE_DIR", "/var/lib/vibearr")
+        "VIBEARR_RUNNER_STATE_DIR",
+        os.getenv("VIBEARR_RUNNER_STATE_DIR", "/var/lib/vibearr"),
     )
     parser.add_argument(
         "--controller-journal",

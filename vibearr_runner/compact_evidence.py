@@ -734,8 +734,8 @@ def validate_wheels(payload):
                 )
                 commands = set(configuration["console_scripts"])
                 expected = {
-                    "vibearr-cli": {"vibearr", "nq"},
-                    "vibearr-runner": {"vibearr-runner", "coding-runner"},
+                    "vibearr-cli": {"vibearr", "vibearr"},
+                    "vibearr-runner": {"vibearr-runner", "vibearr-runner"},
                     "vibearr-executor": {"vibearr-executor"},
                 }
                 if not expected[name] <= commands:
@@ -781,7 +781,8 @@ def validate_wheels(payload):
         installed = installed or "install" in arguments and "--no-index" in arguments
     if (
         not installed
-        or not {"vibearr", "nq", "vibearr-runner", "coding-runner"} <= help_commands
+        or not {"vibearr", "vibearr", "vibearr-runner", "vibearr-runner"}
+        <= help_commands
     ):
         raise ValueError("Installed CLI command execution evidence is incomplete.")
 

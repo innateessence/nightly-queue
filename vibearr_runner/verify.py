@@ -7,7 +7,7 @@ import contextlib
 import unittest
 from pathlib import Path
 
-import coding_runner
+import vibearr_runner
 
 BOUNDARY_METHODS = {
     "test_actual_sandbox_stops_command_at_remaining_budget",
@@ -18,7 +18,7 @@ BOUNDARY_METHODS = {
 def portable_suite():
     loader = unittest.TestLoader()
     suite = loader.discover(
-        str(Path(coding_runner.__file__).parent),
+        str(Path(vibearr_runner.__file__).parent),
         pattern="test_*.py",
         top_level_dir=str(Path(__file__).parent.parent),
     )
@@ -31,10 +31,10 @@ def portable_suite():
         "test_claude_recovery",
         "test_opencode_recovery",
     ):
-        path = Path(coding_runner.__file__).parent / "acceptance" / (module + ".py")
+        path = Path(vibearr_runner.__file__).parent / "acceptance" / (module + ".py")
         if not path.exists():
             continue
-        tests = loader.loadTestsFromName("coding_runner.acceptance." + module)
+        tests = loader.loadTestsFromName("vibearr_runner.acceptance." + module)
 
         def add(group):
             for test in group:

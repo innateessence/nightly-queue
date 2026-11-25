@@ -3,11 +3,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from typing import Any
-from uuid import UUID, uuid4
-
-
-class ApprovalRequired(Exception):
-    pass
+from uuid import UUID
 
 
 def digest(value: Any) -> str:
@@ -85,45 +81,3 @@ class ActionSpec:
     @property
     def binding_digest(self) -> str:
         return digest(self.to_data())
-
-
-class ApprovalBroker:
-    def __init__(self, client, run_id: str, claim_token: str):
-        self.client = client
-        self.run_id = str(UUID(run_id))
-        self.claim_token = claim_token
-
-    def verify_workspace(self, action: ActionSpec) -> None:
-        if action.workspace_id != self.run_id:
-            raise ApprovalRequired("Action workspace does not match the claimed run.")
-
-    def request(self, action: ActionSpec, operation_id: str) -> dict[str, Any]:
-        self.verify_workspace(action)
-        payload = {
-            "claim_token": self.claim_token,
-            "operation_id": str(UUID(operation_id)),
-            "action": action.to_data(),
-        }
-        return self.client.request(
-            "POST", f"/api/v1/runner/runs/{self.run_id}/approvals/", payload
-        )["approval"]
-
-    def consume(self, approval_id: str, action: ActionSpec) -> str:
-        self.verify_workspace(action)
-        approval_id = str(UUID(approval_id))
-        execution_id = str(uuid4())
-        payload = {
-            "claim_token": self.claim_token,
-            "binding_digest": action.binding_digest,
-            "execution_id": execution_id,
-        }
-        path = f"/api/v1/runner/runs/{self.run_id}/approvals/{approval_id}/consume/"
-        response = self.client.request("POST", path, payload)
-        if (
-            response.get("permit") is not True
-            or response.get("execution_id") != execution_id
-        ):
-            raise ApprovalRequired(
-                "An unused human approval for this exact action is required."
-            )
-        return execution_id

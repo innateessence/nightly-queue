@@ -87,7 +87,7 @@ def controller_witness(runner_id):
             selected_environment = {}
             for field in (process / "environ").read_bytes().split(b"\0"):
                 key, _, value = field.partition(b"=")
-                if key in {b"VIBEARR_RUNNER_STATE_DIR", b"NQ_RUNNER_STATE_DIR"}:
+                if key in {b"VIBEARR_RUNNER_STATE_DIR", b"VIBEARR_RUNNER_STATE_DIR"}:
                     selected_environment[key.decode()] = value.decode()
         except FileNotFoundError:
             continue
@@ -97,7 +97,7 @@ def controller_witness(runner_id):
         )
         directory = selected_environment.get("VIBEARR_RUNNER_STATE_DIR")
         directory = directory or selected_environment.get(
-            "NQ_RUNNER_STATE_DIR", "/var/lib/coding-runner"
+            "VIBEARR_RUNNER_STATE_DIR", "/var/lib/vibearr-runner"
         )
         found.append(
             {
