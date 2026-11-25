@@ -25,6 +25,13 @@ class Executor:
     def __init__(self, run_id, clock):
         self.run_id, self.clock = run_id, clock
         self.states, self.manifests = {}, {}
+        self.identity = {
+            "runtime": "compact-worker-v1",
+            "protocol_version": 2,
+            "instance_id": str(uuid4()),
+            "worker_boot": str(uuid4()),
+            "binding_digest": "b" * 64,
+        }
         self.stopped = []
         self.uncertain = False
 
@@ -37,17 +44,21 @@ class Executor:
             "run_id": self.run_id,
             "state": self.states[operation_id]["state"],
             "manifest_digest": digest(self.manifests[operation_id]),
+            "instance_id": self.identity["instance_id"],
         }
 
     def exited(self, operation_id, *, started=1000.0, ended=None, canceled=False):
         return {
             "operation_id": operation_id,
             "state": "exited",
+            "execution_identity": deepcopy(self.identity),
+            "worker_boot": self.identity["worker_boot"],
             "descendants_terminated": True,
             "container_id": "a" * 64,
             "result": {
                 "operation_id": operation_id,
                 "run_id": self.run_id,
+                "execution_identity": deepcopy(self.identity),
                 "terminated": True,
                 "exit_code": 0,
                 "started_at": started,
@@ -173,12 +184,13 @@ class FactoryRecoveryTests(unittest.TestCase):
         }
         self.factory["roles"][f"{role}:{self.factory['round']}"]["session"] = {
             "manifest": manifest,
-            "execution_identity": None,
+            "execution_identity": deepcopy(self.native.executor.identity),
         }
         self.native.executor.manifests[identity] = manifest
         self.native.executor.states[identity] = {
             "operation_id": identity,
             "state": "not-started",
+            "execution_identity": deepcopy(self.native.executor.identity),
         }
         return identity
 
@@ -187,6 +199,7 @@ class FactoryRecoveryTests(unittest.TestCase):
         self.native.executor.states[identity] = {
             "operation_id": identity,
             "state": "running",
+            "execution_identity": deepcopy(self.native.executor.identity),
         }
 
     def finish(self, identity, elapsed):
@@ -293,7 +306,12 @@ class FactoryRecoveryTests(unittest.TestCase):
         self.dispatch(identity)
         with self.assertRaisesRegex(ReconciliationRequired, "unknown"):
             self.recovery.observe_role(
-                identity, {"operation_id": identity, "state": "unknown"}
+                identity,
+                {
+                    "operation_id": identity,
+                    "state": "unknown",
+                    "execution_identity": deepcopy(self.native.executor.identity),
+                },
             )
         with self.assertRaisesRegex(ReconciliationRequired, "original role"):
             self.prepare("reviewer-code")
@@ -453,10 +471,6 @@ class FactoryRecoveryTests(unittest.TestCase):
     def test_worker_boot_change_cannot_rebind_original_operation(self):
         identity = self.prepare()
         session = self.factory["roles"]["build:1"]["session"]
-        session["execution_identity"] = {
-            "instance_id": str(uuid4()),
-            "worker_boot": str(uuid4()),
-        }
         self.dispatch(identity)
         status = self.native.executor.status(identity)
         status["execution_identity"] = {

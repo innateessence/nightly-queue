@@ -392,6 +392,8 @@ class CompactAdapterTests(unittest.TestCase):
         }
         self.capabilities = {
             **self.identity,
+            "schema_version": 1,
+            "qualification_version": 1,
             "qualified": True,
             "profiles": [
                 {**self.profile.data(), "profile_digest": self.profile.digest}
