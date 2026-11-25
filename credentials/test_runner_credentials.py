@@ -1,5 +1,3 @@
-import json
-
 from django.core.exceptions import ValidationError
 from django.db.models.deletion import ProtectedError
 from django.test import TestCase, override_settings
@@ -16,70 +14,15 @@ from .test_models import TEST_KEY
 @override_settings(VIBEARR_CREDENTIAL_KEY=TEST_KEY)
 class BackendCredentialTests(TestCase):
     def make_credential(
-        self, provider="codex", kind="token", secret="backend-private-token"
+        self, provider="github", kind="token", secret="backend-private-token"
     ):
         credential = Credential(name="Backend", provider=provider, kind=kind)
         credential.set_secret(secret)
         credential.save()
         return credential
 
-    def test_codex_session_round_trip(self):
-        material = {
-            "tokens": {
-                "access_token": "access",
-                "refresh_token": "refresh",
-                "id_token": "id",
-                "account_id": "account",
-            }
-        }
-        secret = json.dumps(material)
-        credential = self.make_credential(kind="session", secret=secret)
-        credential.refresh_from_db()
-        self.assertEqual(json.loads(credential.get_secret()["secret"]), material)
-        self.assertNotIn("access", credential.encrypted_payload)
-
-    def test_codex_session_rejects_unknown_fields_without_echo(self):
-        secret = '{"private-secret-value":"other"}'
-        with self.assertRaises(ValidationError) as caught:
-            self.make_credential(kind="session", secret=secret)
-        self.assertNotIn("private-secret-value", str(caught.exception))
-
-    def test_codex_session_accepts_pinned_cli_owner_and_provenance_metadata(self):
-        tokens = {
-            "access_token": "access",
-            "refresh_token": "refresh",
-            "id_token": "id",
-            "account_id": "account",
-            "login_owner_id": "login-owner",
-            "oauth_provenance": {
-                "issuer": "https://auth.openai.com",
-                "client_id": "codex-client",
-            },
-        }
-        credential = self.make_credential(
-            kind="session", secret=json.dumps({"tokens": tokens})
-        )
-        self.assertEqual(
-            json.loads(credential.get_secret()["secret"])["tokens"], tokens
-        )
-
-    def test_codex_session_rejects_unknown_provenance_metadata(self):
-        tokens = {
-            "access_token": "access",
-            "refresh_token": "refresh",
-            "id_token": "id",
-            "account_id": "account",
-            "oauth_provenance": {
-                "issuer": "https://auth.openai.com",
-                "client_id": "codex-client",
-                "command": "untrusted",
-            },
-        }
-        with self.assertRaises(ValidationError):
-            self.make_credential(kind="session", secret=json.dumps({"tokens": tokens}))
-
     def test_opencode_ollama_connection(self):
-        secret = '{"provider":"ollama","base_url":"http://runner-ollama:11434/api"}'
+        secret = '{"provider":"ollama","base_url":"http://ollama.example:11434"}'
         credential = self.make_credential(
             provider="opencode", kind="connection", secret=secret
         )
@@ -95,7 +38,9 @@ class BackendCredentialTests(TestCase):
 
     def test_wrong_kind_rejected(self):
         with self.assertRaises(ValidationError):
-            self.make_credential(provider="claude", kind="session", secret="{}")
+            self.make_credential(
+                provider="claude", kind="token", secret="private-token"
+            )
 
     def test_provider_cannot_change(self):
         credential = self.make_credential()
@@ -257,8 +202,7 @@ class BackendCredentialTests(TestCase):
             {
                 "name": "Backend",
                 "provider": "claude",
-                "kind": "token",
-                "secret": "private-token",
+                "kind": "login",
             }
         )
         self.assertTrue(form.is_valid(), form.errors)

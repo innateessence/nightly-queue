@@ -15,16 +15,21 @@ class APISettingsTests(TestCase):
     def setUp(self):
         self.url = reverse("api_settings")
         self.github = self.make_credential("GitHub token", "github", "token")
-        self.codex = self.make_credential("Codex token", "codex", "token")
+        self.codex = self.make_credential("Codex login", "codex", "login")
 
     def make_credential(self, name, provider, kind):
         credential = Credential(name=name, provider=provider, kind=kind)
-        credential.set_secret("settings-private-secret")
+        secret = (
+            "managed-subscription-login"
+            if kind == "login"
+            else "settings-private-secret"
+        )
+        credential.set_secret(secret)
         credential.save()
         return credential
 
     def test_page_shows_only_existing_provider_tokens(self):
-        other = self.make_credential("Other account", "claude", "token")
+        other = self.make_credential("Other account", "claude", "login")
         response = self.client.get(self.url)
         form = response.context["form"]
         self.assertEqual(list(form.fields["github_credential"].queryset), [self.github])
@@ -103,7 +108,7 @@ class APISettingsTests(TestCase):
         self.assertFalse(APISettings.objects.exists())
 
     def test_non_token_is_rejected(self):
-        credential = self.make_credential("Other account", "claude", "token")
+        credential = self.make_credential("Other account", "claude", "login")
         response = self.client.post(self.url, {"github_credential": credential.pk})
         self.assertIn("github_credential", response.context["form"].errors)
         self.assertFalse(APISettings.objects.exists())

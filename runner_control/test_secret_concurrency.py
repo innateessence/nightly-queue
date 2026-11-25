@@ -7,6 +7,7 @@ from django.test import TransactionTestCase, override_settings
 
 from credentials.models import Credential, RunnerPreflightGrant
 from credentials.test_models import TEST_KEY
+from projects.models import Project
 
 from .auth import token_digest
 from .models import RunnerIdentity
@@ -20,20 +21,24 @@ class SelectedSecretConcurrencyTests(TransactionTestCase):
         self.runner = RunnerIdentity.objects.create(
             name="owner", token_digest=token_digest("concurrency-owner")
         )
-        self.credential = Credential(name="Backend", provider="codex", kind="token")
+        self.credential = Credential(name="Backend", provider="github", kind="token")
         self.credential.set_secret("original-private-secret")
         self.credential.save()
         saved = RunnerSettings.objects.get(pk=1)
         saved.implementation_backend = "codex"
-        saved.implementation_credential = self.credential
+        saved.repository_credential = self.credential
         saved.save()
         RunnerPreflightGrant.objects.create(
             runner=self.runner, credential=self.credential
         )
+        project = Project.objects.create(
+            name="Concurrency", repository_url="https://github.com/example/concurrency"
+        )
         self.data = {
             "scope": "preflight",
-            "backend": "codex",
+            "backend": "github",
             "credential_id": self.credential.pk,
+            "project_id": project.pk,
         }
 
     def action(self, function, barrier):

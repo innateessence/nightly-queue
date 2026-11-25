@@ -79,23 +79,6 @@ class SystemLogHandlerTests(TestCase):
         entry = self.emit("queue-private-key django-private-key")
         self.assertEqual(entry.message, "[redacted] [redacted]")
 
-    def test_structured_session_tokens_are_redacted(self):
-        material = json.dumps(
-            {
-                "tokens": {
-                    "access_token": "session-access",
-                    "refresh_token": "session-refresh",
-                    "id_token": "session-id",
-                    "account_id": "session-account",
-                }
-            }
-        )
-        credential = Credential(name="Session", provider="codex", kind="session")
-        credential.set_secret(material)
-        credential.save()
-        entry = self.emit("session-access session-refresh session-id")
-        self.assertEqual(entry.message, "[redacted] [redacted] [redacted]")
-
     def test_encoded_secret_variants_are_redacted(self):
         credential = Credential(name="Secret", provider="github", kind="token")
         credential.set_secret('private/secret"value')

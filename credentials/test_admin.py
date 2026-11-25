@@ -96,7 +96,7 @@ class CredentialAdminTests(TestCase):
 
     def test_edit_cannot_change_type(self):
         credential = self.make_credential()
-        self.data.update(kind="session", secret="")
+        self.data.update(kind="login", secret="")
         self.client.post(self.change_url(credential), self.data)
         credential.refresh_from_db()
         self.assertEqual(credential.kind, "token")

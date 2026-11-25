@@ -274,29 +274,23 @@ class OperatorPresentationTests(TestCase):
         provision_controller(self)
         self.client.defaults["HTTP_AUTHORIZATION"] = "Bearer operator-test-token"
         self.current = Credential(
-            name="Current selection", provider="codex", kind="token"
+            name="Current selection", provider="github", kind="token"
         )
         self.current.set_secret("previous-global-selection")
         self.current.save()
         self.current.set_secret("current-global-selection")
         self.current.save()
         self.historical = Credential(
-            name="Run selection", provider="codex", kind="token"
+            name="Run selection", provider="github", kind="token"
         )
         self.historical.set_secret("previous-run-selection")
         self.historical.save()
         self.historical.set_secret("current-run-selection")
         self.historical.save()
         self.settings = RunnerSettings.objects.get(pk=1)
-        self.settings.implementation_backend = self.settings.implementation_backend = (
-            "codex"
-        )
-        self.settings.implementation_model = self.settings.implementation_model = (
-            "fixture-model"
-        )
-        self.settings.implementation_credential = (
-            self.settings.implementation_credential
-        ) = self.current
+        self.settings.implementation_backend = "codex"
+        self.settings.implementation_model = "fixture-model"
+        self.settings.repository_credential = self.current
         self.settings.save()
         self.project = Project.objects.create(
             name="Fixture project", repository_url="https://github.com/example/test"
@@ -313,7 +307,7 @@ class OperatorPresentationTests(TestCase):
             wait_reason="previous-run-selection",
             result_url="https://github.com/example/test/pull/1?detail=current-run-selection",
             configuration_snapshot={
-                "effective": {"implementation_credential_id": self.historical.pk},
+                "effective": {"repository_credential_id": self.historical.pk},
                 "instructions": "previous-run-selection and current-run-selection",
             },
         )
@@ -421,7 +415,7 @@ class OperatorPresentationTests(TestCase):
 
         Credential.objects.create(
             name="Unselected corrupt",
-            provider="codex",
+            provider="github",
             kind="token",
             encrypted_payload="invalid",
         )
@@ -454,10 +448,9 @@ class OperatorPresentationTests(TestCase):
         )
 
     def test_settings_gate_sections_use_safe_presentation(self):
-        self.qualification()
         response = self.client.get(reverse("coding_runner_edit", args=[1]))
         self.assert_safe(response, global_values=True)
-        self.assertContains(response, "Controlled release verification")
+        self.assertContains(response, "Processing gates")
         self.assertContains(response, "[redacted]")
 
     def test_project_selected_credentials_are_included_without_report_run(self):
@@ -466,7 +459,7 @@ class OperatorPresentationTests(TestCase):
         ProjectRunnerSettings.objects.create(
             project=self.project,
             overrides={
-                "implementation_credential_id": {
+                "repository_credential_id": {
                     "mode": "replace",
                     "value": self.historical.pk,
                 }
@@ -483,7 +476,7 @@ class OperatorPresentationTests(TestCase):
         ProjectRunnerSettings.objects.create(
             project=self.project,
             overrides={
-                "implementation_credential_id": {"mode": "replace", "value": 999999}
+                "repository_credential_id": {"mode": "replace", "value": 999999}
             },
         )
         response = self.client.get(reverse("runner_system"))
@@ -675,7 +668,7 @@ class OperatorPresentationTests(TestCase):
 
         Credential.objects.create(
             name="Unselected corrupt JSON fixture",
-            provider="codex",
+            provider="github",
             kind="token",
             encrypted_payload="invalid",
         )

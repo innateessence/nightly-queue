@@ -84,7 +84,7 @@ class CredentialTests(TestCase):
 
     def test_type_cannot_change(self):
         credential = self.make_credential()
-        credential.kind = Credential.Kind.SSH
+        credential.kind = Credential.Kind.LOGIN
         with self.assertRaises(ValidationError):
             credential.save()
 

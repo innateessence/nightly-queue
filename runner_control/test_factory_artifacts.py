@@ -423,7 +423,6 @@ class FactoryArtifactTests(FactoryFixture, TestCase):
             str(self.claim),
             self.runner_token,
             "github-native-secret",
-            "backend-native-secret",
         ):
             document = self.document()
             document["payload"]["summary"] = "Leak " + secret
