@@ -16,7 +16,6 @@ from unittest.mock import Mock, patch
 from urllib.error import URLError
 from uuid import uuid4
 
-from vibearr_runner.context import manual_context
 from vibearr_runner.client import ConflictError, SupersededSourceError
 from vibearr_runner.journal import Journal
 from vibearr_runner.native_lifecycle import NativeLifecycle
@@ -344,7 +343,21 @@ class NativeLifecycleTests(unittest.TestCase):
             "branch_name": "task/native",
             "claim_token": str(uuid4()),
         }
-        self.queue = Queue(manual_context(item))
+        self.queue = Queue(
+            {
+                "schema_version": 1,
+                "source": "manual",
+                "title": item["title"],
+                "instructions": item["instructions"],
+                "issue": None,
+                "comments": [],
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "checkout": {
+                    key: item[key]
+                    for key in ("repository_url", "base_branch", "branch_name")
+                },
+            }
+        )
         self.host = SimpleNamespace(
             client=self.queue,
             journal=self.journal,
