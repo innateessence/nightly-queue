@@ -18,13 +18,29 @@ from vibearr_runner.recovery import ReconciliationRequired
 
 
 class Executor:
+    compact = True
+
     def __init__(self):
-        self.instance = str(uuid4())
+        self.instance, self.boot = str(uuid4()), str(uuid4())
         self.stopped = []
         self.manifests = {}
 
+    def identity(self):
+        return {
+            "runtime": "compact-worker-v1",
+            "protocol_version": 2,
+            "instance_id": self.instance,
+            "worker_boot": self.boot,
+            "binding_digest": "b" * 64,
+        }
+
     def capabilities(self):
-        return {"instance_id": self.instance, "binding_digest": "b" * 64}
+        return {
+            **self.identity(),
+            "schema_version": 1,
+            "qualified": True,
+            "qualification_version": 1,
+        }
 
     def stop(self, operation):
         self.stopped.append(operation)
@@ -32,7 +48,7 @@ class Executor:
 
     def prepare(self, manifest):
         self.manifests[manifest["operation_id"]] = manifest
-        return {}
+        return {"execution_identity": self.identity(), "worker_boot": self.boot}
 
     def termination_receipt(self, operation):
         manifest = self.manifests[operation]
@@ -49,7 +65,11 @@ class Executor:
         }
 
     def status(self, operation):
-        return {"state": "running"}
+        return {
+            "state": "running",
+            "execution_identity": self.identity(),
+            "worker_boot": self.boot,
+        }
 
     def pause(self, operation):
         return {}
@@ -59,8 +79,8 @@ class Executor:
 
 
 class Adapter:
-    def __init__(self, journal):
-        self.journal = journal
+    def __init__(self, journal, executor):
+        self.journal, self.executor = journal, executor
         self.state = "not-started"
         self.starts = []
         self.prepared = []
@@ -89,7 +109,14 @@ class Adapter:
             "profile_digest": "d" * 64,
         }
         return NativeSession(
-            "codex", "test", account, "token", "sha256:" + "a" * 64, "b" * 64, manifest
+            "codex",
+            "test",
+            account,
+            "login",
+            "sha256:" + "a" * 64,
+            "b" * 64,
+            manifest,
+            self.executor.identity(),
         )
 
     def reconcile(self, session):
@@ -140,7 +167,7 @@ class NativePreflightTests(unittest.TestCase):
         self.addCleanup(self.journal.__exit__)
         self.state = self.journal.load()
         self.executor, self.queue = Executor(), Queue()
-        self.adapter = Adapter(self.journal)
+        self.adapter = Adapter(self.journal, self.executor)
         original_prepare = self.adapter.prepare_auth_probe
 
         def prepare(**request):
