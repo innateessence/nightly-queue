@@ -15,7 +15,6 @@ from .initialize import (
     ROOT,
     private,
     require_existing_credentials,
-    selected,
     write_once,
 )
 
@@ -58,16 +57,16 @@ def initialize(root=ROOT, existing_database=Path("/var/lib/existing-postgres")):
         os.chown(database, 999, 10001)
         write_once(
             database / "password",
-            selected("VIBEARR_POSTGRES_PASSWORD", "POSTGRES_PASSWORD"),
+            os.environ.get("VIBEARR_POSTGRES_PASSWORD", ""),
             uid=999,
             gid=10001,
             mode=0o440,
         )
         write_once(
             root / "application/api-token",
-            selected("VIBEARR_API_TOKEN", "NQ_API_TOKEN"),
+            os.environ.get("VIBEARR_API_TOKEN", ""),
         )
-        encryption_key = selected("VIBEARR_CREDENTIAL_KEY", "NQ_CREDENTIAL_KEY")
+        encryption_key = os.environ.get("VIBEARR_CREDENTIAL_KEY", "")
         if not encryption_key and not (root / "application/encryption-key").exists():
             encryption_key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
         write_once(root / "application/encryption-key", encryption_key)

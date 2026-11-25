@@ -14,14 +14,6 @@ VOLUMES = (
     "database-secrets",
     "runner-secrets",
     "runner-data",
-    "runner-control",
-    "runner-logins",
-)
-COMPACT_VOLUMES = (
-    "application-secrets",
-    "database-secrets",
-    "runner-secrets",
-    "runner-data",
     "runner-logins",
     "worker-secrets",
     "worker-control",
