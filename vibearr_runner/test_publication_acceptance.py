@@ -237,6 +237,82 @@ class ProviderObservationTests(unittest.TestCase):
     "Install the native-runtime extra for protected native acceptance checks",
 )
 class NativeAcceptanceEvidenceTests(unittest.TestCase):
+    def failed_observation(self, check):
+        queue, github = Mock(), Mock()
+        queue.reconcile.return_value = {
+            "run": {
+                "state": "completed",
+                "native_outcome": "failed",
+                "result_status": "failed",
+                "result_url": "",
+                "configuration_snapshot": {
+                    "execution_kind": "native",
+                    "autonomous": True,
+                    "execution_policy": {"repair_limit": 0},
+                },
+                "source_snapshot": {"issue_number": 10, "repository_id": 99},
+                "created_at": "2026-11-24T00:02:00+00:00",
+                "finished_at": "2026-11-24T00:04:00+00:00",
+            },
+            "item": {
+                "project": {"id": 1},
+                "issue_number": 10,
+                "source": "github",
+                "github_repository_id": 99,
+                "author_id": 7,
+                "created_at": "2026-11-24T00:01:00+00:00",
+                "branch_name": "work/failing-test",
+            },
+        }
+        entries = [
+            {
+                "id": 1,
+                "kind": "native_agent",
+                "data": {
+                    "successful": True,
+                    "receipt": {"started_at": "2026-11-24T00:03:00+00:00"},
+                },
+            },
+            {
+                "id": 2,
+                "kind": "native_intent",
+                "operation_id": str(uuid4()),
+                "data": {"kind": "agent", "attempt": 0},
+            },
+            {
+                "id": 3,
+                "kind": "native_validation",
+                "data": {"checks": [{"id": check, "receipt": {"exit_code": 1}}]},
+            },
+        ]
+        queue.request.return_value = {"evidence": entries, "has_more": False}
+        github.repository.return_value = ({"repository": "owner/repo"}, "")
+        github.request.side_effect = [
+            {
+                "number": 10,
+                "user": {"id": 7},
+                "created_at": "2026-11-24T00:00:00+00:00",
+            },
+            [],
+        ]
+        with patch("vibearr_runner.native_contract.validate_native_artifact"):
+            return publication_acceptance.collect_run(
+                queue, github, str(uuid4()), 1, 10, failed=True
+            )
+
+    def test_independent_runner_test_failure_establishes_failed_scenario(self):
+        result = self.failed_observation("runner")
+        self.assertEqual(result["nonzero_receipts"][0]["id"], "runner")
+        self.assertTrue(result["no_pull_request"])
+
+    def test_retired_cli_failure_cannot_establish_failed_scenario(self):
+        with self.assertRaisesRegex(ValueError, "independent application or runner"):
+            self.failed_observation("cli")
+
+    def test_formatting_failure_cannot_replace_an_independent_test_failure(self):
+        with self.assertRaisesRegex(ValueError, "independent application or runner"):
+            self.failed_observation("ruff")
+
     def test_explicit_validation_profile_does_not_require_an_environment_fallback(self):
         from vibearr_executor import SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION
         from vibearr_executor.compact_profiles import profiles

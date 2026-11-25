@@ -13,7 +13,6 @@ CHECK_IDS = (
     "migrations",
     "system",
     "django",
-    "cli",
     "runner",
     "git-acceptance",
 )

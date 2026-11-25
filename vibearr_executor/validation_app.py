@@ -10,10 +10,10 @@ WORK = Path("/work")
 
 def suite(kind: str) -> unittest.TestSuite:
     loader = unittest.TestLoader()
-    if kind == "cli":
-        return loader.discover(str(WORK / "vibearr"), top_level_dir=str(WORK))
     if kind == "runner":
         return loader.discover(str(WORK / "vibearr_runner"), top_level_dir=str(WORK))
+    if kind != "git-acceptance":
+        raise RuntimeError("Choose a fixed runtime validation suite.")
     result = unittest.TestSuite()
     for path in sorted((WORK / "vibearr_runner" / "acceptance").glob("test_*.py")):
         result.addTests(
@@ -25,6 +25,14 @@ def suite(kind: str) -> unittest.TestSuite:
 
 
 def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in {
+        "migrations",
+        "system",
+        "django",
+        "runner",
+        "git-acceptance",
+    }:
+        raise RuntimeError("Choose a fixed application validation check.")
     check = sys.argv[1]
     os.chdir(WORK)
     os.umask(0o022)
@@ -53,8 +61,6 @@ def main():
             execute_from_command_line(["trusted-validation", "migrate", "--check"])
         execute_from_command_line(["trusted-validation", *arguments[check]])
         return 0
-    if check not in {"cli", "runner", "git-acceptance"}:
-        raise RuntimeError("Choose a fixed application validation check.")
     result = unittest.TextTestRunner(verbosity=1).run(suite(check))
     if result.testsRun == 0:
         raise RuntimeError("Required validation suite discovered no tests.")
