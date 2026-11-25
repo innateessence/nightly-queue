@@ -9,6 +9,8 @@ The stack has **four persistent containers**: `app`, `postgres`, `runner`, and
 inside the execution worker. No Docker daemon or host checkout is available to
 runtime code. See the [architecture](docs/architecture.md).
 
+![Vibearr queue](docs/images/vibearr-queue.png)
+
 ## Start with Docker
 
 Docker Engine and Compose are the runtime prerequisites. All application, Git,
