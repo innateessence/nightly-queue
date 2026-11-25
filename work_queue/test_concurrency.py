@@ -138,12 +138,9 @@ class SourceClaimConcurrencyTests(TransactionTestCase):
         )
         metadata.start()
         self.addCleanup(metadata.stop)
-        backend = Credential.objects.create(
-            name="Backend",
-            provider="codex",
-            kind="token",
-            encrypted_payload="controlled-fixture",
-        )
+        backend = Credential(name="Backend", provider="codex", kind="login")
+        backend.set_secret("managed-subscription-login")
+        backend.save()
         github = Credential(name="GitHub", provider="github", kind="token")
         github.set_secret("controlled-github-token")
         github.save()

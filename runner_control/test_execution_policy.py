@@ -71,7 +71,7 @@ class NativePolicyOwnershipTests(ConfiguredProjectTestCase):
         type(self.github).objects.filter(pk=self.github.pk).update(
             encrypted_payload=self.github.encrypted_payload
         )
-        self.backend.set_secret("native-test-backend-token")
+        self.backend.set_secret("managed-subscription-login")
         type(self.backend).objects.filter(pk=self.backend.pk).update(
             encrypted_payload=self.backend.encrypted_payload
         )
