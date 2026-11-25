@@ -20,7 +20,7 @@ from vibearr_runner.native_contract import (
     workspace_record,
 )
 from vibearr_runner.test_native_evidence import receipt as delivery_receipt
-from vibearr_runner.self_acceptance import timestamp
+from vibearr_runner.publication_acceptance import timestamp
 
 
 SDK_AVAILABLE = find_spec("vibearr_executor") is not None

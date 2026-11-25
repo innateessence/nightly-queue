@@ -17,7 +17,7 @@ from .native_contract import (
     receipt_summary,
     validate_native_artifact,
 )
-from .self_acceptance import evidence_entries, timestamp
+from .publication_acceptance import evidence_entries, timestamp
 
 
 FAILURE_CASES = frozenset(
@@ -775,7 +775,7 @@ class History:
         from .factory_delivery import checked_factory_workspace
         from .native_contract import validation_evidence
         from .native_evidence import validate_native_evidence
-        from .self_acceptance import pulls_for_branch
+        from .publication_acceptance import pulls_for_branch
 
         workspaces = self.facts.get("native_workspace", [])
         need(bool(workspaces), "Repaired scenario lacks inspected workspace.")
@@ -1255,7 +1255,7 @@ def verify_case(name, history, *, queue, github, records, operation_id):
         )
         history.ready(queue, github)
     if name in {"repair-exhaustion", "cancellation", "missing-capability"}:
-        from .self_acceptance import pulls_for_branch
+        from .publication_acceptance import pulls_for_branch
 
         branch = history.item["branch_name"]
         pulls = pulls_for_branch(github, history.scenario["repository"], branch)

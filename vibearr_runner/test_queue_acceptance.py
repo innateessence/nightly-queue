@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from vibearr_runner.journal import Journal
 from vibearr_runner import queue_acceptance
-from vibearr_runner.self_acceptance import restart_evidence
+from vibearr_runner.publication_acceptance import restart_evidence
 
 
 class QueueAcceptanceTests(unittest.TestCase):

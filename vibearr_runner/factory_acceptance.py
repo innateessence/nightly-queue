@@ -25,7 +25,7 @@ from .native_contract import (
 from .native_evidence import digest as valid_digest
 from .merge_github import MergeGitHub, MergeRepair, MergeWait
 from .native_workspace import atomic_bytes
-from .self_acceptance import collect_run, evidence_entries, timestamp
+from .publication_acceptance import collect_run, evidence_entries, timestamp
 from .workspaces import private_directory, validate_branch
 
 
