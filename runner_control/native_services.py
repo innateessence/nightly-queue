@@ -852,15 +852,9 @@ def validate_agent_binding(run, value):
         or value["agent_version"] != session["agent_version"]
     ):
         raise RunConflict("Agent result differs from its prepared source/version.")
-    identity = session.get("execution_identity")
-    if identity is not None and receipt.get("execution_identity") != identity:
+    identity = session["execution_identity"]
+    if receipt["execution_identity"] != identity:
         raise RunConflict("Agent result differs from its prepared worker identity.")
-    if value["successful"] and not (
-        receipt.get("execution_identity") or receipt.get("container_id")
-    ):
-        raise RunConflict(
-            "Agent success requires its original protected execution identity."
-        )
 
 
 def validate_workspace_binding(run, value):

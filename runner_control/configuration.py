@@ -322,7 +322,7 @@ def _configuration_document(saved):
     }
     document["runtime_contract"] = {
         "schema_version": 1,
-        "runtime": os.environ.get("VIBEARR_RUNTIME_PROTOCOL", "compose-slot-v2"),
+        "runtime": os.environ.get("VIBEARR_RUNTIME_PROTOCOL", "compact-worker-v1"),
         "protocol_version": PROTOCOL_VERSION,
         "qualification_version": QUALIFICATION_VERSION,
         "qualification_source": "authenticated_executor_capabilities",

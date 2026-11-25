@@ -106,7 +106,6 @@ async def main():
             await page.locator("#id_provider").select_option("opencode")
             await page.locator("#id_kind").select_option("connection")
             await page.locator("#id_name").fill("External Ollama")
-            await page.locator("#id_connection_provider").select_option("ollama")
             await page.locator("#id_connection_endpoint").fill(
                 "http://192.168.1.20:11434"
             )
