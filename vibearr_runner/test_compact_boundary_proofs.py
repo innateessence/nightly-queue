@@ -1,10 +1,17 @@
 import unittest
-
-from vibearr_executor.compact_profiles import REQUIRED_BOUNDARY_CHECKS
+import importlib.util
 
 from .compact_evidence import boundary_proof, digest
 
 
+SDK_AVAILABLE = importlib.util.find_spec("vibearr_executor") is not None
+if SDK_AVAILABLE:
+    from vibearr_executor.compact_profiles import REQUIRED_BOUNDARY_CHECKS
+
+
+@unittest.skipUnless(
+    SDK_AVAILABLE, "Install the native-runtime extra for protected worker proof checks"
+)
 class BoundaryProofTests(unittest.TestCase):
     def setUp(self):
         self.authority = {
