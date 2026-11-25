@@ -72,7 +72,7 @@ add pytest `conftest.py`. Include migrations with model changes.
 Implement each feature on its own branch. Use descriptive imperative commit
 subjects. PRs explain behavior changes, validation, relevant issues and any schema
 or configuration steps; include screenshots for visible UI changes. Humans merge
-PRs. Runtime automatic merging remains disabled.
+PRs. Runtime automatic merging is not supported.
 
 ## Security and configuration
 

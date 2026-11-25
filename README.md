@@ -78,8 +78,8 @@ budget, including an explicit zero-repair setting. New candidates require fresh
 checks and reviews. See [factory execution](docs/software-factory-plan.md) and
 [review routing](docs/factory-routing.md).
 
-**Humans merge every PR.** Automatic merging remains disabled until a separate
-explicitly approved rollout. Engineering qualification, fixture tests and agent
+**Humans merge every PR.** Automatic merging is not supported.
+Engineering qualification, fixture tests and agent
 review do not grant merge or live-provider permission. The
 [release contract](docs/vibearr-mvp.md) and [acceptance observer](docs/factory-acceptance.md)
 retain the real account/model, failure-scenario and human-merge requirements.
