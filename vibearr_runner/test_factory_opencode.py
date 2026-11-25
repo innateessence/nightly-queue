@@ -494,13 +494,36 @@ class OpenCodeFactoryConnectionTests(unittest.TestCase):
                 }
             )
 
+    def test_api_key_fields_are_rejected_even_when_empty(self):
+        adapter = NativeCLIAdapter(None, "opencode")
+        for key in ("", "private-key"):
+            with self.subTest(key=key), self.assertRaises(NativeSessionError):
+                adapter.connection(
+                    {
+                        "credential": {
+                            "provider": "opencode",
+                            "kind": "connection",
+                            "id": 9,
+                        },
+                        "material": {
+                            "secret": json.dumps(
+                                {
+                                    "provider": "ollama",
+                                    "base_url": "http://192.168.10.20:11434",
+                                    "api_key": key,
+                                }
+                            )
+                        },
+                    }
+                )
+
     def test_external_connection_remains_operator_selected(self):
         adapter = NativeCLIAdapter(None, "opencode")
         connection = adapter.connection(
             {
                 "credential": {"provider": "opencode", "kind": "connection", "id": 9},
                 "material": {
-                    "secret": '{"provider":"ollama","base_url":"http://192.168.10.20:11434/api","api_key":""}'
+                    "secret": '{"provider":"ollama","base_url":"http://192.168.10.20:11434/api"}'
                 },
             }
         )

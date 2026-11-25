@@ -44,9 +44,8 @@ def connection(secret):
         raise NativeSessionError("OpenCode connection is malformed.") from None
     if (
         not isinstance(value, dict)
-        or set(value) - {"provider", "base_url", "api_key"}
+        or set(value) != {"provider", "base_url"}
         or value.get("provider") != "ollama"
-        or value.get("api_key", "") != ""
     ):
         raise NativeSessionError("OpenCode requires only its selected external Ollama.")
     return external_endpoint(value.get("base_url"))

@@ -45,15 +45,6 @@ class CredentialForm(forms.ModelForm):
         ),
         help_text="Paste the secret value. Leave blank when editing to keep the saved secret.",
     )
-    connection_provider = forms.ChoiceField(
-        required=False,
-        label="OpenCode inference provider",
-        choices=[
-            ("", "Use connection JSON or keep saved connection"),
-            ("ollama", "External Ollama"),
-        ],
-        help_text="OpenCode runs inside the runner and uses your external Ollama server.",
-    )
     connection_endpoint = forms.CharField(
         required=False,
         label="Ollama endpoint",
@@ -100,42 +91,33 @@ class CredentialForm(forms.ModelForm):
                 )
                 return data
             data["secret"] = "" if self.instance.pk else "managed-subscription-login"
-        connection_provider = data.get("connection_provider")
-        connection_fields = (
-            connection_provider
-            or data.get("connection_endpoint")
-            or self.data.get("connection_api_key")
-        )
-        if connection_fields:
+        if {"connection_provider", "connection_api_key"}.intersection(self.data):
+            self.add_error(
+                None, "Use only the external Ollama endpoint or connection JSON."
+            )
+            return data
+        endpoint = data.get("connection_endpoint")
+        if endpoint:
             if data.get("provider") != "opencode" or data.get("kind") != "connection":
                 self.add_error(
-                    "connection_provider",
-                    "Select OpenCode and connection type to use inference fields.",
+                    "connection_endpoint",
+                    "Select OpenCode and connection type to use the Ollama endpoint.",
                 )
                 return data
-            if not connection_provider or data.get("secret"):
+            if data.get("secret"):
                 self.add_error(
-                    "connection_provider",
-                    "Choose a provider and use either inference fields or connection JSON.",
+                    "connection_endpoint",
+                    "Use either the Ollama endpoint or connection JSON.",
                 )
                 return data
-            value = {"provider": connection_provider}
-            if data.get("connection_endpoint"):
-                value["base_url"] = data["connection_endpoint"]
-            if self.data.get("connection_api_key"):
-                value["api_key"] = self.data["connection_api_key"]
             from vibearr_executor.ollama_relay import external_endpoint
 
             try:
-                if connection_provider != "ollama" or value.get("api_key"):
-                    raise ValueError(
-                        "OpenCode requires external Ollama without a model API key."
-                    )
-                value["base_url"] = external_endpoint(value.get("base_url"))
+                endpoint = external_endpoint(endpoint)
             except ValueError as exc:
-                self.add_error("connection_provider", str(exc))
+                self.add_error("connection_endpoint", str(exc))
                 return data
-            data["secret"] = json.dumps(value)
+            data["secret"] = json.dumps({"provider": "ollama", "base_url": endpoint})
         secret = data.get("secret", "")
         if not secret:
             if not self.instance.pk:

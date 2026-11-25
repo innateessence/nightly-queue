@@ -55,7 +55,6 @@ class CredentialViewTests(TestCase):
                 "provider",
                 "kind",
                 "secret",
-                "connection_provider",
                 "connection_endpoint",
             ],
         )

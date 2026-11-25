@@ -17,7 +17,6 @@ class OpenCodeConnectionTests(TestCase):
             "name": "Local inference",
             "provider": "opencode",
             "kind": "connection",
-            "connection_provider": "ollama",
             "connection_endpoint": "http://ollama.example:11434",
             **values,
         }
@@ -31,7 +30,7 @@ class OpenCodeConnectionTests(TestCase):
             {"provider": "ollama", "base_url": "http://ollama.example:11434"},
         )
 
-    def test_create_hosted_connection_with_fixed_endpoint(self):
+    def test_submitted_cloud_provider_and_api_key_are_rejected(self):
         form = CredentialForm(
             data=self.data(
                 connection_provider="openai",
@@ -42,7 +41,7 @@ class OpenCodeConnectionTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertFalse(Credential.objects.exists())
 
-    def test_hosted_connection_rejects_arbitrary_endpoint(self):
+    def test_submitted_cloud_endpoint_and_api_key_are_rejected(self):
         form = CredentialForm(
             data=self.data(
                 connection_provider="openai",
@@ -52,6 +51,23 @@ class OpenCodeConnectionTests(TestCase):
         )
         self.assertFalse(form.is_valid())
         self.assertFalse(Credential.objects.exists())
+
+    def test_api_key_input_is_rejected_even_without_a_cloud_provider(self):
+        for key in ("", "private-api-key"):
+            with self.subTest(key=key):
+                form = CredentialForm(data=self.data(connection_api_key=key))
+                self.assertFalse(form.is_valid())
+        self.assertFalse(Credential.objects.exists())
+
+    def test_ollama_api_base_path_is_normalized_to_origin(self):
+        form = CredentialForm(
+            data=self.data(connection_endpoint="http://ollama.example:11434/api/")
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(
+            json.loads(form.save().get_secret()["secret"]),
+            {"provider": "ollama", "base_url": "http://ollama.example:11434"},
+        )
 
     def test_wrong_credential_provider_rejects_connection_fields(self):
         form = CredentialForm(
@@ -113,7 +129,6 @@ class OpenCodeConnectionTests(TestCase):
             with self.subTest(provider=provider):
                 form = CredentialForm(
                     data=self.data(
-                        connection_provider="",
                         connection_endpoint="",
                         secret=json.dumps({"provider": provider, "api_key": "key"}),
                     )
@@ -125,4 +140,6 @@ class OpenCodeConnectionTests(TestCase):
     def test_connection_help_is_visible(self):
         response = self.client.get(reverse("credential_list"))
         self.assertContains(response, "Ollama endpoint")
-        self.assertContains(response, "OpenCode runs inside the runner")
+        self.assertContains(response, "external Ollama")
+        self.assertNotContains(response, "id_connection_provider")
+        self.assertNotContains(response, "id_connection_api_key")
