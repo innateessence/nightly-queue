@@ -16,6 +16,8 @@ GitLab, SSH keys, model API keys and uploaded subscription-session JSON are not
 supported credential types. This revision creates a fresh schema and does not
 convert older credential records.
 
+![Subscription login credential form](images/vibearr-connections.png)
+
 Sign in, reconnect and log out through the
 [Docker operations procedure](docker-operations.md#subscription-login). Managed
 login files stay in the runner's private volume. The app stores a reference, not
