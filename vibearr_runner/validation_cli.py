@@ -115,13 +115,8 @@ def main():
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--state", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
-    parser.add_argument("--acceptance", action="store_true")
     args = parser.parse_args()
     profile = ValidationProfile.parse(json.loads(args.profile.read_bytes()))
-    if args.acceptance:
-        parser.error(
-            "Run Docker checks for full validation acceptance; host executor assembly is retired."
-        )
     args.state.mkdir(mode=0o700, parents=True, exist_ok=True)
     output = args.state / "candidate"
     output.mkdir(mode=0o700)

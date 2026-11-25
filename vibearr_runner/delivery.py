@@ -36,10 +36,6 @@ class DeliveryUnknown(DeliveryError):
     pass
 
 
-class DeliveryWait(DeliveryError):
-    pass
-
-
 class DeliveryReadUnavailable(DeliveryError):
     def __init__(self, message, *, retry_at=0):
         super().__init__(message)

@@ -6,32 +6,19 @@ import sys
 import unittest
 
 WORK = Path("/work")
-LEGACY_BOUNDARY_TESTS = {
-    "test_actual_sandbox_stops_command_at_remaining_budget",
-    "test_real_sandbox_validation_records_actual_exit_code",
-}
 
 
 def suite(kind: str) -> unittest.TestSuite:
     loader = unittest.TestLoader()
     if kind == "cli":
-        result = loader.discover(str(WORK / "vibearr"), top_level_dir=str(WORK))
-        result.addTests(loader.discover(str(WORK / "vibearr"), top_level_dir=str(WORK)))
-        return result
+        return loader.discover(str(WORK / "vibearr"), top_level_dir=str(WORK))
     if kind == "runner":
         return loader.discover(str(WORK / "vibearr_runner"), top_level_dir=str(WORK))
     result = unittest.TestSuite()
     for path in sorted((WORK / "vibearr_runner" / "acceptance").glob("test_*.py")):
-        tests = loader.loadTestsFromName("vibearr_runner.acceptance." + path.stem)
-
-        def append(group):
-            for test in group:
-                if isinstance(test, unittest.TestSuite):
-                    append(test)
-                elif test._testMethodName not in LEGACY_BOUNDARY_TESTS:
-                    result.addTest(test)
-
-        append(tests)
+        result.addTests(
+            loader.loadTestsFromName("vibearr_runner.acceptance." + path.stem)
+        )
     if result.countTestCases() == 0:
         raise RuntimeError("The required Git acceptance suite is missing.")
     return result
