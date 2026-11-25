@@ -304,7 +304,9 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
                 workspace=self.workspace,
                 source_digest=digest(self.changed),
                 export_digest=digest(self.changed),
-                requirements_digest=self.profile.dependency_digest,
+                requirements_digest=getattr(
+                    self, "requirements_digest", self.profile.dependency_digest
+                ),
             ),
         )
 
@@ -1058,6 +1060,13 @@ class NativeProtocolTests(NativeProtocolMixin, TestCase):
         from vibearr_executor.validation_profile import PACKAGE_HOSTS
         from .native_services import validation_profile_binding
 
+        self.changed = pack(
+            {
+                "requirements.txt": (0o644, b"example==2.0\n"),
+                "file.py": (0o644, b"after\n"),
+            }
+        )
+        self.requirements_digest = digest(b"example==2.0\n")
         self.complete_agent()
         build_id = str(uuid4())
         fixed = self.profile.setup_profile()
@@ -1481,7 +1490,7 @@ class NativeHTTPTests(NativeProtocolMixin, TestCase):
     def test_native_status_presentation_redacts_selected_material(self):
         from .plan_presentation import present_run
 
-        self.run.native_status = {"detail": "backend-native-secret"}
+        self.run.native_status = {"detail": "github-native-secret"}
         self.run.save(update_fields=["native_status"])
         self.assertEqual(present_run(self.run).native_status["detail"], "[redacted]")
 

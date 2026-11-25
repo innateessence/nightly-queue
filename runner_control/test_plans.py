@@ -73,7 +73,7 @@ class ContextPlanAPITests(NativeProtocolMixin, TestCase):
         payload = self.context_payload()
         payload["operation_id"] = str(uuid4())
         payload["document"] = copy.deepcopy(payload["document"])
-        payload["document"]["acceptance_criteria"] = ["backend-native-secret"]
+        payload["document"]["acceptance_criteria"] = ["github-native-secret"]
         self.assertEqual(self.post("runner_contexts", payload).status_code, 400)
 
     def test_context_rejects_unknown_request_fields(self):
@@ -85,7 +85,7 @@ class ContextPlanAPITests(NativeProtocolMixin, TestCase):
         payload = self.context_payload()
         payload["operation_id"] = str(uuid4())
         payload["base_commit"] = "f" * 40
-        self.assertEqual(self.post("runner_contexts", payload).status_code, 400)
+        self.assertEqual(self.post("runner_contexts", payload).status_code, 409)
 
     def test_context_cursor_rejects_negative_values(self):
         response = self.client.get(
