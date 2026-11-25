@@ -2,7 +2,7 @@ import json
 import importlib.util
 import unittest
 
-from vibearr_runner.native_sessions import NativeSessionError
+from vibearr_runner.native_sessions import NativeBackendRegistry, NativeSessionError
 
 HAS_EXECUTOR = importlib.util.find_spec("vibearr_executor") is not None
 if HAS_EXECUTOR:
@@ -85,3 +85,17 @@ class NativeConnectionTests(unittest.TestCase):
         }
         with self.assertRaises(NativeSessionError):
             adapter.connection(connection)
+
+
+class NativeRegistryTests(unittest.TestCase):
+    def test_retired_integrated_client_cannot_select_native_execution(self):
+        class RetiredClient:
+            integrated = True
+            compact = False
+
+        with self.assertRaisesRegex(NativeSessionError, "compact worker"):
+            NativeBackendRegistry().create("codex", RetiredClient())
+
+    def test_client_without_registered_runtime_cannot_select_native_execution(self):
+        with self.assertRaisesRegex(NativeSessionError, "compact worker"):
+            NativeBackendRegistry().create("codex", object())

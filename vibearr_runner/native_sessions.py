@@ -1,4 +1,4 @@
-"""Native process sessions are separate from model proposal backends."""
+"""Sessions for selected subscription and external Ollama CLI execution."""
 
 from dataclasses import asdict, dataclass
 import json
@@ -59,7 +59,7 @@ class NativeSession:
             for text in (value["adapter"], value["agent_version"], account["model"]):
                 if not isinstance(text, str) or not text or len(text) > 200:
                     raise ValueError
-            if value["auth_kind"] not in {"token", "session", "connection", "login"}:
+            if value["auth_kind"] not in {"connection", "login"}:
                 raise ValueError
             if value["execution_identity"] is not None:
                 from .native_contract import validate_execution_identity
@@ -118,15 +118,10 @@ class NativeAdapter(Protocol):
 
 class NativeBackendRegistry:
     def create(self, provider: str, client) -> NativeAdapter:
-        if (
-            getattr(client, "integrated", False) is True
-            or getattr(client, "compact", False) is True
-        ):
-            from .native_cli import NativeCLIAdapter
+        if getattr(client, "compact", False) is not True:
+            raise NativeSessionError(
+                "Native execution requires the qualified compact worker client."
+            )
+        from .native_cli import NativeCLIAdapter
 
-            return NativeCLIAdapter(client, provider)
-        if provider == "codex":
-            from .native_codex import NativeCodexAdapter
-
-            return NativeCodexAdapter(client)
-        raise NativeSessionError("Selected provider has no installed native adapter.")
+        return NativeCLIAdapter(client, provider)

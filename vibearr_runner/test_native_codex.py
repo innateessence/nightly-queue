@@ -6,7 +6,8 @@ import json
 import unittest
 from uuid import uuid4
 
-from vibearr_runner.native_codex import CodexEvents, NativeCodexAdapter, codex_profile
+from vibearr_runner.native_codex import CodexEvents
+from vibearr_runner.native_cli import NativeCLIAdapter
 from vibearr_runner.native_sessions import NativeSession, NativeSessionError
 from vibearr_runner.policy import default_execution_policy
 
@@ -15,21 +16,32 @@ if EXECUTOR_INSTALLED:
     from vibearr_executor import SLOT_QUALIFICATION_VERSION as QUALIFICATION_VERSION
     from vibearr_executor.artifacts import pack, result_manifest
     from vibearr_executor.contracts import Conflict
+    from vibearr_executor.compact_profiles import profiles
 
 
-TOKEN = "test-codex-token-0123456789"
+LOGIN_DIGEST = "d" * 64
 
 
 def credential():
     return {
-        "credential": {"id": 1, "provider": "codex", "kind": "token", "version": 2},
-        "material": {"secret": TOKEN},
+        "credential": {"id": 1, "provider": "codex", "kind": "login", "version": 2},
     }
 
 
 class ExecutorFixture:
     def __init__(self):
-        self.profile = codex_profile("sha256:" + "a" * 64, "token")
+        installed, _ = profiles("sha256:" + "a" * 64, "b" * 64)
+        self.profile = next(
+            value for value in installed if value.profile_id == "native-default"
+        )
+        self.compact = True
+        self.identity = {
+            "runtime": "compose-slot-v2",
+            "protocol_version": 2,
+            "binding_digest": "b" * 64,
+            "instance_id": str(uuid4()),
+            "worker_boot": str(uuid4()),
+        }
         self.prepared = {}
         self.starts = 0
         self.secrets = {}
@@ -44,7 +56,7 @@ class ExecutorFixture:
 
     def capabilities(self):
         return {
-            "runtime": "compose-slot-v2",
+            "runtime": "compact-worker-v1",
             "schema_version": 1,
             "protocol_version": 2,
             "qualification_version": self.qualification_version,
@@ -64,7 +76,14 @@ class ExecutorFixture:
         if operation in self.prepared and self.prepared[operation] != manifest:
             raise Conflict("Manifest changed")
         self.prepared[operation] = copy.deepcopy(manifest)
-        return {"operation_id": operation, "state": self.state}
+        return {
+            "operation_id": operation,
+            "state": self.state,
+            "execution_identity": self.identity,
+        }
+
+    def request(self, path):
+        return {"available": True, "login_digest": LOGIN_DIGEST}
 
     def supply_secret(self, operation, secret):
         self.secrets[operation] = secret
@@ -120,7 +139,7 @@ class ExecutorFixture:
 class NativeCodexTests(unittest.TestCase):
     def setUp(self):
         self.client = ExecutorFixture()
-        self.adapter = NativeCodexAdapter(self.client)
+        self.adapter = NativeCLIAdapter(self.client, "codex")
         self.policy = default_execution_policy()
         self.policy["runtime_profile"] = self.client.profile.profile_id
         self.source = pack({"answer.py": (0o644, b"answer = 0\n")})
@@ -157,7 +176,22 @@ class NativeCodexTests(unittest.TestCase):
         self.assertEqual(
             self.client.prepared[session.manifest["operation_id"]], session.manifest
         )
-        self.assertNotIn(TOKEN, json.dumps(session.to_data()))
+        self.assertEqual(
+            json.loads(self.client.secrets[session.manifest["operation_id"]]),
+            {"provider": "codex", "credential_id": 1, "login_digest": LOGIN_DIGEST},
+        )
+
+    def test_retired_token_session_record_is_rejected(self):
+        value = self.prepare().to_data()
+        value["auth_kind"] = "token"
+        with self.assertRaises(NativeSessionError):
+            NativeSession.from_data(value)
+
+    def test_retired_raw_subscription_session_record_is_rejected(self):
+        value = self.prepare().to_data()
+        value["auth_kind"] = "session"
+        with self.assertRaises(NativeSessionError):
+            NativeSession.from_data(value)
 
     def test_smaller_policy_limits_require_a_matching_fixed_worker_slot(self):
         self.policy.update(cpu_limit=1, memory_mb=1024, pids_limit=32, workspace_mb=256)
@@ -184,11 +218,6 @@ class NativeCodexTests(unittest.TestCase):
         self.assertFalse(self.client.prepared)
 
     def test_changed_recipe_digest_is_rejected(self):
-        self.client.profile = codex_profile(
-            self.client.profile.image,
-            "token",
-            profile_id=self.client.profile.profile_id,
-        )
         original = self.client.capabilities
         self.client.capabilities = lambda: {
             **original(),
@@ -204,11 +233,6 @@ class NativeCodexTests(unittest.TestCase):
 
     def test_model_egress_cannot_expand_policy(self):
         self.policy["network_hosts"] = ["pypi.org"]
-        with self.assertRaises(NativeSessionError):
-            self.prepare()
-
-    def test_selected_secret_in_prompt_is_rejected(self):
-        self.request["prompt"] += TOKEN
         with self.assertRaises(NativeSessionError):
             self.prepare()
 
@@ -298,8 +322,10 @@ class NativeCodexTests(unittest.TestCase):
         with self.assertRaises(NativeSessionError):
             self.adapter.outcome(session, self.source)
 
-    def test_diagnostics_do_not_claim_live_auth_from_configured_key(self):
-        result = self.adapter.diagnostics(self.policy, credential())
+    def test_diagnostics_do_not_claim_live_auth_from_selected_login(self):
+        result = self.adapter.diagnostics(
+            self.policy, credential(), model=self.request["model"]
+        )
         self.assertTrue(result["auth_available"])
         self.assertFalse(result["authenticated"])
         self.assertFalse(result["native_agent_ready"])
