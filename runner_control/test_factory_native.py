@@ -149,7 +149,7 @@ class FactoryNativeFixture(native_fixture.NativeProtocolMixin):
             "codex",
             CODEX_VERSION,
             account,
-            "token",
+            "login",
             profile.image,
             "e" * 64,
             manifest,

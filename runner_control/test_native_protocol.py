@@ -96,7 +96,7 @@ class NativeProtocolMixin(ConfiguredProjectMixin):
         )
         self.deadline = (timezone.now() + timedelta(seconds=120)).isoformat()
         self.worker_identity = {
-            "runtime": "compose-slot-v2",
+            "runtime": "compact-worker-v1",
             "protocol_version": 2,
             "instance_id": str(uuid4()),
             "worker_boot": str(uuid4()),
@@ -524,9 +524,9 @@ class NativeProtocolTests(NativeProtocolMixin, TestCase):
         self.assertEqual(result.native_outcome, "delivered")
         self.assertEqual(result.state, "completed")
 
-    def test_docker_slot_receipts_authorize_the_complete_delivery_chain(self):
+    def test_compact_worker_receipts_authorize_the_complete_delivery_chain(self):
         self.worker_identity = {
-            "runtime": "compose-slot-v2",
+            "runtime": "compact-worker-v1",
             "protocol_version": 2,
             "instance_id": str(uuid4()),
             "worker_boot": str(uuid4()),
