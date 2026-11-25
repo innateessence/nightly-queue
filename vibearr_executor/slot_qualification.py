@@ -25,13 +25,13 @@ def wait(runtime, operation, *, terminal=True):
     raise Rejected("Qualification operation did not reach its bounded checkpoint.")
 
 
-def prepare(runtime, case, *, seconds=30, secret=""):
+def prepare(runtime, case, *, seconds=30):
     base = next(iter(runtime.profiles.values()))
     profile = replace(
         base,
         profile_id="worker-qualification",
         argv=ARGV,
-        backend_secret_env="PROBE_CREDENTIAL" if secret else "",
+        backend_secret_env="",
     )
     operation = str(uuid4())
     runtime.probe_operation, runtime.probe_profile = operation, profile
@@ -56,8 +56,6 @@ def prepare(runtime, case, *, seconds=30, secret=""):
     first = runtime.prepare(manifest.data())
     if first != runtime.prepare(manifest.data()):
         raise Rejected("Repeated prepare changed the qualification operation.")
-    if secret:
-        runtime.supply_secret(operation, secret)
     return operation
 
 
