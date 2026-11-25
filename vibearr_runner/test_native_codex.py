@@ -36,7 +36,7 @@ class ExecutorFixture:
         )
         self.compact = True
         self.identity = {
-            "runtime": "compose-slot-v2",
+            "runtime": "compact-worker-v1",
             "protocol_version": 2,
             "binding_digest": "b" * 64,
             "instance_id": str(uuid4()),
@@ -192,6 +192,49 @@ class NativeCodexTests(unittest.TestCase):
         value["auth_kind"] = "session"
         with self.assertRaises(NativeSessionError):
             NativeSession.from_data(value)
+
+    def test_session_record_requires_protected_worker_identity(self):
+        value = self.prepare().to_data()
+        value.pop("execution_identity")
+        with self.assertRaises(NativeSessionError):
+            NativeSession.from_data(value)
+
+    def test_session_record_rejects_null_worker_identity(self):
+        value = self.prepare().to_data()
+        value["execution_identity"] = None
+        with self.assertRaises(NativeSessionError):
+            NativeSession.from_data(value)
+
+    def test_packaging_identity_cannot_describe_a_native_session(self):
+        value = self.prepare().to_data()
+        value["execution_identity"]["runtime"] = "compose-slot-v2"
+        with self.assertRaises(NativeSessionError):
+            NativeSession.from_data(value)
+
+    def test_session_record_rejects_a_different_runtime_binding(self):
+        value = self.prepare().to_data()
+        value["execution_identity"]["binding_digest"] = "c" * 64
+        with self.assertRaises(NativeSessionError):
+            NativeSession.from_data(value)
+
+    def test_session_record_rejects_malformed_worker_boot(self):
+        value = self.prepare().to_data()
+        value["execution_identity"]["worker_boot"] = "unknown"
+        with self.assertRaises(NativeSessionError):
+            NativeSession.from_data(value)
+
+    def test_missing_prepared_worker_identity_cannot_receive_a_login_grant(self):
+        original = self.client.prepare
+
+        def missing_identity(manifest):
+            value = original(manifest)
+            value.pop("execution_identity")
+            return value
+
+        self.client.prepare = missing_identity
+        with self.assertRaises(NativeSessionError):
+            self.prepare()
+        self.assertFalse(self.client.secrets)
 
     def test_smaller_policy_limits_require_a_matching_fixed_worker_slot(self):
         self.policy.update(cpu_limit=1, memory_mb=1024, pids_limit=32, workspace_mb=256)

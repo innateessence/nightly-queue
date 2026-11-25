@@ -286,8 +286,7 @@ class NativeCLIAdapter:
         self.client.upload("source", source)
         self.client.upload("context", context)
         prepared = self.client.prepare(manifest)
-        self.client.supply_secret(operation_id, json.dumps(connection))
-        return NativeSession.from_data(
+        session = NativeSession.from_data(
             {
                 "adapter": self.provider,
                 "agent_version": self.version,
@@ -296,9 +295,11 @@ class NativeCLIAdapter:
                 "image_digest": profile.image,
                 "runtime_binding_digest": capabilities["binding_digest"],
                 "manifest": manifest,
-                "execution_identity": prepared["execution_identity"],
+                "execution_identity": prepared.get("execution_identity"),
             }
         )
+        self.client.supply_secret(operation_id, json.dumps(connection))
+        return session
 
     def bound(self, session):
         NativeSession.from_data(session.to_data())
