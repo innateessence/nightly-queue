@@ -46,7 +46,7 @@ class FactoryFixture(NativeProtocolMixin):
     def setUp(self):
         super().setUp()
         self.worker_identity = {
-            "runtime": "compose-slot-v2",
+            "runtime": "compact-worker-v1",
             "protocol_version": 2,
             "instance_id": str(uuid4()),
             "worker_boot": str(uuid4()),
