@@ -732,14 +732,20 @@ def validate_wheels(payload):
                 configuration.read_string(
                     archive.read(info + "/entry_points.txt").decode()
                 )
-                commands = set(configuration["console_scripts"])
+                commands = dict(configuration["console_scripts"])
                 expected = {
-                    "vibearr-cli": {"vibearr", "vibearr"},
-                    "vibearr-runner": {"vibearr-runner", "vibearr-runner"},
-                    "vibearr-executor": {"vibearr-executor"},
+                    "vibearr-cli": {"vibearr": "vibearr.cli:main"},
+                    "vibearr-runner": {
+                        "vibearr-runner": "vibearr_runner.__main__:main"
+                    },
+                    "vibearr-executor": {
+                        "vibearr-worker": "vibearr_executor.compact_worker:main"
+                    },
                 }
-                if not expected[name] <= commands:
-                    raise ValueError("Wheel console entrypoints are incomplete.")
+                if commands != expected[name]:
+                    raise ValueError(
+                        "Wheel console entrypoints differ from the current commands."
+                    )
                 records = csv.reader(
                     io.StringIO(archive.read(info + "/RECORD").decode())
                 )
@@ -781,8 +787,7 @@ def validate_wheels(payload):
         installed = installed or "install" in arguments and "--no-index" in arguments
     if (
         not installed
-        or not {"vibearr", "vibearr", "vibearr-runner", "vibearr-runner"}
-        <= help_commands
+        or not {"vibearr", "vibearr-runner", "vibearr-worker"} <= help_commands
     ):
         raise ValueError("Installed CLI command execution evidence is incomplete.")
 
