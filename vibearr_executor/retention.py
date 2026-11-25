@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import shutil
-from typing import TYPE_CHECKING
 
 from .contracts import (
     ArtifactRemoved,
@@ -14,9 +13,6 @@ from .contracts import (
     digest,
     identifier,
 )
-
-if TYPE_CHECKING:
-    from .runtime import Runtime
 
 RESOURCES = {"source", "logs"}
 
@@ -83,7 +79,7 @@ def compact_result(record: dict) -> None:
     record["result"] = summary
 
 
-def artifact_referenced(runtime: Runtime, content_digest: str) -> bool:
+def artifact_referenced(runtime, content_digest: str) -> bool:
     for path in runtime.operations.iterdir():
         record = runtime.record(path.name)
         if removed(record, "source"):
@@ -104,7 +100,7 @@ def artifact_referenced(runtime: Runtime, content_digest: str) -> bool:
     return False
 
 
-def purge(runtime: Runtime, operation_id: str, run_id: str, selected) -> dict:
+def purge(runtime, operation_id: str, run_id: str, selected) -> dict:
     from .runtime import durable
 
     identifier(run_id)

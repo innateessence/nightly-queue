@@ -103,8 +103,11 @@ class QualificationTargetHTTPTests(unittest.TestCase):
                     "/v4/qualify", {"targets": {**TARGETS, "runner": "127.0.0.1"}}
                 )
 
-    def test_legacy_runtime_cannot_accept_versioned_qualification_targets(self):
-        with self.endpoint(self.legacy, CompactHandler) as client:
+    def test_wrong_runtime_cannot_accept_versioned_qualification_targets(self):
+        different = SimpleNamespace(
+            execution_identity=lambda: {"runtime": "wrong-boundary"}
+        )
+        with self.endpoint(different, CompactHandler) as client:
             with self.assertRaises(ExecutorRejected):
                 client.request("/v4/qualify", {"targets": TARGETS})
 

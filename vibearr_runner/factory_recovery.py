@@ -18,7 +18,7 @@ class FactoryRecovery:
         controls = native.snapshot["global"]
         stages = {
             stage: controls[f"{stage}_timeout_seconds"]
-            for stage in ("research", "implementation", "validation")
+            for stage in ("implementation", "validation")
         }
         self.budget = ActiveBudget(
             native.journal,
@@ -431,10 +431,6 @@ class FactoryRecovery:
         return {**deepcopy(trigger), "artifacts": records}
 
     def repair(self, reason, diagnostics):
-        if self.native.native.get("delivery_recovery_generation"):
-            raise BudgetExceeded(
-                "Delivery-only recovery cannot launch factory repairs."
-            )
         trigger = self.factory.get("repair_trigger")
         previous = self.data["repairs"][-1] if self.data["repairs"] else None
         if (

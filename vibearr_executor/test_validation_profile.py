@@ -1,13 +1,11 @@
+from .validation_profile import validate_dependency_provenance
 import unittest
 from dataclasses import replace
-from uuid import uuid4
 
-from .contracts import Rejected, digest
-from .qualification import REQUIRED_CHECKS
+from .contracts import Rejected
 from .validation_profile import (
     CHECK_IDS,
     ValidationProfile,
-    validate_dependency_provenance,
 )
 
 
@@ -52,41 +50,8 @@ class ValidationProfileTests(unittest.TestCase):
         with self.assertRaises(Rejected):
             replace(self.profile, database_image="")
 
-    def provenance(self):
-        build = str(uuid4())
-        return {
-            "schema_version": 1,
-            "build_id": build,
-            "run_id": str(uuid4()),
-            "source_digest": "d" * 64,
-            "requirements_digest": self.profile.dependency_digest,
-            "dependency_digest": "e" * 64,
-            "parent_image": "sha256:" + "f" * 64,
-            "parent_profile_digest": "a" * 64,
-            "parent_runtime_binding": "b" * 64,
-            "setup_operation_id": build,
-            "setup_log_digest": "c" * 64,
-            "derived_image": self.profile.image,
-            "qualification_binding_digest": "d" * 64,
-            "qualification_report_digest": "e" * 64,
-            "boundary_checks": sorted(REQUIRED_CHECKS),
-        }
-
-    def test_dependency_provenance_requires_full_real_boundary_check_set(self):
-        value = self.provenance()
-        self.assertEqual(validate_dependency_provenance(value, self.profile), value)
-        value["boundary_checks"].pop()
-        with self.assertRaises(Rejected):
-            validate_dependency_provenance(value, self.profile)
-
-    def test_dependency_provenance_cannot_change_its_run(self):
+    def test_image_build_provenance_cannot_replace_dependency_artifact_provenance(self):
         with self.assertRaises(Rejected):
             validate_dependency_provenance(
-                self.provenance(), self.profile, run_id=str(uuid4())
+                {"schema_version": 1, "derived_image": self.profile.image}, self.profile
             )
-
-    def test_dependency_provenance_cannot_claim_other_requirements(self):
-        value = self.provenance()
-        value["requirements_digest"] = digest(b"other")
-        with self.assertRaises(Rejected):
-            validate_dependency_provenance(value, self.profile)

@@ -14,14 +14,12 @@ from vibearr_runner.verify import main
 class DeploymentVerificationTests(unittest.TestCase):
     def setUp(self):
         self.report = {
-            "runtime": "compose-slot-v2",
+            "runtime": "compact-worker-v1",
             "protocol_version": 2,
             "qualification_version": 1,
             "qualified": True,
             "binding_digest": "a" * 64,
-            "workers": {
-                phase: {"qualified": True} for phase in ("agent", "setup", "validation")
-            },
+            "schema_version": 1,
         }
         self.client = patch("vibearr_executor.client.Client.from_environment").start()
         self.addCleanup(patch.stopall)
@@ -35,12 +33,14 @@ class DeploymentVerificationTests(unittest.TestCase):
             ):
                 return main()
 
-    def test_current_qualified_docker_fleet_is_accepted(self):
+    def test_current_qualified_dedicated_worker_is_accepted(self):
         self.assertEqual(self.invoke("--boundary"), 0)
 
-    def test_one_stale_worker_rejects_deployment_readiness(self):
-        self.report["workers"]["setup"]["qualified"] = False
-        with self.assertRaisesRegex(RuntimeError, "every current Docker worker boot"):
+    def test_stale_worker_rejects_deployment_readiness(self):
+        self.report["qualified"] = False
+        with self.assertRaisesRegex(
+            RuntimeError, "current dedicated Docker worker boot"
+        ):
             self.invoke("--boundary")
 
     def test_legacy_runtime_cannot_qualify_docker_deployment(self):

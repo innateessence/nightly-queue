@@ -466,11 +466,6 @@ class FactoryRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ReconciliationRequired, "worker instance or boot"):
             self.recovery.observe_role(identity, status)
 
-    def test_delivery_only_recovery_cannot_reset_or_launch_repairs(self):
-        self.native.native["delivery_recovery_generation"] = 2
-        with self.assertRaisesRegex(BudgetExceeded, "Delivery-only"):
-            self.recovery.repair("checks", "failure")
-
     def test_frozen_repair_limit_cannot_increase_after_restart(self):
         self.native.policy.repair_limit = 1
         with self.assertRaisesRegex(ReconciliationRequired, "controls changed"):
@@ -608,26 +603,6 @@ class FactoryRecoveryTests(unittest.TestCase):
         ]
         self.assertEqual(saved["state"], "dispatching")
         self.assertEqual(saved["elapsed"], 0)
-
-    def test_factory_cannot_prepare_generic_ci_or_base_repair(self):
-        from vibearr_runner.delivery import DeliveryError
-        from vibearr_runner.native_revision import NativeRevision
-
-        for reason in ("ci_repair", "base_update"):
-            with (
-                self.subTest(reason=reason),
-                self.assertRaisesRegex(DeliveryError, "new context and attempt"),
-            ):
-                NativeRevision(self.native).prepare(reason, "free diagnostic")
-        self.assertEqual(self.native.native["attempt"], 0)
-
-    def test_factory_cannot_resume_a_generic_publication_repair(self):
-        from vibearr_runner.delivery import DeliveryError
-        from vibearr_runner.native_revision import NativeRevision
-
-        with self.assertRaisesRegex(DeliveryError, "new context and attempt"):
-            NativeRevision(self.native).step()
-        self.assertEqual(self.native.native["attempt"], 0)
 
     def test_claimed_run_base_or_head_change_invalidates_failure_evidence(self):
         self.failure()

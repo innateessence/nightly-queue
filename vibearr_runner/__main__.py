@@ -31,7 +31,7 @@ def main() -> int:
             getenv("VIBEARR_RUNNER_API_TOKEN", ""),
             max_bytes=8388608,
         )
-        directory = Path(getenv("VIBEARR_RUNNER_STATE_DIR", "/var/lib/vibearr-runner"))
+        directory = Path(getenv("VIBEARR_RUNNER_STATE_DIR", "/var/lib/vibearr"))
         with Journal(directory) as journal:
             maintenance = Maintenance(client, journal, directory / "workspaces")
             Controller(

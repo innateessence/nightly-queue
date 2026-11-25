@@ -234,28 +234,6 @@ class RecoveryTests(RecoveryFixture, unittest.TestCase):
             self.recovery.reconcile(self.state)
         self.assertEqual(self.client.calls, [])
 
-    def test_owned_model_uncertainty_requires_operator(self):
-        self.owned()
-        self.state["implementation"] = {self.run_id: {"model_pending": True}}
-        with self.assertRaisesRegex(ReconciliationRequired, "uncertain outcome"):
-            self.recovery.reconcile(self.state)
-        self.assertEqual(len(self.client.calls), 1)
-
-    def test_validation_started_before_crash_is_not_reexecuted(self):
-        self.owned()
-        self.state["implementation"] = {self.run_id: {"pending": {"started": True}}}
-        with self.assertRaises(ReconciliationRequired):
-            self.recovery.reconcile(self.state)
-
-    def test_interrupted_budget_is_never_reset(self):
-        self.owned()
-        self.state["budgets"] = {
-            self.run_id: {"active": {"stage": "validation", "started": 1}, "total": 12}
-        }
-        with self.assertRaises(ReconciliationRequired):
-            self.recovery.reconcile(self.state)
-        self.assertEqual(self.state["budgets"][self.run_id]["total"], 12)
-
     def test_obsolete_run_cannot_resume(self):
         self.owned()
         self.client.remote["run"]["state"] = "obsolete"

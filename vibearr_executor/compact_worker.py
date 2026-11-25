@@ -20,7 +20,7 @@ from .compact_profiles import (
 )
 from .contracts import Conflict, Manifest, Rejected, canonical, digest, identifier
 from .control_token import read_control_token
-from .integrated import DependencyGateway
+from .dependency_gateway import DependencyGateway
 from .local_database import LocalDatabase
 from .runtime import durable
 from .server import Handler

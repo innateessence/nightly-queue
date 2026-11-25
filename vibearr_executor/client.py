@@ -42,22 +42,13 @@ class Client:
             loopback = ipaddress.ip_address(parsed.hostname or "").is_loopback
         except ValueError:
             loopback = parsed.hostname == "localhost"
-        slot = (
-            os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "compose-slot-v2"
-            and parsed.hostname
-            in {"agent-worker", "setup-worker", "validation-worker", "worker-gateway"}
-            and parsed.port == 8791
-        )
-        compact = (
-            os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "compact-worker-v1"
-            and parsed.hostname == "worker"
-            and parsed.port == 8791
-        )
-        if os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "compact-worker-v1" and not (
-            compact or loopback
-        ):
+        protocol = os.environ.get("VIBEARR_RUNTIME_PROTOCOL", "compact-worker-v1")
+        if protocol != "compact-worker-v1":
+            raise Rejected("Use the dedicated worker protocol.")
+        compact = parsed.hostname == "worker" and parsed.port == 8791
+        if not (compact or loopback):
             raise Rejected("Use the registered compact worker origin.")
-        if slot or compact:
+        if compact:
             addresses = socket.getaddrinfo(parsed.hostname, parsed.port, socket.AF_INET)
             if not addresses or any(
                 not ipaddress.ip_address(value[4][0]).is_private
@@ -69,7 +60,7 @@ class Client:
                     "Docker worker control must resolve on private container networks."
                 )
         if parsed.scheme not in {"http", "https"} or (
-            parsed.scheme == "http" and not loopback and not slot and not compact
+            parsed.scheme == "http" and not loopback and not compact
         ):
             raise Rejected("Use HTTPS or loopback executor control.")
         if (
@@ -83,12 +74,8 @@ class Client:
         if len(token) < 32:
             raise Rejected("Executor control token is missing.")
         self.url, self.token, self.timeout = url.rstrip("/"), token, timeout
-        self.expected_runtime = (
-            "compact-worker-v1"
-            if os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "compact-worker-v1"
-            else ""
-        )
-        self.compact = self.expected_runtime == "compact-worker-v1"
+        self.expected_runtime = "compact-worker-v1"
+        self.compact = True
         self.opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}), NoRedirect()
         )
@@ -104,23 +91,11 @@ class Client:
                 "Set VIBEARR_EXECUTOR_URL and VIBEARR_EXECUTOR_TOKEN_FILE for authenticated executor control."
             )
         path = Path(os.environ["VIBEARR_EXECUTOR_TOKEN_FILE"])
-        if os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "compact-worker-v1":
-            from .control_token import read_control_token
+        from .control_token import read_control_token
 
-            token = read_control_token(path)
-        else:
-            if path.stat().st_mode & 0o077:
-                raise Rejected("Executor token file must be private.")
-            token = path.read_text().strip()
+        token = read_control_token(path)
         client = cls(os.environ["VIBEARR_EXECUTOR_URL"], token)
-        client.integrated = (
-            os.environ.get("VIBEARR_RUNTIME_PROTOCOL") == "integrated-runner-v1"
-        )
-        if os.environ.get(
-            "VIBEARR_RUNTIME_PROTOCOL"
-        ) == "compact-worker-v1" and os.environ.get(
-            "VIBEARR_MEDIATION_CONTROLLER_TOKEN_FILE"
-        ):
+        if os.environ.get("VIBEARR_MEDIATION_CONTROLLER_TOKEN_FILE"):
             from vibearr_runner.compact_connections import CompactClient
             from .control_token import read_control_token
 

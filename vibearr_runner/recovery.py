@@ -226,23 +226,6 @@ class RecoveryCoordinator:
                 raise ReconciliationRequired("Native recovery belongs to another run.")
             self.journal.save(state)
             return remote
-        for stage in ("research", "implementation"):
-            session = state.get(stage, {}).get(run_id, {})
-            pending = session.get("pending") or {}
-            uncertain = (
-                session.get("model_pending")
-                or pending.get("started")
-                or pending.get("execution_started")
-            )
-            if uncertain and not remote["run"].get("cancellation_requested_at"):
-                raise ReconciliationRequired(
-                    "Previous model or workspace operation has an uncertain outcome; operator reconciliation is required."
-                )
-        budget = state.get("budgets", {}).get(run_id, {})
-        if budget.get("active") and not remote["run"].get("cancellation_requested_at"):
-            raise ReconciliationRequired(
-                "Interrupted active time needs conservative operator reconciliation."
-            )
         self.journal.save(state)
         return remote
 

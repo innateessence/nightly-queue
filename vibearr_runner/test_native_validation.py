@@ -108,7 +108,7 @@ class ClientFixture:
 
         return {
             "schema_version": 1,
-            "runtime": "compose-slot-v2",
+            "runtime": "compact-worker-v1",
             "protocol_version": PROTOCOL_VERSION,
             "qualification_version": QUALIFICATION_VERSION,
             "qualified": True,

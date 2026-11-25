@@ -1,14 +1,8 @@
-import argparse
 import base64
 import hmac
-import ipaddress
 import json
-import signal
-import ssl
 import sys
-import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import Any
 
 from .contracts import (
@@ -16,12 +10,9 @@ from .contracts import (
     ArtifactRemoved,
     Conflict,
     NotFound,
-    Profile,
     Rejected,
     canonical,
 )
-from .engine import EngineError
-from .runtime import Runtime
 from .client import ExecutorUnavailable, ExecutorRejected
 
 
@@ -107,7 +98,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(
                 400, {"error": "Request violates the versioned executor contract."}
             )
-        except (EngineError, OSError) as exc:
+        except OSError as exc:
             print(
                 type(exc).__name__ + ": " + str(exc)[:1500], file=sys.stderr, flush=True
             )
@@ -120,25 +111,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def route(self, data: dict) -> dict:
         runtime = self.server.runtime
-        if (
-            self.command == "POST"
-            and self.path
-            in {
-                "/v2/qualification/restart",
-                "/v2/qualification/run",
-                "/v2/qualification/status",
-            }
-            and not data
-        ):
-            if not hasattr(runtime, "qualification"):
-                raise Rejected("Qualification is available only on fixed worker slots.")
-            return runtime.qualification(self.path.rsplit("/", 1)[1])
         if self.command == "GET" and self.path == "/v1/capabilities" and not data:
-            if hasattr(runtime, "capabilities"):
-                return runtime.capabilities()
-            from .qualification import capabilities
-
-            return capabilities(runtime)
+            return runtime.capabilities()
         if self.command != "POST":
             raise Rejected("Unsupported endpoint.")
         if self.path == "/v1/artifacts" and set(data) == {"kind", "sha256", "content"}:
@@ -231,73 +205,3 @@ class Handler(BaseHTTPRequestHandler):
             manifest, source = runtime.export(operation_id)
             return {"manifest": manifest, "content": base64.b64encode(source).decode()}
         raise Rejected("Unsupported endpoint or fields.")
-
-
-def monitor(runtime: Runtime, stop: threading.Event):
-    while not stop.wait(1):
-        try:
-            runtime.dependency_builds.enforce_controls()
-        except (Rejected, EngineError, OSError, ValueError):
-            pass
-        for path in runtime.operations.iterdir():
-            try:
-                runtime.status(path.name)
-            except (Rejected, EngineError, OSError, ValueError):
-                continue
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Trusted OCI executor; run on a dedicated Linux Docker host."
-    )
-    parser.add_argument("--state", type=Path, required=True)
-    parser.add_argument("--profiles", type=Path, required=True)
-    parser.add_argument("--token-file", type=Path, required=True)
-    parser.add_argument("--bind", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8791)
-    parser.add_argument("--tls-cert", type=Path)
-    parser.add_argument("--tls-key", type=Path)
-    parser.add_argument("--deny-ip", action="append", default=[])
-    args = parser.parse_args()
-    if args.token_file.stat().st_mode & 0o077:
-        parser.error("Token file must be private (mode 0600).")
-    token = args.token_file.read_text().strip()
-    if len(token) < 32:
-        parser.error("Executor token must contain at least 32 random characters.")
-    if not ipaddress.ip_address(args.bind).is_loopback and not (
-        args.tls_cert and args.tls_key
-    ):
-        parser.error("Remote executor control requires TLS.")
-    profiles = [
-        Profile.parse(value) for value in json.loads(args.profiles.read_bytes())
-    ]
-    runtime = Runtime(
-        args.state,
-        profiles,
-        denied_ips=tuple(args.deny_ip),
-    )
-    stop = threading.Event()
-    with Server((args.bind, args.port), Handler) as server:
-        server.runtime, server.token = runtime, token
-        if args.tls_cert and args.tls_key:
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.load_cert_chain(args.tls_cert, args.tls_key)
-            server.socket = context.wrap_socket(server.socket, server_side=True)
-        thread = threading.Thread(target=monitor, args=(runtime, stop), daemon=True)
-        thread.start()
-
-        def shutdown(_signum, _frame):
-            threading.Thread(target=server.shutdown, daemon=True).start()
-
-        signal.signal(signal.SIGTERM, shutdown)
-        signal.signal(signal.SIGINT, shutdown)
-        try:
-            server.serve_forever()
-        finally:
-            stop.set()
-            thread.join(timeout=60)
-            runtime.close()
-
-
-if __name__ == "__main__":
-    main()

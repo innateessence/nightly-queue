@@ -36,7 +36,7 @@ class ExecutorFixture:
             "schema_version": 1,
             "protocol_version": 2,
             "qualification_version": QUALIFICATION_VERSION,
-            "runtime": "compose-slot-v2",
+            "runtime": "compact-worker-v1",
             "qualified": True,
             "accepting_work": True,
             "binding_digest": "c" * 64,
