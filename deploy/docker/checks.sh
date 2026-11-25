@@ -21,7 +21,7 @@ done
 case "$mode" in full|unit|boundary|candidate|operations) ;; *) echo 'Choose full, unit, boundary, candidate, or operations.' >&2; exit 2 ;; esac
 [[ -z $candidate || -n $commit ]] || { echo 'Exact candidate input requires --commit.' >&2; exit 2; }
 project=${VIBEARR_CHECK_PROJECT:-vibearr-check-${GITHUB_RUN_ID:-local}-${RANDOM}-${RANDOM}}
-[[ $project =~ ^(vibearr-check|nq-auto-qualification)-[a-z0-9-]+$ && ${#project} -le 50 ]] || { echo 'Choose a disposable vibearr-check-* or nq-auto-qualification-* project of at most 50 characters.' >&2; exit 2; }
+[[ $project =~ ^vibearr-check-[a-z0-9-]+$ && ${#project} -le 50 ]] || { echo 'Choose a disposable vibearr-check-* project of at most 50 characters.' >&2; exit 2; }
 restore_project=${project}-restore
 for selected in "$project" "$restore_project"; do
   existing_containers=$(docker ps -aq --filter "label=com.docker.compose.project=$selected") || exit $?
@@ -32,8 +32,8 @@ scratch=$(mktemp -d /tmp/vibearr-check.XXXXXXXX)
 output=${VIBEARR_CHECK_OUTPUT:-/tmp/$project-reports}
 mkdir "$output"
 export BUILDX_CONFIG=${BUILDX_CONFIG:-$scratch/buildx}
-unset VIBEARR_API_TOKEN NQ_API_TOKEN VIBEARR_POSTGRES_PASSWORD POSTGRES_PASSWORD
-unset VIBEARR_CREDENTIAL_KEY NQ_CREDENTIAL_KEY DJANGO_SECRET_KEY VIBEARR_RUNNER_API_TOKEN NQ_RUNNER_API_TOKEN
+unset VIBEARR_API_TOKEN VIBEARR_POSTGRES_PASSWORD
+unset VIBEARR_CREDENTIAL_KEY DJANGO_SECRET_KEY VIBEARR_RUNNER_API_TOKEN
 unset COMPOSE_PROFILES COMPOSE_ENV_FILES
 export COMPOSE_DISABLE_ENV_FILE=1 COMPOSE_PROJECT_NAME=$project VIBEARR_DATA_PROJECT=$project
 export PORT=0 VIBEARR_BIND=127.0.0.1 DJANGO_ALLOWED_HOSTS='*'
@@ -209,7 +209,7 @@ docker inspect "${ids[@]}" | docker run --rm -i --network none --read-only --cap
 docker stats --no-stream --no-trunc --format '{{json .}}' "${ids[@]}" > "$output/idle-resources.jsonl"
 observe_phase startup
 if [[ $mode == full || $mode == unit ]]; then
-  docker run --rm --network "${project}_database" --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10001 --memory 2g --pids-limit 128 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,exec,size=2048m --volume "${project}_application-secrets:/run/vibearr/application:ro" --volume "${project}_database-secrets:/run/vibearr/database:ro" -e DJANGO_DEBUG=True -e POSTGRES_HOST=postgres -e "VIBEARR_POSTGRES_DB=$VIBEARR_POSTGRES_DB" -e "VIBEARR_POSTGRES_USER=$VIBEARR_POSTGRES_USER" --entrypoint sh "$VIBEARR_TOOLS_IMAGE" -c 'cp -R /app /tmp/test-source && cd /tmp/test-source && if [ "$#" -gt 0 ]; then set -- "$@" deploy.docker; fi; python -m deploy.docker.entrypoint python manage.py test "$@" --noinput' sh "$@" > "$output/application-tests.log" 2>&1
+  docker run --rm --network "${project}_database" --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10001 --memory 2g --pids-limit 128 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,exec,size=2048m --volume "${project}_application-secrets:/run/vibearr/application:ro" --volume "${project}_database-secrets:/run/vibearr/database:ro" -e DJANGO_DEBUG=True -e VIBEARR_POSTGRES_HOST=postgres -e "VIBEARR_POSTGRES_DB=$VIBEARR_POSTGRES_DB" -e "VIBEARR_POSTGRES_USER=$VIBEARR_POSTGRES_USER" --entrypoint sh "$VIBEARR_TOOLS_IMAGE" -c 'cp -R /app /tmp/test-source && cd /tmp/test-source && if [ "$#" -gt 0 ]; then set -- "$@" deploy.docker; fi; python -m deploy.docker.entrypoint python manage.py test "$@" --noinput' sh "$@" > "$output/application-tests.log" 2>&1
   docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --memory 2g --pids-limit 128 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,exec,size=2048m --entrypoint sh "$VIBEARR_TOOLS_IMAGE" -c 'black --check . && ruff check . && mypy . --config-file mypy.ini && shellcheck test.sh run.sh deploy/docker/*.sh && actionlint -config-file .github/actionlint.yaml .github/workflows/*.yml && python -m unittest discover -s vibearr_executor -t . && cp -R /app /tmp/portable-source && cd /tmp/portable-source && python -m vibearr_runner.verify' > "$output/tools-tests.log" 2>&1
 fi
 if [[ $mode == full || $mode == unit || $mode == candidate ]]; then

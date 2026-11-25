@@ -50,10 +50,8 @@ RUN python -m venv --copies /opt/application-python \
     && /opt/application-python/bin/python -m pip install --no-cache-dir pip==25.0.1 setuptools==80.9.0 wheel==0.48.0 packaging==26.3
 COPY vibearr_executor /opt/executor/vibearr_executor
 COPY vibearr_runner /opt/executor/vibearr_runner
-COPY coding_runner /opt/executor/coding_runner
 RUN ln -s /opt/executor/vibearr_executor /usr/local/lib/python3.12/site-packages/vibearr_executor \
-    && ln -s /opt/executor/vibearr_runner /usr/local/lib/python3.12/site-packages/vibearr_runner \
-    && ln -s /opt/executor/coding_runner /usr/local/lib/python3.12/site-packages/coding_runner
+    && ln -s /opt/executor/vibearr_runner /usr/local/lib/python3.12/site-packages/vibearr_runner
 WORKDIR /opt/executor
 USER 0:0
 ENTRYPOINT ["python", "-I", "-m", "vibearr_executor.compact_worker"]
@@ -72,10 +70,8 @@ COPY --from=runner-binaries /usr/local/bin/claude /usr/local/bin/claude
 COPY --from=runner-binaries /usr/local/bin/opencode /usr/local/bin/opencode
 COPY vibearr_executor /opt/executor/vibearr_executor
 COPY vibearr_runner /opt/executor/vibearr_runner
-COPY coding_runner /opt/executor/coding_runner
 RUN ln -s /opt/executor/vibearr_executor /usr/local/lib/python3.12/site-packages/vibearr_executor \
-    && ln -s /opt/executor/vibearr_runner /usr/local/lib/python3.12/site-packages/vibearr_runner \
-    && ln -s /opt/executor/coding_runner /usr/local/lib/python3.12/site-packages/coding_runner
+    && ln -s /opt/executor/vibearr_runner /usr/local/lib/python3.12/site-packages/vibearr_runner
 WORKDIR /opt/executor
 USER 0:0
 ENTRYPOINT ["python", "-I", "-m", "vibearr_runner.compact_connections"]
