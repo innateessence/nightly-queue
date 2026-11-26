@@ -120,6 +120,59 @@ async def main():
                     theme="light",
                 )
             )
+            await page.goto(
+                BASE + "/token-budgets/?theme=light", wait_until="networkidle"
+            )
+            await page.get_by_role("link", name="Add token budget", exact=True).click()
+            budget_name = "Weekly reserve " + name + " " + uuid4().hex[:8]
+            await page.locator("#id_name").fill(budget_name)
+            await page.locator("#id_weekly_remaining_percent").fill("40")
+            await page.locator("#id_five_hour_remaining_percent").fill("0")
+            budget_form = capture / ("token-budget-edit-" + name + ".png")
+            await page.screenshot(path=str(budget_form), full_page=True)
+            images.append(
+                image_record(
+                    budget_form,
+                    binding=binding,
+                    url=page.url,
+                    viewport=viewport,
+                    theme=await page.locator("html").get_attribute("data-theme"),
+                )
+            )
+            await page.get_by_role(
+                "button", name="Save token budget", exact=True
+            ).click()
+            await page.get_by_role("status").filter(
+                has_text="Token budget saved."
+            ).wait_for()
+            await page.goto(
+                BASE + "/coding-runners/1/?theme=light", wait_until="networkidle"
+            )
+            await page.locator("#id_runner-token_budget").select_option(
+                label=budget_name
+            )
+            await page.get_by_role(
+                "button", name="Save coding runner settings", exact=True
+            ).click()
+            await page.get_by_role("status").filter(
+                has_text="Coding runner settings saved."
+            ).wait_for()
+            await page.goto(
+                BASE + "/token-budgets/?theme=light", wait_until="networkidle"
+            )
+            row = page.get_by_role("row").filter(has_text=budget_name)
+            await row.get_by_role("link", name="Default runner", exact=True).wait_for()
+            budget_list = capture / ("token-budgets-" + name + ".png")
+            await page.screenshot(path=str(budget_list), full_page=True)
+            images.append(
+                image_record(
+                    budget_list,
+                    binding=binding,
+                    url=page.url,
+                    viewport=viewport,
+                    theme="light",
+                )
+            )
             await context.close()
         await browser.close()
     if errors or requests:

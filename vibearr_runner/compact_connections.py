@@ -182,6 +182,27 @@ class CompactConnections:
                 return {"available": False}
             return {"available": True, "login_digest": digest(canonical(files))}
 
+    def usage(self, provider, credential_id):
+        from datetime import UTC
+        from .subscription_usage import read_subscription_usage
+        from .gates import stamp
+
+        with self.lock:
+            files = self._login(provider, credential_id)
+        reading = read_subscription_usage(provider, files, datetime.now(UTC))
+        return {
+            "supported": reading.supported,
+            "windows": [
+                {
+                    "window_id": window.window_id,
+                    "remaining_percent": window.remaining_percent,
+                    "observed_at": stamp(window.observed_at),
+                    "reset_at": stamp(window.reset_at),
+                }
+                for window in reading.windows
+            ],
+        }
+
     def _current_scope(self, scope):
         checked_scope(scope)
         capabilities = self.worker.capabilities()
@@ -610,6 +631,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             if self.headers.get("Transfer-Encoding") or not 0 < length <= MAX_BODY:
                 raise Rejected("Invalid mediation request size.")
             controller_paths = {
+                "/v4/usage/read",
                 "/v4/connections/status",
                 "/v4/connections/prepare",
                 "/v4/logins/begin",
@@ -631,7 +653,12 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise Rejected("Invalid mediation request.")
             manager = self.server.connections
-            if self.path == "/v4/logins/begin" and set(data) == {"provider"}:
+            if self.path == "/v4/usage/read" and set(data) == {
+                "provider",
+                "credential_id",
+            }:
+                result = manager.usage(data["provider"], data["credential_id"])
+            elif self.path == "/v4/logins/begin" and set(data) == {"provider"}:
                 result = manager.begin_login(data["provider"])
             elif self.path == "/v4/logins/end" and set(data) == {"token"}:
                 result = manager.end_login(data["token"])
@@ -718,7 +745,9 @@ class MediationClient:
         )
 
     def request(self, path, data=None):
-        if not path.startswith(("/v4/connections/", "/v4/logins/", "/health")):
+        if not path.startswith(
+            ("/v4/connections/", "/v4/logins/", "/v4/usage/", "/health")
+        ):
             raise Rejected("Unknown mediation route.")
         request = urllib.request.Request(
             self.origin + path,

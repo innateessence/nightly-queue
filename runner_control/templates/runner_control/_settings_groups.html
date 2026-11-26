@@ -5,6 +5,8 @@
 <p class="field-hint"><a href="{% url 'runner_schedule_list' %}">Manage schedules</a></p>
 {% include "runner_control/_field.html" with field=runner_form.polling_interval_seconds %}
 {% include "runner_control/_field.html" with field=runner_form.tasks_per_window %}
+{% include "runner_control/_field.html" with field=runner_form.token_budget %}
+<p class="field-hint"><a href="{% url 'token_budget_list' %}">Manage token budgets</a></p>
 {% include "runner_control/_field.html" with field=runner_form.reserve_enabled %}
 {% include "runner_control/_field.html" with field=runner_form.minimum_remaining_usage_percent %}
 </fieldset>

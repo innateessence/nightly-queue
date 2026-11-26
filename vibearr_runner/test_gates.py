@@ -79,6 +79,86 @@ class GateTests(TestCase):
         self.config["global"]["enabled"] = False
         self.assertEqual(self.evaluate().reasons, ("disabled",))
 
+    def token_budget(self, weekly=40, five_hour=0):
+        self.config["global"]["token_budget"] = {
+            "id": 1,
+            "name": "Weekly reserve",
+            "weekly_remaining_percent": weekly,
+            "five_hour_remaining_percent": five_hour,
+        }
+
+    def test_token_budget_uses_separate_thresholds_and_blocks_equality(self):
+        self.token_budget()
+        for weekly, five_hour, allowed in (
+            (41, 1, True),
+            (40, 90, False),
+            (39, 90, False),
+            (90, 0, False),
+        ):
+            with self.subTest(weekly=weekly, five_hour=five_hour):
+                self.usage(
+                    self.window(weekly, identity="weekly"),
+                    self.window(five_hour, identity="five_hour"),
+                )
+                self.assertEqual(self.evaluate().allowed, allowed)
+
+    def test_assigned_budget_enforces_without_legacy_reserve(self):
+        self.token_budget(weekly=20, five_hour=10)
+        self.usage(
+            self.window(30, identity="weekly"), self.window(11, identity="five_hour")
+        )
+        self.config["global"]["reserve_enabled"] = False
+        decision = self.evaluate()
+        self.assertTrue(decision.allowed)
+        self.assertTrue(decision.reserve_enabled)
+        self.assertEqual(
+            decision.data()["token_budget"], self.config["global"]["token_budget"]
+        )
+
+    def test_budget_checks_next_prompt_and_resumes_owned_work(self):
+        self.token_budget()
+        self.usage(
+            self.window(60, identity="weekly"), self.window(20, identity="five_hour")
+        )
+        self.claim()
+        self.usage(
+            self.window(40, identity="weekly"), self.window(10, identity="five_hour")
+        )
+        self.assertEqual(
+            self.evaluate(checkpoint="model", run_id="run").reasons, ("usage_reserve",)
+        )
+        self.now += timedelta(minutes=1)
+        self.usage(
+            self.window(100, identity="weekly"), self.window(100, identity="five_hour")
+        )
+        self.assertTrue(self.evaluate(checkpoint="model", run_id="run").allowed)
+        self.assertEqual(self.state["gates"]["owned_run_id"], "run")
+        self.assertEqual(sum(self.state["gates"]["counts"].values()), 1)
+
+    def test_budget_requires_both_fresh_recognized_windows(self):
+        self.token_budget()
+        for windows, reason in (
+            ((self.window(90, identity="weekly"),), "usage_missing"),
+            (
+                (self.window(90, identity="weekly"), self.window(90, identity="daily")),
+                "usage_invalid",
+            ),
+            (
+                (
+                    self.window(90, identity="weekly"),
+                    self.window(
+                        90,
+                        identity="five_hour",
+                        observed=self.now - timedelta(minutes=5),
+                    ),
+                ),
+                "usage_stale",
+            ),
+        ):
+            with self.subTest(reason=reason):
+                self.usage(*windows)
+                self.assertEqual(self.evaluate().reasons, (reason,))
+
     def test_pause_blocks_every_checkpoint(self):
         self.claim()
         self.config["global"]["paused"] = True
@@ -380,6 +460,18 @@ class GateTests(TestCase):
         self.config["global"]["reserve_enabled"] = True
         self.gates.adapters[("fake", 1)] = SlowUsage()
         self.assertIn("checkpoint_expired", self.evaluate().reasons)
+
+    def test_live_observation_after_request_begins_is_fresh(self):
+        test = self
+
+        class LiveUsage:
+            def read_usage(self, account, now):
+                test.now += timedelta(milliseconds=100)
+                return UsageReading(True, (test.window(),))
+
+        self.config["global"]["reserve_enabled"] = True
+        self.gates.adapters[("fake", 1)] = LiveUsage()
+        self.assertTrue(self.evaluate().allowed)
 
     def test_usage_reset_shortens_next_check(self):
         self.usage(self.window(reset=self.now + timedelta(seconds=2)))

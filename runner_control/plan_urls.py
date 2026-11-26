@@ -6,9 +6,17 @@ from . import (
     configuration_views,
     schedule_views,
     deletion_views,
+    token_budget_views,
 )
 
 urlpatterns = [
+    path("token-budgets/", token_budget_views.index, name="token_budget_list"),
+    path("token-budgets/add/", token_budget_views.edit, name="token_budget_add"),
+    path(
+        "token-budgets/<int:budget_id>/",
+        token_budget_views.edit,
+        name="token_budget_edit",
+    ),
     path("schedules/", schedule_views.index, name="runner_schedule_list"),
     path("schedules/add/", schedule_views.edit, name="runner_schedule_add"),
     path(

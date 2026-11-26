@@ -40,6 +40,7 @@
       <a href="{% url 'credential_list' %}"{% block credentials_current %}{% endblock %}>{% include "_icon.html" with name="key" %}Credentials</a>
       <a href="{% url 'coding_runner_list' %}"{% block runners_current %}{% endblock %}>{% include "_icon.html" with name="activity" %}Coding Runners</a>
       <a href="{% url 'runner_schedule_list' %}"{% block schedules_current %}{% endblock %}>{% include "_icon.html" with name="history" %}Schedules</a>
+      <a href="{% url 'token_budget_list' %}"{% block budgets_current %}{% endblock %}>{% include "_icon.html" with name="activity" %}Token Budgets</a>
       <a href="{% url 'api_settings' %}"{% block settings_current %}{% endblock %}>{% include "_icon.html" with name="settings" %}Settings</a>
       <a href="{% url 'system_logs' %}"{% block logs_current %}{% endblock %}>{% include "_icon.html" with name="logs" %}Logs</a>
       <a href="{% url 'runner_system' %}"{% block system_current %}{% endblock %}>{% include "_icon.html" with name="system" %}System</a>

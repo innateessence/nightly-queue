@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Token Budgets · vibearr{% endblock %}
+{% block budgets_current %} aria-current="page"{% endblock %}
+{% block heading %}
+<section class="page-heading" aria-labelledby="page-title"><div><h1 id="page-title">Token Budgets</h1><p class="subtitle">Keep a subscription allowance in reserve for each coding runner.</p></div><a class="button-primary" href="{% url 'token_budget_add' %}">Add token budget</a></section>
+{% endblock %}
+{% block content %}
+<section class="panel plan-section"><h2>Usage remaining thresholds</h2>
+  <p class="field-hint">A runner continues while usage remaining is above both thresholds. For example, 40% weekly and 0% 5-hour waits when weekly allowance reaches 40% or the 5-hour allowance runs out. Checks happen before new tasks and prompts; a prompt already running may finish. Missing or stale usage readings make the runner wait.</p>
+  <div class="table-scroll"><table class="data-table">
+    <thead><tr><th scope="col">Token budget</th><th scope="col">Weekly remaining</th><th scope="col">5-hour remaining</th><th scope="col">Coding runners</th><th scope="col">Actions</th></tr></thead>
+    <tbody>{% for budget in budgets %}<tr>
+      {% if budget.error %}<td colspan="4">{{ budget.error }}</td>{% else %}
+      <td><a href="{% url 'token_budget_edit' budget.pk %}">{{ budget.metadata.name }}</a></td><td>{{ budget.metadata.weekly }}%</td><td>{{ budget.metadata.five_hour }}%</td>
+      <td>{% for runner in budget.metadata.runners %}<p><a href="{% url 'coding_runner_edit' runner.pk %}">{{ runner.name }}</a></p>{% empty %}<span class="field-hint">Unassigned</span>{% endfor %}</td>
+      {% endif %}<td><a href="{% url 'token_budget_edit' budget.pk %}">Edit</a></td>
+    </tr>{% empty %}<tr><td colspan="5">No token budgets yet. Add a budget, then select it on a coding runner.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}

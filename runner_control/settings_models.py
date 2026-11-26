@@ -75,6 +75,28 @@ def ensure_default_schedule():
         return saved
 
 
+class TokenBudget(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    weekly_remaining_percent = models.PositiveSmallIntegerField(
+        default=40, validators=[MaxValueValidator(100)]
+    )
+    five_hour_remaining_percent = models.PositiveSmallIntegerField(
+        default=0, validators=[MaxValueValidator(100)]
+    )
+
+    class Meta:
+        ordering = ["name", "pk"]
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            list(RunnerSettings.objects.select_for_update().filter(pk=1))
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
 class RunnerSettings(models.Model):
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=100, default="Default runner")
@@ -109,6 +131,13 @@ class RunnerSettings(models.Model):
         default=1800, validators=[MinValueValidator(1)]
     )
     reserve_enabled = models.BooleanField(default=False)
+    token_budget = models.ForeignKey(
+        TokenBudget,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="runners",
+    )
     minimum_remaining_usage_percent = models.PositiveSmallIntegerField(
         default=40, validators=[MaxValueValidator(100)]
     )
