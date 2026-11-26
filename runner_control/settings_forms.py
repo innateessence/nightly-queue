@@ -3,7 +3,12 @@ from django.core.exceptions import ValidationError
 
 from credentials.models import Credential
 
-from .settings_models import ProjectRunnerSettings, RunnerSettings, RunnerSchedule
+from .settings_models import (
+    ProjectRunnerSettings,
+    RunnerSettings,
+    RunnerSchedule,
+    TokenBudget,
+)
 from .validators import BACKENDS, OVERRIDE_FIELDS
 
 
@@ -37,6 +42,10 @@ class RunnerSettingsForm(forms.ModelForm):
         self.fields["schedule"].help_text = (
             "Choose a reusable schedule. Changes on the Schedules page apply to every assigned runner."
         )
+        self.fields["token_budget"].help_text = (
+            "Choose a shared token budget, checked before new tasks and prompts. "
+            "An assigned budget replaces the legacy single usage reserve below."
+        )
         for stage in ("implementation",):
             self.fields[f"{stage}_model"].widget.attrs["list"] = "runner-claude-models"
             self.fields[f"{stage}_model"].help_text = (
@@ -49,7 +58,10 @@ class RunnerSettingsForm(forms.ModelForm):
     class Meta:
         model = RunnerSettings
         exclude = ["id"]
-        labels = {"minimum_remaining_usage_percent": "Minimum remaining usage (%)"}
+        labels = {
+            "minimum_remaining_usage_percent": "Minimum remaining usage (%) (legacy)",
+            "reserve_enabled": "Enable legacy single usage reserve",
+        }
         field_classes = {
             field: ConfigurationJSONField
             for field in (
@@ -64,7 +76,7 @@ class RunnerSettingsForm(forms.ModelForm):
             "log_retention_days": "Expire protected local logs and uploaded artifacts for acknowledged terminal runs. Keep delivery, validation, stage, and recovery summaries.",
             "enabled": "Execution stays release-gated until live integration verification succeeds.",
             "paused": "Pause current work at the next safe checkpoint and prevent new claims.",
-            "reserve_enabled": "Block all projects if any participating account lacks fresh allowance or is at/below the reserve.",
+            "reserve_enabled": "Used when no token budget is assigned. Block all projects if any participating account lacks fresh allowance or is at/below the reserve.",
             "minimum_remaining_usage_percent": "40 permits work only while more than 40% remains. Zero still blocks exhausted accounts.",
             "setup_commands": "JSON list of setup commands, restricted to the configured isolated task policy.",
             "execution_policy": "Versioned native execution limits. Task content cannot change this policy. Runtime and agent installation are still required.",
@@ -74,6 +86,20 @@ class RunnerSettingsForm(forms.ModelForm):
             "setup_commands": forms.Textarea(attrs={"rows": 3}),
             "validation_commands": forms.Textarea(attrs={"rows": 3}),
             "implementation_instructions": forms.Textarea(attrs={"rows": 4}),
+        }
+
+
+class TokenBudgetForm(forms.ModelForm):
+    class Meta:
+        model = TokenBudget
+        fields = ["name", "weekly_remaining_percent", "five_hour_remaining_percent"]
+        labels = {
+            "weekly_remaining_percent": "Weekly usage remaining (%)",
+            "five_hour_remaining_percent": "5-hour usage remaining (%)",
+        }
+        help_texts = {
+            "weekly_remaining_percent": "Wait before new work when weekly usage remaining is at or below this percentage.",
+            "five_hour_remaining_percent": "Zero permits work until the 5-hour allowance is exhausted. Both thresholds must pass.",
         }
 
 

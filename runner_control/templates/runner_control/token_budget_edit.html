@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Token budget · vibearr{% endblock %}
+{% block budgets_current %} aria-current="page"{% endblock %}
+{% block heading %}
+<section class="page-heading" aria-labelledby="page-title"><div><h1 id="page-title">{% if budget_id %}Edit token budget{% else %}Add token budget{% endif %}</h1><p class="subtitle">Choose how much subscription usage to keep available.</p></div><a class="button-filter" href="{% url 'token_budget_list' %}">All token budgets</a></section>
+{% endblock %}
+{% block content %}
+<div class="settings-layout"><nav class="section-nav" aria-label="Token budget sections"><a href="#budget">Token budget</a><a href="#assigned">Coding runners</a></nav><div class="settings-content">
+  <section class="panel composer" id="budget"><h2>Usage remaining</h2>
+    <p class="field-hint">These percentages describe usage remaining, not usage to spend. A runner waits at or below either threshold and checks again before continuing. Changes apply to all assigned runners before their next task or prompt.</p>
+    {% if form_unavailable %}<p role="status">{{ form_unavailable }}</p>{% else %}
+    <form method="post" class="settings-fields">{% csrf_token %}{{ form.non_field_errors }}
+      {% include "runner_control/_fields.html" with fields=form %}
+      <div class="form-actions"><button class="button-primary" type="submit">Save token budget</button></div>
+    </form>{% endif %}
+  </section>
+  <section class="panel plan-section" id="assigned"><h2>Assigned coding runners</h2>
+    {% if assigned_error %}<p role="status">{{ assigned_error }}</p>{% endif %}
+    {% for runner in assigned_runners %}<p><a href="{% url 'coding_runner_edit' runner.pk %}">{{ runner.name }}</a></p>{% empty %}<p class="field-hint">No coding runners use this budget yet. Choose it on a runner's configuration page.</p>{% endfor %}
+    <a href="{% url 'coding_runner_list' %}">Manage coding runners</a>
+  </section>
+</div></div>
+{% endblock %}

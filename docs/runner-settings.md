@@ -14,6 +14,24 @@ its next processing gate. Task-window limits are counted separately per runner.
 An assigned schedule cannot be deleted until its runners use another schedule.
 The default **Always on** schedule remains available for new runners.
 
+Open **Configuration → Token Budgets**, below Schedules, to create reusable named
+budgets. Select a budget in a coding runner's **Token budget** field. Each budget
+has separate weekly and 5-hour percentages of subscription usage to keep remaining.
+For example, 40% weekly and 0% 5-hour permits new work only while more than 40%
+weekly and more than 0% 5-hour remains. Equality blocks work. A budget replaces
+the runner's legacy single reserve and is always enforced when assigned.
+Editing a shared budget applies to every assigned runner at its next gate, including
+active runs before their next prompt. Existing prompts may finish. Waiting work
+keeps its identity and resumes when fresh readings pass both thresholds.
+
+The trusted runner reads the selected Codex or Claude subscription's live usage
+endpoint through its private controller API; login tokens never enter usage reports.
+It does not start a model to read usage. Both windows must be present and fresh;
+missing, invalid, expired, unsupported or failed readings block further work.
+OpenCode has no subscription quota telemetry and waits when assigned a token budget.
+Provider login expiry requires renewing the selected login. Budget changes do not
+enable processing or bypass runtime/account qualification.
+
 The built-in **Default runner** is the fallback configuration. Provision a
 dedicated identity using the app image entrypoint and a private runner token:
 `docker compose run --rm app python manage.py provision_runner <name>`.

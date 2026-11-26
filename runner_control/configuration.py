@@ -30,6 +30,17 @@ def settings_values(saved):
     values.pop("name", None)
     values.pop("identity", None)
     values["schedule_id"] = values.pop("schedule")
+    values["token_budget_id"] = values.pop("token_budget")
+    values["token_budget"] = None
+    if saved.token_budget_id:
+        budget = saved.token_budget
+        values["token_budget"] = {
+            "id": budget.pk,
+            "name": budget.name,
+            "weekly_remaining_percent": budget.weekly_remaining_percent,
+            "five_hour_remaining_percent": budget.five_hour_remaining_percent,
+        }
+        values["reserve_enabled"] = True
     schedule = (
         RunnerSchedule.objects.filter(pk=saved.schedule_id).first() or RunnerSchedule()
     )

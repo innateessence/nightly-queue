@@ -67,12 +67,15 @@ class GateDecision:
     minimum_remaining_usage_percent: float
     readings: tuple[dict[str, Any], ...]
     tasks_started: int
+    token_budget: dict[str, Any] | None = None
 
     def data(self) -> dict[str, Any]:
         result = asdict(self)
         result["schema_version"] = 1
         result["reasons"] = list(self.reasons)
         result["readings"] = list(self.readings)
+        if self.token_budget is None:
+            result.pop("token_budget")
         return result
 
 
@@ -288,10 +291,11 @@ class GateEvaluator:
             None if interval is None else interval.data(),
             stamp(next_boundary),
             stamp(next_check) or "",
-            controls["reserve_enabled"],
+            controls["reserve_enabled"] or controls.get("token_budget") is not None,
             controls["minimum_remaining_usage_percent"],
             tuple(readings),
             started,
+            controls.get("token_budget"),
         )
         gate["checkpoint"] = decision.data()
         if run_id:
@@ -301,8 +305,17 @@ class GateEvaluator:
 
     def _usage(self, configuration: dict[str, Any], now: datetime):
         controls = configuration["global"]
-        enforced = controls["reserve_enabled"]
+        budget = controls.get("token_budget")
+        enforced = controls["reserve_enabled"] or budget is not None
         reserve = controls["minimum_remaining_usage_percent"]
+        thresholds = (
+            None
+            if budget is None
+            else {
+                "weekly": budget["weekly_remaining_percent"],
+                "five_hour": budget["five_hour_remaining_percent"],
+            }
+        )
         reports = []
         reasons = []
         accounts = configuration["accounts"]
@@ -328,7 +341,7 @@ class GateEvaluator:
                 continue
             try:
                 reading = adapter.read_usage(account, now)
-                self._reading(report, reading, now, reserve)
+                self._reading(report, reading, utc(self.clock()), reserve, thresholds)
             except Exception:
                 # Provider errors never become an unlimited allowance or leak provider text.
                 report["status"] = "unavailable"
@@ -337,7 +350,14 @@ class GateEvaluator:
                 reasons.append(f"usage_{report['status']}")
         return reports, reasons
 
-    def _reading(self, report, reading: UsageReading, now: datetime, reserve: float):
+    def _reading(
+        self,
+        report,
+        reading: UsageReading,
+        now: datetime,
+        reserve: float,
+        thresholds=None,
+    ):
         if not reading.supported:
             report["status"] = "unsupported"
             return
@@ -347,6 +367,9 @@ class GateEvaluator:
         statuses = []
         seen = set()
         for window in reading.windows:
+            threshold = (
+                reserve if thresholds is None else thresholds.get(window.window_id)
+            )
             observed = utc(window.observed_at)
             reset = None if window.reset_at is None else utc(window.reset_at)
             remaining = window.remaining_percent
@@ -355,6 +378,7 @@ class GateEvaluator:
                 not window.window_id
                 or window.window_id in seen
                 or window.unit != "percent"
+                or threshold is None
             ):
                 status = "invalid"
             elif (
@@ -370,7 +394,7 @@ class GateEvaluator:
                 status = "stale"
             elif reset is not None and reset <= now:
                 status = "stale"
-            elif remaining <= reserve:
+            elif remaining <= threshold:
                 status = "reserve"
             seen.add(window.window_id)
             statuses.append(status)
@@ -385,6 +409,8 @@ class GateEvaluator:
                     "status": status,
                 }
             )
+        if thresholds is not None and not set(thresholds).issubset(seen):
+            statuses.append("missing")
         report["status"] = next(
             (status for status in statuses if status != "ready"), "ready"
         )

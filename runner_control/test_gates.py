@@ -76,6 +76,17 @@ class GateEvidenceTests(TestCase):
             self.post(HTTP_AUTHORIZATION="Bearer generic-token").status_code, 401
         )
 
+    def test_report_accepts_token_budget_thresholds(self):
+        self.report["token_budget"] = {
+            "id": 1,
+            "name": "Weekly reserve",
+            "weekly_remaining_percent": 40,
+            "five_hour_remaining_percent": 0,
+        }
+        self.assertEqual(self.post().status_code, 200)
+        self.report["token_budget"]["weekly_remaining_percent"] = 101
+        self.assertEqual(self.post().status_code, 400)
+
     def test_read_latest_requires_runner_authentication(self):
         self.assertEqual(self.client.get(reverse("runner_gates")).status_code, 401)
 

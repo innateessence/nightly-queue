@@ -67,8 +67,10 @@ docker compose run --rm app python manage.py docker_bootstrap_runner docker-runn
 
 GitHub issue/read and repository/delivery grants remain separate. Saving login
 metadata is not live authentication proof. Login expiry and subscription limits
-must block work rather than fall back to model APIs. Unsupported remaining quota
-telemetry stays unsupported; enabling reserve requires fresh supported readings.
+must block work rather than fall back to model APIs. Assigned token budgets read
+Codex and Claude subscription usage through the trusted runner before further work.
+Both weekly and 5-hour readings must be available and fresh. Unsupported telemetry
+(including OpenCode), failed reads and expired logins block budgeted work.
 
 ## External Ollama for OpenCode
 

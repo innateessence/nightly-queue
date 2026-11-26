@@ -106,7 +106,26 @@ def percent(value, nullable=False):
 
 
 def validate_report(report):
-    keys(report, REPORT_FIELDS)
+    keys(
+        report,
+        REPORT_FIELDS
+        | (
+            {"token_budget"}
+            if isinstance(report, dict) and "token_budget" in report
+            else set()
+        ),
+    )
+    if "token_budget" in report:
+        budget = report["token_budget"]
+        keys(
+            budget,
+            {"id", "name", "weekly_remaining_percent", "five_hour_remaining_percent"},
+        )
+        if type(budget["id"]) is not int or budget["id"] < 1:
+            invalid()
+        text(budget["name"], 100)
+        percent(budget["weekly_remaining_percent"])
+        percent(budget["five_hour_remaining_percent"])
     if report["schema_version"] != 1 or type(report["allowed"]) is not bool:
         invalid()
     if type(report["reserve_enabled"]) is not bool:
